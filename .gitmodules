@@ -4,3 +4,9 @@
 [submodule "game-service"]
 	path = game-service
 	url = https://github.com/AndreiCeaetchii/game-service.git
+[submodule "world-service"]
+	path = world-service
+	url = https://github.com/mariaelenabotnari/world-service.git
+[submodule "exam-service"]
+	path = exam-service
+	url = https://github.com/mariaelenabotnari/exam-service.git
