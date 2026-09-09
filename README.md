@@ -5,11 +5,11 @@ This document outlines the communication contracts for the microservices within 
 ---
 ## Overview
 
-The platform simulates a campus survival scenario where players gather resources, build up their base, fight off zombies, and pass exams to progress. Each microservice encapsulates a specific domain — player identity, academics, zombies, resources, base management, and crafting. The microservices were  to ensure modularity, independence, and maintainability.
+The platform simulates a campus survival scenario where players gather resources, build up their base, fight off zombies, and pass exams to progress. Each microservice encapsulates a specific domain — player identity, academics, zombies, resources, base management, and crafting. The microservices were designed to ensure modularity, independence, and maintainability.
 
 Microservices are implemented using two technologies:
 
-* **Node.js/TypeScript:**  Exam Service, World Service, Zombie Service, Resource Service
+* **Node.js/TypeScript:** Exam Service, World Service, Zombie Service, Resource Service
 * **C#/.NET (ASP.NET Core):** Player Service, Game Service, Base Service, Crafting Service
 
 ---
@@ -27,15 +27,17 @@ Microservices are implemented using two technologies:
 
 Every service owns a **database** — no service reads or writes another service's tables directly. All cross-service data access happens through the network, using two patterns:
 
-- **Synchronous REST** for data an actor needs immediately to proceed (e.g. Game Service needs zombie stats before it can spawn an encounter). 
+- **Synchronous REST** for data an actor needs immediately to proceed (e.g. Game Service needs zombie stats before it can spawn an encounter).
 - **Asynchronous events** (RabbitMQ) for state changes that other services should eventually react to, but that shouldn't stop the initial request (e.g. World Service unlocking a wing doesn't need to block exam grading).
 
 Two rules apply across every state-changing endpoint that moves resources, items, or currency-like values:
 
-- **Idempotency keys.** Any endpoint that deducts something (`POST /api/gather`, `POST /api/spend`, `POST /craft`, trade endpoints) requires an `idempotencyKey`. The receiving service persists a transaction record keyed on it; a repeated call with the same key returns the original result instead of re-applying the effect. This is what makes reconnects and duplicate completion events safe.
-- **Sagas for multi-service writes.** Some actions span two databases with no shared transaction (e.g. crafting deducts resources in Resource Service's database *and* adds an item in Player Service's database). These are implemented as a saga: if the second step fails after the first succeeded, the initiating service (Crafting Service) issues a compensating call to undo the first step, rather than leaving the two databases inconsistent.
+- **Idempotency keys.** Any endpoint that deducts something (`POST /api/gather`, `POST /api/spend`, `POST /api/refund`, `POST /api/craft`, trade endpoints) requires an `idempotencyKey`. The receiving service persists a transaction record keyed on it; a repeated call with the same key returns the original result instead of re-applying the effect. This is what makes reconnects and duplicate completion events safe.
+- **Sagas for multi-service writes.** Some actions span two databases with no shared transaction (e.g. crafting deducts resources in Resource Service's database *and* adds an item in Player Service's database). These are implemented as a saga: if the second step fails after the first succeeded, the initiating service (Crafting Service, Base Service) issues a compensating call to undo the first step, rather than leaving the two databases inconsistent.
 
 No service is ever a passive shared datastore for another — every read of another domain's data goes through that domain's own API, never a shared schema or cross-service SQL join.
+
+The full communication contract — every endpoint, its payload, and its response — is documented per service below in each service's "Exposed/Consumed API Endpoints" and "Message Queue Events" sections.
 
 ---
 # Technologies & Communication Patterns
@@ -43,24 +45,24 @@ No service is ever a passive shared datastore for another — every read of anot
 
 | Team | Services | Language & Framework | Database | Communication Patterns | Motivation & Trade-offs |
 |---|---|---|---|---|---|
-| Ceaetchii Andrei | Player Service, Game Service | C# / ASP.NET Core | Player: PostgreSQL; Game: Redis | REST/HTTP + WebSockets + RabbitMQ Events | C# provides strong typing and asynchronous programming. PostgreSQL ensures data integrity and transactions for the Player Service, while Redis is suitable for temporary Game Service state. REST is used for request/response communication, WebSockets for real-time updates, and RabbitMQ for asynchronous cross-service events.|
-| Botnari Maria-Elena | Exam Service, World Service | TypeScript (Express) | PostgreSQL | REST + RabbitMQ events | Both services store structured, relational data (exams and attempts for one, rooms and connections for the other), so one language and one database keeps things simple and easy to maintain across both. |
-| Costin Loredana | Zombie Service, Resource Service | Node.js/TypeScript (Express) | Zombie: MongoDB; Resource: PostgreSQL | Zombie: REST; Resource: REST, idempotency-key-gated | Node's non-blocking I/O fits both I/O-bound services, which wait on DB calls. MongoDB's flexible schema enables rapid Zombie Service iteration without migrations as ability types expand. The correctness-critical Resource Service uses TypeScript and DB transactions to enforce atomic, idempotent balance updates, so duplicate completion events never double-award resources.|
-| Bulat Cristian | Base Service, Crafting Service | C#/.NET (ASP.NET Core) | PostgreSQL |  REST for Base and Crafting Services; RabbitMQ publisher and consumer for both | Both services perform "spend and apply" operations that must not partially succeed. C#'s explicit exception handling and EF Core transactions make atomic, saga-style operations across service calls easier to reason about than a dynamically-typed alternative. Trade-off: more boilerplate than Node for simple CRUD, accepted for the correctness guarantee. |
+| Ceaetchii Andrei | Player Service, Game Service | C# / ASP.NET Core | Player: PostgreSQL; Game: Redis | REST/HTTP + WebSockets + RabbitMQ Events | C# provides strong typing and asynchronous programming. PostgreSQL ensures data integrity and transactions for the Player Service, while Redis is suitable for temporary Game Service state. REST is used for request/response communication, WebSockets for real-time updates, and RabbitMQ for asynchronous cross-service events. Trade-off: C# requires more setup for real-time WebSocket handling via SignalR than Node's simpler event-driven model, but this is offset by compile-time safety and keeping both services in one language. |
+| Botnari Maria-Elena | Exam Service, World Service | Node.js/TypeScript (Express) | PostgreSQL | REST + RabbitMQ events | Both services store structured, relational data (exams and attempts for one, rooms and connections for the other), so one language and one database keeps things simple and easy to maintain across both. Trade-off: without EF Core's built-in migration tooling, schema changes to the room graph require more manual discipline to keep consistent. |
+| Costin Loredana | Zombie Service, Resource Service | Node.js/TypeScript (Express) | Zombie: MongoDB; Resource: PostgreSQL | Zombie: REST; Resource: REST, idempotency-key-gated | Node's non-blocking I/O fits both I/O-bound services, which wait on DB calls. MongoDB's flexible schema enables rapid Zombie Service iteration without migrations as ability types expand. The correctness-critical Resource Service uses TypeScript and DB transactions to enforce atomic, idempotent balance updates, so duplicate completion events never double-award resources. Trade-off: Node is weaker at CPU-heavy work, but neither service does any, so this cost doesn't apply here. |
+| Bulat Cristian | Base Service, Crafting Service | C#/.NET (ASP.NET Core) | PostgreSQL | REST for Base and Crafting Services; RabbitMQ publisher and consumer for both | Both services perform "spend and apply" operations that must not partially succeed. C#'s explicit exception handling and EF Core transactions make atomic, saga-style operations across service calls easier to reason about than a dynamically-typed alternative. Trade-off: more boilerplate than Node for simple CRUD, accepted for the correctness guarantee. |
 
 ---
 # Architectural Diagram of Microservices Operation
 
 ![architecture-diagram](architectural-diagram.jpg)
 
-The diagram illustrates the microservices architecture for the **In Kahoots with the Undead** system. Game Service acts as the central service handling the others, making synchronous calls to Player, Exam, World, Zombie, Resource, and Base Service to run a gameplay cycle. Resource Service and Zombie Service never call outward to other microservices. Exam Service and World Service are loosely coupled via an asynchronous `AchievementUnlocked` event, so grading a player's exam doesn't block on procedural map generation. Crafting Service coordinates a saga across Resource Service and Player Service to atomically consume ingredients and deliver crafted items.
+The diagram illustrates the microservices architecture for the **In Kahoots with the Undead** system. Game Service acts as the central service handling the others, making synchronous calls to Player, Exam, World, Zombie, Resource, and Base Service to run a gameplay cycle. Resource Service and Zombie Service never call outward to other microservices. Exam Service and World Service are loosely coupled via asynchronous events — `AchievementUnlocked` (consumed by World Service, Player Service, and Crafting Service) and `ZoneUnlocked` (consumed by Game Service, Base Service, and Crafting Service) — so grading a player's exam doesn't block on procedural map generation. Base Service and Crafting Service each additionally read from and coordinate sagas across several other services to validate and apply their own effects — see the dependency diagram below for the full picture. Crafting Service specifically coordinates a saga across Resource Service and Player Service to atomically consume ingredients and deliver crafted items, and reads from Player, Exam, and World Service to evaluate recipe unlock conditions.
 
 ---
 ## **1. Player Service**
 
 Handles global player identity, progression, and inventory.
 
-### **Responsibilities**
+### **Owns**
 - Player accounts: registration, authentication, profile data.
 - Friends and online presence.
 - XP totals, levels, and progression.
@@ -98,7 +100,7 @@ Response
 { "jwt": "<jwt_token>", "player_id": "p_44" }
 ```
 
-**`GET /api/players/{player_id}`** *(Consumed by Gateway, Game Service)*
+**`GET /api/players/{player_id}`** *(Consumed by Gateway, Game Service, Crafting Service)*
 
 Retrieves a player's public profile.
 
@@ -132,9 +134,9 @@ Response
 { "items": [ { "itemId": "coffee", "quantity": 3 }, { "itemId": "cosmetic_cap", "quantity": 1 } ] }
 ```
 
-**`POST /api/players/{player_id}/inventory/items`** *(Consumed by Crafting Service)*
+**`POST /api/players/{player_id}/inventory/items`** *(Consumed by Crafting Service, Base Service)*
 
-Delivers a crafted item to the player's inventory.
+Delivers a crafted item or Kiki reward to the player's inventory.
 
 Payload
 ```json
@@ -199,7 +201,7 @@ Error Response (409 Conflict)
 
 The central real-time gameplay service. Manages sessions, the day/night cycle, timers, and timed player actions.
 
-### **Responsibilities**
+### **Owns**
 - Game sessions/lobbies and session timers.
 - The day/night cycle state.
 - Timed actions in progress: chopping, scavenging, clearing rooms, barricading, upgrading.
@@ -252,7 +254,7 @@ Response
 
 Responsible for the academic progression of players.
 
-### **Responsibilities**
+### **Owns**
 - Every exam offered in the game, across all fifteen university courses, including questions, answer options and passing threshold.
 - Every attempt a player makes, including submitted answers, grade and status.
 - The six achievements tied to completing course categories, including their unlock conditions and effects.
@@ -382,7 +384,7 @@ Response
 { "canRetry": false, "availableAt": "2026-09-08T10:35:00Z" }
 ```
 
-**`GET /players/{playerId}/progress`** *(Consumed by Gateway, Player Service)*
+**`GET /players/{playerId}/progress`** *(Consumed by Gateway, Player Service, Crafting Service)*
 
 Reports the player's status for every course and every category.
 
@@ -440,7 +442,7 @@ Response
 { "playerId": "player_123", "courseCategory": "mathematics", "timestamp": "2026-09-08T10:45:00Z" }
 ```
 
-**PUBLISH `AchievementUnlocked`** *(Consumed by World Service, Player Service)*
+**PUBLISH `AchievementUnlocked`** *(Consumed by World Service, Player Service, Crafting Service)*
 ```json
 { "playerId": "player_123", "achievementId": "achievementSurvivedMathematics", "fullAchievementName": "Achievement, Survived Mathematics", "xpAwarded": 500, "timestamp": "2026-09-08T10:45:00Z" }
 ```
@@ -451,7 +453,7 @@ Response
 
 Owns the persistent physical state of the university.
 
-### **Responsibilities**
+### **Owns**
 - Every zone, every room within each zone, the connections between rooms.
 - The type of resource each room produces.
 - Every zombie spawn point, including which zombie category is allowed at each.
@@ -459,7 +461,7 @@ Owns the persistent physical state of the university.
 
 ### **Exposed API Endpoints**
 
-**`GET /world/map`** *(Consumed by Game Service, Gateway)*
+**`GET /world/map`** *(Consumed by Game Service, Gateway, Crafting Service)*
 
 Returns the full list of zones and their unlocked status.
 
@@ -488,7 +490,7 @@ Response
 { "rooms": [ { "roomId": "mathematicsExamHall", "fullRoomName": "Mathematics Exam Hall", "type": "classroom", "zoneId": "zoneZero", "connectsTo": ["mainCorridor"] } ] }
 ```
 
-**`GET /world/rooms/{roomId}`** *(Consumed by Game Service)*
+**`GET /world/rooms/{roomId}`** *(Consumed by Game Service, Base Service)*
 
 Returns the full detail of a single room.
 
@@ -572,7 +574,7 @@ Response
 { "playerId": "player_123", "achievementId": "achievementSurvivedMathematics", "fullAchievementName": "Achievement, Survived Mathematics", "xpAwarded": 500, "timestamp": "2026-09-08T10:45:00Z" }
 ```
 
-**PUBLISH `ZoneUnlocked`** *(Consumed by Game Service)*
+**PUBLISH `ZoneUnlocked`** *(Consumed by Game Service, Base Service, Crafting Service)*
 ```json
 { "zoneId": "mathematicsWing", "roomsAdded": ["physicsLaboratory", "mathematicsWingLibrary", "mathematicsWingCanteen"], "timestamp": "2026-09-08T10:45:00Z" }
 ```
@@ -582,7 +584,7 @@ Response
 
 Owns the persistent definitions and short-lived instance state of zombies.
 
-### **Responsibilities**
+### **Owns**
 - Zombie type definitions: stats, sprites, behavior configuration, special abilities.
 - Two major categories — Professor Zombies (initiate exams) and Tourist Zombies (roam, steal resources/XP). (other categories will be discussed)
 - Short-lived zombie instance state during a game cycle (health, position reference, status).
@@ -623,7 +625,7 @@ Response
 
 **`POST /api/zombies/{instance_id}/special-action`** *(Consumed by Game Service)*
 
-Triggers a professor exam-initiation flag or a tourist steal flag, returned to Game Service.
+Triggers a zombie's special action against a player. For a Professor Zombie, this can initiate an exam encounter. For a Tourist Zombie, this can generate a resource or XP stealing action.
 
 Payload
 ```json
@@ -641,11 +643,11 @@ Response
 
 Owns the university's resource economy independently from the physical map.
 
-### **Responsibilities**
-- Resource type definitions (wood, metal scraps, paper, food) and their rules.
+### **Owns**
+- Resource type definitions (wood, metal scraps, paper, food, chemicals, electronics)
 - Player resource inventories/balances.
 - Resource node state (how much is available at a given gatherable location).
-- The full transaction/idempotency log for every resource change.
+- The full transaction/idempotency ledger for every resource change.
 
 ### **Consumed API Endpoints**
 
@@ -707,6 +709,41 @@ Returns remaining gatherable quantity at a node.
 Response
 ```json
 { "nodeId": "node_7", "resourceType": "food", "quantityAvailable": 30, "respawnRate": "5/hour" }
+```
+
+**`POST /api/refund`** *(Consumed by Base Service, Crafting Service — idempotent)*
+
+Returns previously spent resources when a multi-service operation cannot be completed.
+
+This endpoint is used as the compensation step of a saga. The refund is idempotent so that retrying the compensation cannot return the same resources more than once.
+
+Payload
+
+```json
+{
+  "idempotencyKey": "refund_craft_p44_barricadekit_001", "playerId": "p_44", "reason": "craft_rollback",
+  "costs": [
+    { "resourceType": "wood", "amount": 3 },
+    { "resourceType": "metal", "amount": 1 }
+  ]
+}
+```
+
+Success Response (200 OK)
+
+```json
+{
+  "status": "refunded",
+  "newBalance": { "wood": 13, "metal": 5 }
+}
+```
+Duplicate Response (200 OK)
+
+```json
+{
+  "status": "already_refunded",
+  "newBalance": { "wood": 13, "metal": 5 }
+}
 ```
 
 ---
