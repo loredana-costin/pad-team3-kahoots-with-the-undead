@@ -10,3 +10,9 @@
 [submodule "exam-service"]
 	path = exam-service
 	url = https://github.com/mariaelenabotnari/exam-service.git
+[submodule "resource-service"]
+	path = resource-service
+	url = git@github.com:loredana-costin/resource-service.git
+[submodule "zombie-service"]
+	path = zombie-service
+	url = git@github.com:loredana-costin/zombie-service.git
