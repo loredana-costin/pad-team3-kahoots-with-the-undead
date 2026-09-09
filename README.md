@@ -715,66 +715,144 @@ Response
 
 Responsible for the player's survival base, initially represented by the FAF Cab room.
 
-### **Responsibilities**
+### **Owns**
 - Base upgrades, barricades, facilities, and defensive improvements, tracked separately from World Service's campus geography.
+- The rooms claimed into the base, their barricade levels, and the aggregate defense rating.
+- Unlocked storage capacity and homeroom decorations.
 - Kiki's interaction state and reward outcomes.
+- The transaction ledger keyed on the caller's idempotency key.
 
 ### **Consumed API Endpoints**
 
-- `POST /api/spend` *(Resource Service)* — deducts resources before applying a barricade, facility upgrade, or Kiki feeding.
+- `GET /world/rooms/{roomId}` *(World Service)* — confirms a room exists and its zone is unlocked.
+- `POST /api/spend` *(Resource Service)* — deducts resources before applying a barricade, facility upgrade, decoration, or Kiki feeding.
+- `POST /api/refund` *(Resource Service)* — returns the resources if the effect cannot be applied.
+- `POST /api/players/{player_id}/inventory/items` *(Player Service)* — delivers a Kiki reward to the player's inventory.
+
+Every state-changing endpoint spends first, then applies the effect in one database transaction. If that fails, Base Service refunds the resources rather than leaving the player having paid for nothing.
 
 ### **Exposed API Endpoints**
 
 **`GET /api/base/{player_id}`** *(Consumed by Gateway, Game Service)*
 
-Returns the current state of a player's base.
+Returns the current state of a player's base, including the defense rating used for night raids and the storage capacity used to cap a gather.
 
 Response
 ```json
-{ "playerId": "p_44", "rooms": [ { "roomId": "faf_cab", "barricadeLevel": 2, "facilities": ["storage_lvl1"] } ] }
+{
+  "playerId": "p_44",
+  "defenseRating": 34,
+  "storageCapacity": 250,
+  "moraleBonus": 3,
+  "rooms": [ { "roomId": "faf_cab", "barricadeLevel": 2 } ],
+  "facilities": [ { "facilityType": "storage", "level": 2 } ],
+  "decorations": [ { "decorationId": "dec_01", "itemId": "faf_poster" } ],
+  "kiki": { "mood": "content", "cooldownUntil": "2026-09-08T22:00:00Z" }
+}
+```
+
+**`POST /api/base/{player_id}/rooms`** *(Consumed by Gateway — idempotent)*
+
+Claims a campus room into the player's base, after checking with World Service that its zone is unlocked.
+
+Payload
+```json
+{ "idempotencyKey": "claim_p44_mainCorridor_001", "roomId": "mainCorridor" }
+```
+
+Response
+```json
+{ "roomId": "mainCorridor", "barricadeLevel": 0 }
 ```
 
 **`POST /api/base/{player_id}/barricade`** *(Consumed by Game Service — idempotent)*
 
-Spends resources via Resource Service, then applies the barricade effect.
+Spends resources via Resource Service, then raises the room's barricade by one level.
 
 Payload
 ```json
-{ "idempotencyKey": "spend_p44_barricade_room9", "roomId": "faf_cab" }
+{ "idempotencyKey": "barricade_p44_faf_cab_001", "roomId": "faf_cab" }
 ```
 
-Response
+Success Response (200 OK)
 ```json
-{ "roomId": "faf_cab", "barricadeLevel": 3, "resourcesSpent": { "wood": 5, "metal": 2 } }
+{ "roomId": "faf_cab", "barricadeLevel": 3, "defenseRating": 34, "resourcesSpent": { "wood": 5, "metal": 2 } }
+```
+
+Error Response (402 Payment Required)
+```json
+{ "status": "rejected_insufficient", "missing": { "wood": 2 } }
+```
+
+Error Response (500, compensated)
+```json
+{ "status": "rolled_back", "reason": "effect_not_applied", "resourcesRefunded": true }
 ```
 
 **`POST /api/base/{player_id}/facilities`** *(Consumed by Game Service — idempotent)*
 
-Upgrades or unlocks a facility.
+Unlocks or upgrades a facility by one level; upgrading `storage` also raises the storage capacity.
 
 Payload
 ```json
-{ "idempotencyKey": "spend_p44_upgrade_storage", "facilityType": "storage" }
+{ "idempotencyKey": "facility_p44_storage_001", "facilityType": "storage" }
 ```
 
 Response
 ```json
-{ "facilityType": "storage", "level": 2 }
+{ "facilityType": "storage", "level": 2, "storageCapacity": 250, "resourcesSpent": { "wood": 8 } }
+```
+
+**`POST /api/base/{player_id}/decorations`** *(Consumed by Gateway — idempotent)*
+
+Places a decoration in a claimed room, adding a small morale bonus.
+
+Payload
+```json
+{ "idempotencyKey": "decorate_p44_faf_poster_001", "itemId": "faf_poster", "roomId": "faf_cab" }
+```
+
+Response
+```json
+{ "decorationId": "dec_01", "moraleBonus": 3, "resourcesSpent": { "paper": 2 } }
 ```
 
 **`POST /api/base/{player_id}/kiki/interact`** *(Consumed by Gateway — idempotent)*
 
-Feeds Kiki and returns a random reward.
+Feeds Kiki and returns a random booster reward, delivered through Player Service. The reward is rolled once and stored, so a retry returns the same one.
 
 Payload
 ```json
-{ "idempotencyKey": "spend_p44_feed_kiki_001" }
+{ "idempotencyKey": "kiki_p44_001" }
 ```
+
+Success Response (200 OK)
+```json
+{ "mood": "happy", "reward": { "itemId": "energy_booster", "quantity": 1 }, "resourcesSpent": { "food": 5 }, "cooldownUntil": "2026-09-08T22:00:00Z" }
+```
+
+Error Response (422 Unprocessable Entity)
+```json
+{ "status": "rejected", "reason": "kiki_on_cooldown" }
+```
+
+**`GET /api/base/{player_id}/transactions/{idempotencyKey}`** *(Consumed by Gateway)*
+
+Reports the outcome of a base action, so a client that lost the response can check it instead of retrying blindly.
 
 Response
 ```json
-{ "reward": { "itemId": "energy_booster", "quantity": 1 } }
+{ "idempotencyKey": "barricade_p44_faf_cab_001", "action": "barricade", "status": "completed" }
 ```
+
+### **Message Queue Events**
+
+**PUBLISH `BaseDefenseChanged`** *(Consumed by Game Service)* — reports the new defense rating whenever a barricade or facility changes it.
+```json
+{ "playerId": "p_44", "defenseRating": 34, "timestamp": "2026-09-08T20:14:00Z" }
+```
+
+**SUBSCRIBE `ZoneUnlocked`** *(Published by World Service)* — records the rooms of a newly unlocked wing as claimable.
 
 ---
 
@@ -782,32 +860,69 @@ Response
 
 Allows players to combine resources into useful survival equipment.
 
-### **Responsibilities**
-- Recipe definitions (ingredients, unlock conditions).
+### **Owns**
+- Recipe definitions and unlock conditions: Wood + Metal → Barricade Kit, Paper + Metal → Improvised Weapon, Food + Chemicals → Energy Booster, Metal + Electronics → Zombie Detector, Paper + Wood → Exam Cheat Sheet.
+- Which recipes each player has unlocked.
 - The craft transaction/saga state for each craft attempt.
-
 
 ### **Consumed API Endpoints**
 
 - `POST /api/spend` *(Resource Service)* — consumes recipe ingredients.
-- `POST /api/players/{id}/inventory/items` *(Player Service)* — delivers the crafted item.
+- `POST /api/refund` *(Resource Service)* — returns the ingredients if delivery fails.
+- `POST /api/players/{player_id}/inventory/items` *(Player Service)* — delivers the crafted item.
+- `GET /api/players/{player_id}` *(Player Service)* — reads the player's level.
+- `GET /players/{playerId}/progress` *(Exam Service)* — reads passed exams.
+- `GET /world/map` *(World Service)* — reads unlocked zones.
 
-If the inventory delivery step fails after ingredients were already consumed, Crafting Service issues a compensating call back to Resource Service to refund the spent resources — this is the saga's rollback path.
+A recipe can be gated on a player level, a passed exam, an unlocked zone, or a discovered resource, which is why this service reads from four others. If delivery fails after the ingredients were consumed, Crafting Service refunds them — this is the saga's rollback path.
 
 ### **Exposed API Endpoints**
 
 **`GET /api/recipes`** *(Consumed by Gateway)*
 
-Returns all recipes available to a given player, filtered by unlock conditions.
+Returns the recipes for a player, each marked unlocked or locked. `playerId` is required, since unlock conditions are evaluated per player.
+
+Query Parameters: `playerId`, `includeLocked`
 
 Response
 ```json
-[ { "recipeId": "recipe_wood_metal", "name": "Barricade Kit", "ingredients": [ { "resourceType": "wood", "amount": 3 }, { "resourceType": "metal", "amount": 1 } ], "unlockCondition": null } ]
+{
+  "playerId": "p_44",
+  "recipes": [
+    { "recipeId": "recipe_wood_metal", "name": "Barricade Kit", "ingredients": [ { "resourceType": "wood", "amount": 3 }, { "resourceType": "metal", "amount": 1 } ], "output": "barricade_kit", "unlockCondition": null, "unlocked": true },
+    { "recipeId": "recipe_metal_electronics", "name": "Zombie Detector", "ingredients": [ { "resourceType": "metal", "amount": 3 }, { "resourceType": "electronics", "amount": 2 } ], "output": "zombie_detector", "unlockCondition": { "type": "playerLevel", "minLevel": 5 }, "unlocked": false }
+  ]
+}
+```
+
+**`GET /api/recipes/{recipeId}/eligibility`** *(Consumed by Gateway)*
+
+Reports whether a player can craft a recipe and, if not, which condition or material is missing.
+
+Query Parameters: `playerId`
+
+Response
+```json
+{ "recipeId": "recipe_metal_electronics", "unlocked": false, "unsatisfied": [ { "type": "playerLevel", "minLevel": 5, "actual": 3 } ], "missingMaterials": { "electronics": 1 } }
+```
+
+**`POST /api/recipes`** *(Consumed by development team for content seeding)*
+
+Defines a new recipe and its unlock condition.
+
+Payload
+```json
+{ "recipeId": "recipe_food_chemicals", "name": "Energy Booster", "ingredients": [ { "resourceType": "food", "amount": 4 }, { "resourceType": "chemicals", "amount": 1 } ], "output": "energy_booster", "unlockCondition": { "type": "resourceDiscovered", "resourceType": "chemicals" } }
+```
+
+Response
+```json
+{ "recipeId": "recipe_food_chemicals", "created": true }
 ```
 
 **`POST /api/craft`** *(Consumed by Gateway — idempotent)*
 
-Validates ingredients, consumes them via Resource Service, and delivers the result via Player Service.
+Validates the unlock condition and ingredients, consumes them via Resource Service, and delivers the result via Player Service.
 
 Payload
 ```json
@@ -816,17 +931,42 @@ Payload
 
 Success Response (200 OK)
 ```json
-{ "status": "completed", "itemDelivered": "barricade_kit" }
+{ "craftId": "craft_881", "status": "completed", "itemDelivered": "barricade_kit" }
 ```
 
 Error Response (402 Payment Required)
 ```json
-{ "status": "rejected_insufficient_materials" }
+{ "status": "rejected_insufficient_materials", "missing": { "metal": 1 } }
+```
+
+Error Response (422 Unprocessable Entity)
+```json
+{ "status": "rejected", "reason": "recipe_locked" }
 ```
 
 Error Response (500, compensated)
 ```json
 { "status": "rolled_back", "reason": "inventory_delivery_failed", "resourcesRefunded": true }
+```
+
+**`GET /api/crafts/{craftId}`** *(Consumed by Gateway)*
+
+Reports the state of a craft attempt.
+
+Response
+```json
+{ "craftId": "craft_881", "playerId": "p_44", "recipeId": "recipe_wood_metal", "status": "completed" }
+```
+
+### **Message Queue Events**
+
+**SUBSCRIBE `AchievementUnlocked`** *(Published by Exam Service)* — re-evaluates the player's locked recipes.
+
+**SUBSCRIBE `ZoneUnlocked`** *(Published by World Service)* — re-evaluates recipes gated on an unlocked zone.
+
+**PUBLISH `RecipeUnlocked`** *(Consumed by Game Service)* — reports a recipe that has just become available to a player.
+```json
+{ "playerId": "p_44", "recipeId": "recipe_metal_electronics", "name": "Zombie Detector", "timestamp": "2026-09-08T20:45:00Z" }
 ```
 
 ---
