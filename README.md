@@ -609,6 +609,36 @@ Payload
 { "category": "tourist", "name": "Backpacker Horde", "baseHealth": 20, "attackStrength": 2, "moveSpeed": 1.8, "perceptionRadius": 10, "specialAbility": "steal_resource" }
 ```
 
+Response — 201 Created:
+
+```json
+{
+  "typeId": "tourist_backpacker",
+  "category": "tourist",
+  "name": "Backpacker Horde",
+  "baseHealth": 20,
+  "attackStrength": 2,
+  "moveSpeed": 1.8,
+  "perceptionRadius": 10,
+  "specialAbility": "steal_resource"
+}
+```
+
+400 Bad Request
+```json
+{
+  "error": "invalid_zombie_type",
+  "message": "Invalid zombie type data."
+}
+```
+409 Conflict — if a zombie type with the same identifier/name already exists:
+```json
+{
+  "error": "zombie_type_exists",
+  "message": "A zombie type with this identifier already exists."
+}
+```
+
 **`POST /api/zombies/spawn`** *(Consumed by Game Service)*
 
 Instantiates zombies at cycle start.
