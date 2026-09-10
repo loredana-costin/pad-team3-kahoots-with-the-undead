@@ -16,3 +16,9 @@
 [submodule "zombie-service"]
 	path = zombie-service
 	url = git@github.com:loredana-costin/zombie-service.git
+[submodule "base-service"]
+	path = base-service
+	url = https://github.com/CristiBulat/base-service.git
+[submodule "crafting-service"]
+	path = crafting-service
+	url = https://github.com/CristiBulat/crafting-service.git
