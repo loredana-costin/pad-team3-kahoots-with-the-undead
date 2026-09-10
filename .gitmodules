@@ -1,0 +1,24 @@
+[submodule "player-service"]
+	path = player-service
+	url = https://github.com/AndreiCeaetchii/player-service.git
+[submodule "game-service"]
+	path = game-service
+	url = https://github.com/AndreiCeaetchii/game-service.git
+[submodule "world-service"]
+	path = world-service
+	url = https://github.com/mariaelenabotnari/world-service.git
+[submodule "exam-service"]
+	path = exam-service
+	url = https://github.com/mariaelenabotnari/exam-service.git
+[submodule "resource-service"]
+	path = resource-service
+	url = git@github.com:loredana-costin/resource-service.git
+[submodule "zombie-service"]
+	path = zombie-service
+	url = git@github.com:loredana-costin/zombie-service.git
+[submodule "base-service"]
+	path = base-service
+	url = https://github.com/CristiBulat/base-service.git
+[submodule "crafting-service"]
+	path = crafting-service
+	url = https://github.com/CristiBulat/crafting-service.git
