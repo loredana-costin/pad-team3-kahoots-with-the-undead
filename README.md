@@ -53,7 +53,7 @@ The full communication contract — every endpoint, its payload, and its respons
 ---
 # Architectural Diagram of Microservices Operation
 
-![architecture-diagram](architectural-diagram.jpg)
+![architecture-diagram](architectural-diagram.png)
 
 The diagram illustrates the microservices architecture for the **In Kahoots with the Undead** system. Game Service acts as the central service handling the others, making synchronous calls to Player, Exam, World, Zombie, Resource, and Base Service to run a gameplay cycle. Resource Service and Zombie Service never call outward to other microservices. Exam Service and World Service are loosely coupled via asynchronous events — `AchievementUnlocked` (consumed by World Service, Player Service, and Crafting Service) and `ZoneUnlocked` (consumed by Game Service, Base Service, and Crafting Service) — so grading a player's exam doesn't block on procedural map generation. Base Service and Crafting Service each additionally read from and coordinate sagas across several other services to validate and apply their own effects — see the dependency diagram below for the full picture. Crafting Service specifically coordinates a saga across Resource Service and Player Service to atomically consume ingredients and deliver crafted items, and reads from Player, Exam, and World Service to evaluate recipe unlock conditions.
 
@@ -1092,57 +1092,26 @@ type/short-description-issueID
 
 ## Pull Request Requirements
 
-Every Pull Request must include:
-
-### Required Information
-- **Clear description** of what changed and why
-- **Issue reference** (e.g., "Closes #42", "Fixes #18")
-- **List of specific changes** made
-- **Testing instructions** or results
-- **Screenshots** for UI changes
-- **Breaking changes** (if any)
+Every PR must include a clear description, a linked issue, and testing steps. UI changes need screenshots.
 
 ### PR Template
 
-We use the following template (located at `.github/PULL_REQUEST_TEMPLATE.md`):
+Located at `.github/PULL_REQUEST_TEMPLATE.md`:
 
 ```markdown
 ## What does this PR do?
-Brief description of the change and its purpose.
-
-## Related Issue
-Closes #XX
+Brief description and related issue (Closes #XX)
 
 ## Changes Made
-- [ ] Added zombie spawn logic
-- [ ] Fixed resource double-award bug
-- [ ] Updated exam grading tests
-- [ ] Improved error handling
+- Change 1
+- Change 2
 
 ## Type of Change
-- [ ] Bug fix (non-breaking change that fixes an issue)
-- [ ] New feature (non-breaking change that adds functionality)
-- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
-- [ ] Documentation update
+- [ ] Bug fix
+- [ ] New feature
+- [ ] Breaking change
+- [ ] Documentation
 
-## How to Test
-1. Pull this branch: `git checkout feature/branch-name`
-2. Install dependencies: `npm install` (Node services) or `dotnet restore` (C# services)
-3. Run the service: `npm start` or `dotnet run`
-4. Navigate to [specific endpoint/feature]
-5. Verify [specific functionality]
-
-## Screenshots (if applicable)
-[Attach images for UI changes]
-
-## Checklist
-- [ ] My code follows the team's coding standards
-- [ ] I have performed a self-review of my code
-- [ ] I have commented my code, particularly in hard-to-understand areas
-- [ ] I have made corresponding changes to the documentation
-- [ ] My changes generate no new warnings
-- [ ] I have added tests that prove my fix is effective or that my feature works
-- [ ] New and existing unit tests pass locally with my changes
 ```
 
 ## Testing Standards
