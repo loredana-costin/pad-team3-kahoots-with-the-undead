@@ -1236,3 +1236,27 @@ We follow **Semantic Versioning (SemVer)**: `MAJOR.MINOR.PATCH`
 - **Reviewers**: Provide timely, constructive feedback
 - **Project Lead**: Manage releases and resolve conflicts
 - **QA**: Test major features before production deployment
+
+## Common Docker Compose Deployment
+
+The repository root contains a unified `docker-compose.yml` to run the team's services directly from **DockerHub** images without requiring local source builds:
+
+- **Exam Service:** `mariaelenabotnari/exam-service:1.0.0` (Port `3000`)
+- **World Service:** `mariaelenabotnari/world-service:1.0.0` (Port `3001`)
+- **Exam Database (PostgreSQL):** `postgres:16-alpine` (Host port `5433` -> container port `5432`)
+- **World Database (PostgreSQL):** `postgres:16-alpine` (Host port `5434` -> container port `5432`)
+
+### Running the Services
+1. Launch all services and databases:
+   ```bash
+   docker compose up -d
+   ```
+2. To stop all services while preserving database volumes:
+   ```bash
+   docker compose down
+   ```
+3. To reset database volumes and start fresh:
+   ```bash
+   docker compose down -v
+   ```
+

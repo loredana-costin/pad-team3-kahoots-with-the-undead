@@ -1,0 +1,92 @@
+services:
+  # --- PostgreSQL Databases ---
+  exam-db:
+    image: postgres:16-alpine
+    container_name: exam-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: exam_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - exam_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d exam_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kahoots-network
+
+  world-db:
+    image: postgres:16-alpine
+    container_name: world-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: world_db
+    ports:
+      - "5434:5432"
+    volumes:
+      - world_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d world_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kahoots-network
+
+  # --- Microservices (using uploaded DockerHub images) ---
+  exam-service:
+    image: mariaelenabotnari/exam-service:1.0.0
+    container_name: exam-service
+    restart: always
+    environment:
+      PORT: 3000
+      NODE_ENV: production
+      DB_HOST: exam-db
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: exam_db
+    ports:
+      - "3000:3000"
+    depends_on:
+      exam-db:
+        condition: service_healthy
+    networks:
+      - kahoots-network
+
+  world-service:
+    image: mariaelenabotnari/world-service:1.0.0
+    container_name: world-service
+    restart: always
+    environment:
+      PORT: 3001
+      NODE_ENV: production
+      DB_HOST: world-db
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: world_db
+    ports:
+      - "3001:3001"
+    depends_on:
+      world-db:
+        condition: service_healthy
+    networks:
+      - kahoots-network
+
+volumes:
+  exam_postgres_data:
+    driver: local
+  world_postgres_data:
+    driver: local
+
+networks:
+  kahoots-network:
+    driver: bridge
