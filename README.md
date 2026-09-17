@@ -260,6 +260,11 @@ Responsible for the academic progression of players.
 - The six achievements tied to completing course categories, including their unlock conditions and effects.
 - A player's progress per course and per category.
 
+### **DockerHub Image**
+- **Repository:** [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service)
+- **Image Tag:** `mariaelenabotnari/exam-service:1.0.0`
+- **Default Port:** `3000`
+
 ### **Exposed API Endpoints**
 
 **`POST /exams`** *(Consumed by development team for content seeding)*
@@ -458,6 +463,11 @@ Owns the persistent physical state of the university.
 - The type of resource each room produces.
 - Every zombie spawn point, including which zombie category is allowed at each.
 - Which zones are currently unlocked.
+
+### **DockerHub Image**
+- **Repository:** [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service)
+- **Image Tag:** `mariaelenabotnari/world-service:1.0.0`
+- **Default Port:** `3001`
 
 ### **Exposed API Endpoints**
 
@@ -1205,3 +1215,94 @@ We follow **Semantic Versioning (SemVer)**: `MAJOR.MINOR.PATCH`
 - **Reviewers**: Provide timely, constructive feedback
 - **Project Lead**: Manage releases and resolve conflicts
 - **QA**: Test major features before production deployment
+---
+
+## Deployment & Database Seeding
+
+### Services on DockerHub
+
+The microservices are containerized and published on DockerHub:
+
+| Service | DockerHub Repository | Image Tag | Default Port | Description |
+|---|---|---|---|---|
+| **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:1.0.0` | `3000` | Academic progression, exams, and achievements |
+| **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:1.0.0` | `3001` | Physical campus layout, rooms, zones, and spawn points |
+
+---
+
+### System Requirements & Prerequisites
+
+To run these services locally via Docker Compose, ensure the host machine meets the following requirements:
+
+1. **Docker Engine & Docker Compose**:
+   - Docker Engine `20.10.0+` or Docker Desktop `4.0.0+`
+   - Docker Compose `v2.0.0+`
+2. **Available Host Ports**:
+   - `3000` — Exam Service HTTP API
+   - `3001` — World Service HTTP API
+   - `5433` — Exam PostgreSQL Database (`exam-db`)
+   - `5434` — World PostgreSQL Database (`world-db`)
+3. **Resource Allocations**:
+   - At least 2 GB of RAM available for Docker
+   - 2 GB free disk space for Docker images and PostgreSQL data volumes
+4. **Environment Configuration**:
+   - Self-contained in `docker-compose.yml`; no manual `.env` file setup is required to start up the stack.
+
+---
+
+### Step-by-Step Execution Guide
+
+#### 1. Start the Microservices & Databases
+From the repository root, start all four containers in detached mode:
+```bash
+docker compose up -d
+```
+Docker Compose will automatically pull the images from DockerHub, initialize the database containers (`exam-db` on port 5433, `world-db` on port 5434), perform healthchecks, and launch `exam-service` and `world-service`.
+
+To check container health and status:
+```bash
+docker compose ps
+```
+
+#### 2. Run Database Seeding
+Both microservices include idempotent database seed scripts. Run them inside the containers using `docker compose exec`:
+
+##### Seed the Exam Service Database
+```bash
+docker compose exec exam-service npm run db:seed
+```
+- **Execution & Idempotency:** Connects to `exam_db` and checks if the `exams` table contains any records. If records already exist, seeding is safely skipped without altering existing data.
+- **Data Seeded:** If empty, seeds **15 course exams** across 5 categories (Mathematics, Programming, Systems & Hardware, Databases, Law) with 10 questions each, plus **6 achievements** for course category completion and graduation.
+
+##### Seed the World Service Database
+```bash
+docker compose exec world-service npm run db:seed
+```
+- **Execution & Idempotency:** Connects to `world_db` and checks if the `zones` table contains any records. If records already exist, seeding is safely skipped without duplicating records.
+- **Data Seeded:** If empty, seeds:
+  - **7 Zones:** `zoneZero` (`unlocked: true`) and 6 wing/hall zones (`unlocked: false`).
+  - **30 Rooms:** campus rooms with connection topology (student base room, main corridor, exam halls, classrooms, laboratories, libraries, canteens, diploma hall).
+  - **54 Spawn Points:** generated programmatically in a loop (10 Professor spawn points in exam halls with tied course categories, and 44 Tourist spawn points in classrooms, labs, libraries, and canteens; safe rooms contain 0 spawns).
+
+#### 3. Verify Endpoints
+Once seeded, you can verify the persistent data via HTTP requests (Postman, browser, or curl):
+
+```bash
+# Verify Exam Service
+curl -s http://localhost:3000/exams
+
+# Verify World Service Zones
+curl -s http://localhost:3001/zones
+
+# Verify World Service Rooms
+curl -s http://localhost:3001/rooms
+```
+
+#### 4. Stopping the Stack
+```bash
+# Stop containers while preserving database volume data:
+docker compose down
+
+# Stop containers and wipe database volumes (to test a clean seed again):
+docker compose down -v
+```
