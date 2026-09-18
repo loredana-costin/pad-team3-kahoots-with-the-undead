@@ -1,0 +1,1067 @@
+{
+  "info": {
+    "_postman_id": "7f3c1a92-5d48-4e6b-9a12-3b8e0c4d7f51",
+    "name": "Player Service",
+    "description": "Postman Collection for testing Player Service: authentication, profile, XP progression, inventory, achievements and atomic trades.\n\nRun the collection in order - requests share state through collection variables. Usernames are randomised per run, so it can be run repeatedly without resetting the database.\n\nStart the service first (see player-service/README.md). Default baseUrl is http://localhost:5199.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5199",
+      "type": "string"
+    },
+    {
+      "key": "username",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "usernameB",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "playerId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "playerBId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "jwt",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "tradeId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "idempotencyKey",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "01. Health Check (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Service reports healthy\", () => pm.expect(pm.response.json().status).to.eql(\"healthy\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "health"
+          ]
+        }
+      }
+    },
+    {
+      "name": "02. Register Player A (200)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const suffix = Date.now().toString().slice(-8);",
+              "pm.collectionVariables.set(\"username\", \"faf_survivor_\" + suffix);",
+              "pm.collectionVariables.set(\"usernameB\", \"faf_trader_\" + suffix);",
+              "pm.collectionVariables.set(\"idempotencyKey\", \"trade_\" + suffix);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Returns player_id and jwt\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body).to.have.property(\"player_id\");",
+              "    pm.expect(body).to.have.property(\"jwt\");",
+              "    pm.collectionVariables.set(\"playerId\", body.player_id);",
+              "    pm.collectionVariables.set(\"jwt\", body.jwt);",
+              "});",
+              "pm.test(\"player_id uses the contract prefix\", () => pm.expect(pm.response.json().player_id).to.match(/^p_/));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"hunter2pass\",\n  \"email\": \"student@faf.md\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/register",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "register"
+          ]
+        }
+      }
+    },
+    {
+      "name": "03. Register Player B (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Second player created\", () => pm.collectionVariables.set(\"playerBId\", pm.response.json().player_id));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"{{usernameB}}\",\n  \"password\": \"hunter3pass\",\n  \"email\": \"trader@faf.md\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/register",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "register"
+          ]
+        }
+      }
+    },
+    {
+      "name": "04. Register Duplicate Username (409)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 409 Conflict\", () => pm.response.to.have.status(409));",
+              "pm.test(\"Rejected with username_taken\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.status).to.eql(\"rejected\");",
+              "    pm.expect(body.reason).to.eql(\"username_taken\");",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"hunter2pass\",\n  \"email\": \"student@faf.md\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/register",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "register"
+          ]
+        }
+      }
+    },
+    {
+      "name": "05. Register Invalid Payload (400)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 400 Bad Request\", () => pm.response.to.have.status(400));",
+              "pm.test(\"Reports every broken rule\", () => {",
+              "    const errors = pm.response.json().errors;",
+              "    pm.expect(errors).to.have.property(\"Username\");",
+              "    pm.expect(errors).to.have.property(\"Password\");",
+              "    pm.expect(errors).to.have.property(\"Email\");",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"z\",\n  \"password\": \"x\",\n  \"email\": \"not-an-email\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/register",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "register"
+          ]
+        }
+      }
+    },
+    {
+      "name": "06. Login (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Returns a fresh jwt for the same player\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body).to.have.property(\"jwt\");",
+              "    pm.expect(body.player_id).to.eql(pm.collectionVariables.get(\"playerId\"));",
+              "    pm.collectionVariables.set(\"jwt\", body.jwt);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"hunter2pass\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/login",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "login"
+          ]
+        }
+      }
+    },
+    {
+      "name": "07. Login Wrong Password (401)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 401 Unauthorized\", () => pm.response.to.have.status(401));",
+              "pm.test(\"Rejected with invalid_credentials\", () => pm.expect(pm.response.json().reason).to.eql(\"invalid_credentials\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"wrongpassword\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/login",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "login"
+          ]
+        }
+      }
+    },
+    {
+      "name": "08. Get Profile Without Token (401)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 401 Unauthorized\", () => pm.response.to.have.status(401));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/players/{{playerId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "players",
+            "{{playerId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "09. Get Profile (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Profile matches the contract shape\", () => {",
+              "    const body = pm.response.json();",
+              "    ['player_id', 'nickname', 'level', 'xp', 'group'].forEach(k => pm.expect(body).to.have.property(k));",
+              "});",
+              "pm.test(\"New player starts at level 1 with 0 xp\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.level).to.eql(1);",
+              "    pm.expect(body.xp).to.eql(0);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/players/{{playerId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "players",
+            "{{playerId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "10. Get Profile Unknown Player (404)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 404 Not Found\", () => pm.response.to.have.status(404));",
+              "pm.test(\"Rejected with player_not_found\", () => pm.expect(pm.response.json().reason).to.eql(\"player_not_found\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/players/p_doesnotexist",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "players",
+            "p_doesnotexist"
+          ]
+        }
+      }
+    },
+    {
+      "name": "11. Progression +1450 Levels Up (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"1450 xp is level 7 and reports the level up\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.xp).to.eql(1450);",
+              "    pm.expect(body.level).to.eql(7);",
+              "    pm.expect(body.leveledUp).to.be.true;",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"xpDelta\": 1450,\n  \"reason\": \"cycle_survived\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/players/{{playerId}}/progression",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "players",
+            "{{playerId}}",
+            "progression"
+          ]
+        }
+      }
+    },
+    {
+      "name": "12. Progression +50 Stays Level 7 (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"1500 xp is still level 7\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.xp).to.eql(1500);",
+              "    pm.expect(body.level).to.eql(7);",
+              "    pm.expect(body.leveledUp).to.be.false;",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"xpDelta\": 50,\n  \"reason\": \"cycle_survived\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/players/{{playerId}}/progression",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "players",
+            "{{playerId}}",
+            "progression"
+          ]
+        }
+      }
+    },
+    {
+      "name": "13. Progression Floors At Zero (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Tourist Zombie theft cannot push xp below zero\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.xp).to.eql(0);",
+              "    pm.expect(body.level).to.eql(1);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"xpDelta\": -999999,\n  \"reason\": \"tourist_zombie_theft\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/players/{{playerId}}/progression",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "players",
+            "{{playerId}}",
+            "progression"
+          ]
+        }
+      }
+    },
+    {
+      "name": "14. Add Inventory Item (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Item added and snapshot returned\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.status).to.eql(\"added\");",
+              "    pm.expect(body.inventorySnapshot.coffee).to.eql(3);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"itemId\": \"coffee\",\n  \"quantity\": 3,\n  \"source\": \"craft:recipe_coffee\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/players/{{playerId}}/inventory/items",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "players",
+            "{{playerId}}",
+            "inventory",
+            "items"
+          ]
+        }
+      }
+    },
+    {
+      "name": "15. Add Same Item Merges Stack (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Quantity merges into one stack instead of a second row\", () => pm.expect(pm.response.json().inventorySnapshot.coffee).to.eql(5));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"itemId\": \"coffee\",\n  \"quantity\": 2,\n  \"source\": \"craft:recipe_coffee\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/players/{{playerId}}/inventory/items",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "players",
+            "{{playerId}}",
+            "inventory",
+            "items"
+          ]
+        }
+      }
+    },
+    {
+      "name": "16. Add Item Invalid Quantity (400)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 400 Bad Request\", () => pm.response.to.have.status(400));",
+              "pm.test(\"Quantity must be positive\", () => pm.expect(JSON.stringify(pm.response.json())).to.include(\"quantity_must_be_positive\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"itemId\": \"coffee\",\n  \"quantity\": 0\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/players/{{playerId}}/inventory/items",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "players",
+            "{{playerId}}",
+            "inventory",
+            "items"
+          ]
+        }
+      }
+    },
+    {
+      "name": "17. Get Inventory (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Holds 5 coffee in a single stack\", () => {",
+              "    const coffee = pm.response.json().items.filter(i => i.itemId === \"coffee\");",
+              "    pm.expect(coffee).to.have.lengthOf(1);",
+              "    pm.expect(coffee[0].quantity).to.eql(5);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/players/{{playerId}}/inventory",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "players",
+            "{{playerId}}",
+            "inventory"
+          ]
+        }
+      }
+    },
+    {
+      "name": "18. Give Player B a Sandwich (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"itemId\": \"sandwich\",\n  \"quantity\": 1,\n  \"source\": \"seed\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/players/{{playerBId}}/inventory/items",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "players",
+            "{{playerBId}}",
+            "inventory",
+            "items"
+          ]
+        }
+      }
+    },
+    {
+      "name": "19. Grant Achievement (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Achievement granted\", () => pm.expect(pm.response.json().status).to.eql(\"granted\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"achievementId\": \"achievementSurvivedMathematics\",\n  \"grantedBy\": \"exam:mathematics_complete\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/players/{{playerId}}/achievements",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "players",
+            "{{playerId}}",
+            "achievements"
+          ]
+        }
+      }
+    },
+    {
+      "name": "20. Grant Same Achievement Again (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Redelivered event is not an error\", () => pm.expect(pm.response.json().status).to.eql(\"already_granted\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"achievementId\": \"achievementSurvivedMathematics\",\n  \"grantedBy\": \"exam:mathematics_complete\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/players/{{playerId}}/achievements",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "players",
+            "{{playerId}}",
+            "achievements"
+          ]
+        }
+      }
+    },
+    {
+      "name": "21. Create Trade (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Trade completed and id captured\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.status).to.eql(\"completed\");",
+              "    pm.expect(body.tradeId).to.match(/^trade_/);",
+              "    pm.collectionVariables.set(\"tradeId\", body.tradeId);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"idempotencyKey\": \"{{idempotencyKey}}\",\n  \"fromPlayerId\": \"{{playerId}}\",\n  \"toPlayerId\": \"{{playerBId}}\",\n  \"offer\": [ { \"itemId\": \"coffee\", \"qty\": 2 } ],\n  \"request\": [ { \"itemId\": \"sandwich\", \"qty\": 1 } ]\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/trades",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "trades"
+          ]
+        }
+      }
+    },
+    {
+      "name": "22. Replay Same Trade Is Idempotent (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Returns the original tradeId, does not swap twice\", () => pm.expect(pm.response.json().tradeId).to.eql(pm.collectionVariables.get(\"tradeId\")));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"idempotencyKey\": \"{{idempotencyKey}}\",\n  \"fromPlayerId\": \"{{playerId}}\",\n  \"toPlayerId\": \"{{playerBId}}\",\n  \"offer\": [ { \"itemId\": \"coffee\", \"qty\": 2 } ],\n  \"request\": [ { \"itemId\": \"sandwich\", \"qty\": 1 } ]\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/trades",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "trades"
+          ]
+        }
+      }
+    },
+    {
+      "name": "23. Inventory After Trade (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Gave 2 coffee, received 1 sandwich\", () => {",
+              "    const byId = {};",
+              "    pm.response.json().items.forEach(i => byId[i.itemId] = i.quantity);",
+              "    pm.expect(byId.coffee).to.eql(3);",
+              "    pm.expect(byId.sandwich).to.eql(1);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/players/{{playerId}}/inventory",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "players",
+            "{{playerId}}",
+            "inventory"
+          ]
+        }
+      }
+    },
+    {
+      "name": "24. Trade Items Not Owned (409)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 409 Conflict\", () => pm.response.to.have.status(409));",
+              "pm.test(\"Rejected with insufficient_items\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.status).to.eql(\"rejected\");",
+              "    pm.expect(body.reason).to.eql(\"insufficient_items\");",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"idempotencyKey\": \"{{idempotencyKey}}_overdraw\",\n  \"fromPlayerId\": \"{{playerId}}\",\n  \"toPlayerId\": \"{{playerBId}}\",\n  \"offer\": [ { \"itemId\": \"coffee\", \"qty\": 99 } ],\n  \"request\": []\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/trades",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "trades"
+          ]
+        }
+      }
+    },
+    {
+      "name": "25. Trade With Self (400)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 400 Bad Request\", () => pm.response.to.have.status(400));",
+              "pm.test(\"Rejected with self_trade\", () => pm.expect(pm.response.json().reason).to.eql(\"self_trade\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"idempotencyKey\": \"{{idempotencyKey}}_self\",\n  \"fromPlayerId\": \"{{playerId}}\",\n  \"toPlayerId\": \"{{playerId}}\",\n  \"offer\": [ { \"itemId\": \"coffee\", \"qty\": 1 } ],\n  \"request\": []\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/trades",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "trades"
+          ]
+        }
+      }
+    }
+  ]
+}
