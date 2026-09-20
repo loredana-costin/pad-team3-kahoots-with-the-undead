@@ -45,7 +45,7 @@ The full communication contract — every endpoint, its payload, and its respons
 
 | Team | Services | Language & Framework | Database | Communication Patterns | Motivation & Trade-offs |
 |---|---|---|---|---|---|
-| Ceaetchii Andrei | Player Service, Game Service | C# / ASP.NET Core | Player: PostgreSQL; Game: Redis | REST/HTTP + WebSockets + RabbitMQ Events | C# provides strong typing and asynchronous programming. PostgreSQL ensures data integrity and transactions for the Player Service, while Redis is suitable for temporary Game Service state. REST is used for request/response communication, WebSockets for real-time updates, and RabbitMQ for asynchronous cross-service events. Trade-off: C# requires more setup for real-time WebSocket handling via SignalR than Node's simpler event-driven model, but this is offset by compile-time safety and keeping both services in one language. |
+| Ceaetchii Andrei | Player Service, Game Service | C# / ASP.NET Core | PostgreSQL (both services) | REST/HTTP + WebSockets + RabbitMQ Events | C# provides strong typing and asynchronous programming. PostgreSQL ensures data integrity and transactions for player identity, inventory and trades. Game Service uses it as well so both services share one architecture: the same generic repository, migration runner and base entity. Its state is short-lived but still relational (sessions, rosters, timed actions), and one DBMS keeps deployment and the shared compose file simpler. REST is used for request/response communication, WebSockets for real-time updates, and RabbitMQ for asynchronous cross-service events. Trade-off: Redis would fit ephemeral session state better and was the original choice, but running a single database across both services is simpler to operate at this scale. |
 | Botnari Maria-Elena | Exam Service, World Service | Node.js/TypeScript (Express) | PostgreSQL | REST + RabbitMQ events | Both services store structured, relational data (exams and attempts for one, rooms and connections for the other), so one language and one database keeps things simple and easy to maintain across both. Trade-off: without EF Core's built-in migration tooling, schema changes to the room graph require more manual discipline to keep consistent. |
 | Costin Loredana | Zombie Service, Resource Service | Node.js/TypeScript (Express) | Zombie: MongoDB; Resource: PostgreSQL | Zombie: REST; Resource: REST, idempotency-key-gated | Node's non-blocking I/O fits both I/O-bound services, which wait on DB calls. MongoDB's flexible schema enables rapid Zombie Service iteration without migrations as ability types expand. The correctness-critical Resource Service uses TypeScript and DB transactions to enforce atomic, idempotent balance updates, so duplicate completion events never double-award resources. Trade-off: Node is weaker at CPU-heavy work, but neither service does any, so this cost doesn't apply here. |
 | Bulat Cristian | Base Service, Crafting Service | C#/.NET (ASP.NET Core) | PostgreSQL | REST for Base and Crafting Services; RabbitMQ publisher and consumer for both | Both services perform "spend and apply" operations that must not partially succeed. C#'s explicit exception handling and EF Core transactions make atomic, saga-style operations across service calls easier to reason about than a dynamically-typed alternative. Trade-off: more boilerplate than Node for simple CRUD, accepted for the correctness guarantee. |
@@ -260,6 +260,11 @@ Responsible for the academic progression of players.
 - The six achievements tied to completing course categories, including their unlock conditions and effects.
 - A player's progress per course and per category.
 
+### **DockerHub Image**
+- **Repository:** [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service)
+- **Image Tag:** `mariaelenabotnari/exam-service:1.0.0`
+- **Default Port:** `3000`
+
 ### **Exposed API Endpoints**
 
 **`POST /exams`** *(Consumed by development team for content seeding)*
@@ -458,6 +463,11 @@ Owns the persistent physical state of the university.
 - The type of resource each room produces.
 - Every zombie spawn point, including which zombie category is allowed at each.
 - Which zones are currently unlocked.
+
+### **DockerHub Image**
+- **Repository:** [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service)
+- **Image Tag:** `mariaelenabotnari/world-service:1.0.0`
+- **Default Port:** `3001`
 
 ### **Exposed API Endpoints**
 
@@ -1092,57 +1102,26 @@ type/short-description-issueID
 
 ## Pull Request Requirements
 
-Every Pull Request must include:
-
-### Required Information
-- **Clear description** of what changed and why
-- **Issue reference** (e.g., "Closes #42", "Fixes #18")
-- **List of specific changes** made
-- **Testing instructions** or results
-- **Screenshots** for UI changes
-- **Breaking changes** (if any)
+Every PR must include a clear description, a linked issue, and testing steps. UI changes need screenshots.
 
 ### PR Template
 
-We use the following template (located at `.github/PULL_REQUEST_TEMPLATE.md`):
+Located at `.github/PULL_REQUEST_TEMPLATE.md`:
 
 ```markdown
 ## What does this PR do?
-Brief description of the change and its purpose.
-
-## Related Issue
-Closes #XX
+Brief description and related issue (Closes #XX)
 
 ## Changes Made
-- [ ] Added zombie spawn logic
-- [ ] Fixed resource double-award bug
-- [ ] Updated exam grading tests
-- [ ] Improved error handling
+- Change 1
+- Change 2
 
 ## Type of Change
-- [ ] Bug fix (non-breaking change that fixes an issue)
-- [ ] New feature (non-breaking change that adds functionality)
-- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
-- [ ] Documentation update
+- [ ] Bug fix
+- [ ] New feature
+- [ ] Breaking change
+- [ ] Documentation
 
-## How to Test
-1. Pull this branch: `git checkout feature/branch-name`
-2. Install dependencies: `npm install` (Node services) or `dotnet restore` (C# services)
-3. Run the service: `npm start` or `dotnet run`
-4. Navigate to [specific endpoint/feature]
-5. Verify [specific functionality]
-
-## Screenshots (if applicable)
-[Attach images for UI changes]
-
-## Checklist
-- [ ] My code follows the team's coding standards
-- [ ] I have performed a self-review of my code
-- [ ] I have commented my code, particularly in hard-to-understand areas
-- [ ] I have made corresponding changes to the documentation
-- [ ] My changes generate no new warnings
-- [ ] I have added tests that prove my fix is effective or that my feature works
-- [ ] New and existing unit tests pass locally with my changes
 ```
 
 ## Testing Standards
@@ -1236,3 +1215,94 @@ We follow **Semantic Versioning (SemVer)**: `MAJOR.MINOR.PATCH`
 - **Reviewers**: Provide timely, constructive feedback
 - **Project Lead**: Manage releases and resolve conflicts
 - **QA**: Test major features before production deployment
+---
+
+## Deployment & Database Seeding
+
+### Services on DockerHub
+
+The microservices are containerized and published on DockerHub:
+
+| Service | DockerHub Repository | Image Tag | Default Port | Description |
+|---|---|---|---|---|
+| **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:1.0.0` | `3000` | Academic progression, exams, and achievements |
+| **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:1.0.0` | `3001` | Physical campus layout, rooms, zones, and spawn points |
+
+---
+
+### System Requirements & Prerequisites
+
+To run these services locally via Docker Compose, ensure the host machine meets the following requirements:
+
+1. **Docker Engine & Docker Compose**:
+   - Docker Engine `20.10.0+` or Docker Desktop `4.0.0+`
+   - Docker Compose `v2.0.0+`
+2. **Available Host Ports**:
+   - `3000` — Exam Service HTTP API
+   - `3001` — World Service HTTP API
+   - `5433` — Exam PostgreSQL Database (`exam-db`)
+   - `5434` — World PostgreSQL Database (`world-db`)
+3. **Resource Allocations**:
+   - At least 2 GB of RAM available for Docker
+   - 2 GB free disk space for Docker images and PostgreSQL data volumes
+4. **Environment Configuration**:
+   - Self-contained in `docker-compose.yml`; no manual `.env` file setup is required to start up the stack.
+
+---
+
+### Step-by-Step Execution Guide
+
+#### 1. Start the Microservices & Databases
+From the repository root, start all four containers in detached mode:
+```bash
+docker compose up -d
+```
+Docker Compose will automatically pull the images from DockerHub, initialize the database containers (`exam-db` on port 5433, `world-db` on port 5434), perform healthchecks, and launch `exam-service` and `world-service`.
+
+To check container health and status:
+```bash
+docker compose ps
+```
+
+#### 2. Run Database Seeding
+Both microservices include idempotent database seed scripts. Run them inside the containers using `docker compose exec`:
+
+##### Seed the Exam Service Database
+```bash
+docker compose exec exam-service npm run db:seed
+```
+- **Execution & Idempotency:** Connects to `exam_db` and checks if the `exams` table contains any records. If records already exist, seeding is safely skipped without altering existing data.
+- **Data Seeded:** If empty, seeds **15 course exams** across 5 categories (Mathematics, Programming, Systems & Hardware, Databases, Law) with 10 questions each, plus **6 achievements** for course category completion and graduation.
+
+##### Seed the World Service Database
+```bash
+docker compose exec world-service npm run db:seed
+```
+- **Execution & Idempotency:** Connects to `world_db` and checks if the `zones` table contains any records. If records already exist, seeding is safely skipped without duplicating records.
+- **Data Seeded:** If empty, seeds:
+  - **7 Zones:** `zoneZero` (`unlocked: true`) and 6 wing/hall zones (`unlocked: false`).
+  - **30 Rooms:** campus rooms with connection topology (student base room, main corridor, exam halls, classrooms, laboratories, libraries, canteens, diploma hall).
+  - **54 Spawn Points:** generated programmatically in a loop (10 Professor spawn points in exam halls with tied course categories, and 44 Tourist spawn points in classrooms, labs, libraries, and canteens; safe rooms contain 0 spawns).
+
+#### 3. Verify Endpoints
+Once seeded, you can verify the persistent data via HTTP requests (Postman, browser, or curl):
+
+```bash
+# Verify Exam Service
+curl -s http://localhost:3000/exams
+
+# Verify World Service Zones
+curl -s http://localhost:3001/zones
+
+# Verify World Service Rooms
+curl -s http://localhost:3001/rooms
+```
+
+#### 4. Stopping the Stack
+```bash
+# Stop containers while preserving database volume data:
+docker compose down
+
+# Stop containers and wipe database volumes (to test a clean seed again):
+docker compose down -v
+```
