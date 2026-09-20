@@ -1,0 +1,445 @@
+{
+  "info": {
+    "name": "Resource Service",
+    "description": "In Kahoots with the Undead — Resource Service API. Covers the currently implemented CRUD endpoints over /api/resource-types and /api/inventory. Owner: Costin Loredana.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:4002",
+      "type": "string"
+    },
+    {
+      "key": "resourceTypeId",
+      "value": "wood",
+      "type": "string",
+      "description": "Set automatically by 'Create Resource Type' via its test script; also used as a default for read/update/delete requests."
+    },
+    {
+      "key": "playerId",
+      "value": "p_44",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "url": { "raw": "{{baseUrl}}/health", "host": ["{{baseUrl}}"], "path": ["health"] }
+      },
+      "response": []
+    },
+    {
+      "name": "Resource Types",
+      "item": [
+        {
+          "name": "List All Resource Types",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/resource-types", "host": ["{{baseUrl}}"], "path": ["api", "resource-types"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Response is an array', function () { pm.expect(pm.response.json()).to.be.an('array'); });"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Get Resource Type By Id",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/resource-types/{{resourceTypeId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "resource-types", "{{resourceTypeId}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Get Resource Type By Id - Not Found (404)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/resource-types/does_not_exist",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "resource-types", "does_not_exist"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 404', function () { pm.response.to.have.status(404); });"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Create Resource Type",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Chemicals {{$randomInt}}\",\n  \"stackable\": true,\n  \"description\": \"Used for energy boosters.\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/resource-types", "host": ["{{baseUrl}}"], "path": ["api", "resource-types"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 201', function () { pm.response.to.have.status(201); });",
+                  "pm.test('Response has a resourceTypeId', function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.resourceTypeId).to.be.a('string');",
+                  "  pm.collectionVariables.set('resourceTypeId', body.resourceTypeId);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Create Resource Type - Missing Fields (400)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Incomplete\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/resource-types", "host": ["{{baseUrl}}"], "path": ["api", "resource-types"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 400', function () { pm.response.to.have.status(400); });"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Create Resource Type - Duplicate Name (409)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Wood\",\n  \"stackable\": true\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/resource-types", "host": ["{{baseUrl}}"], "path": ["api", "resource-types"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 409', function () { pm.response.to.have.status(409); });"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Update Resource Type",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"Updated description\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/resource-types/{{resourceTypeId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "resource-types", "{{resourceTypeId}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Delete Resource Type",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/resource-types/{{resourceTypeId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "resource-types", "{{resourceTypeId}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 204', function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Delete Resource Type - Already Deleted (404)",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/resource-types/{{resourceTypeId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "resource-types", "{{resourceTypeId}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 404', function () { pm.response.to.have.status(404); });"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Player Inventory",
+      "item": [
+        {
+          "name": "Create Inventory",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "inventory", "{{playerId}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 201', function () { pm.response.to.have.status(201); });",
+                  "pm.test('Resources start empty', function () {",
+                  "  pm.expect(pm.response.json().resources).to.eql({});",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Create Inventory - Already Exists (409)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "inventory", "{{playerId}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 409', function () { pm.response.to.have.status(409); });"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Get Inventory",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "inventory", "{{playerId}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Get Inventory - Not Found (404)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/does_not_exist",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "inventory", "does_not_exist"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 404', function () { pm.response.to.have.status(404); });"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Set Inventory Balances",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resources\": {\n    \"wood\": 10,\n    \"food\": 42\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "inventory", "{{playerId}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Balances match request', function () {",
+                  "  pm.expect(pm.response.json().resources).to.eql({ wood: 10, food: 42 });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Set Inventory Balances - Malformed Body (400)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resources\": \"not-an-object\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "inventory", "{{playerId}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 400', function () { pm.response.to.have.status(400); });"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Delete Inventory",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "inventory", "{{playerId}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 204', function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Delete Inventory - Already Deleted (404)",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "inventory", "{{playerId}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 404', function () { pm.response.to.have.status(404); });"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    }
+  ]
+}
