@@ -1227,6 +1227,8 @@ The microservices are containerized and published on DockerHub:
 |---|---|---|---|---|
 | **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:1.0.0` | `3000` | Academic progression, exams, and achievements |
 | **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:1.0.0` | `3001` | Physical campus layout, rooms, zones, and spawn points |
+| **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:1.0.0` | `3002` | Player identity, progression, inventory, and trades |
+| **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:1.0.0` | `3003` | Game sessions, day/night cycle, and timed player actions |
 
 ---
 
@@ -1242,6 +1244,10 @@ To run these services locally via Docker Compose, ensure the host machine meets 
    - `3001` — World Service HTTP API
    - `5433` — Exam PostgreSQL Database (`exam-db`)
    - `5434` — World PostgreSQL Database (`world-db`)
+   - `3002` — Player Service HTTP API
+   - `3003` — Game Service HTTP API
+   - `5435` — Player PostgreSQL Database (`player-db`)
+   - `5436` — Game PostgreSQL Database (`game-db`)
 3. **Resource Allocations**:
    - At least 2 GB of RAM available for Docker
    - 2 GB free disk space for Docker images and PostgreSQL data volumes
@@ -1253,11 +1259,11 @@ To run these services locally via Docker Compose, ensure the host machine meets 
 ### Step-by-Step Execution Guide
 
 #### 1. Start the Microservices & Databases
-From the repository root, start all four containers in detached mode:
+From the repository root, start all eight containers in detached mode:
 ```bash
 docker compose up -d
 ```
-Docker Compose will automatically pull the images from DockerHub, initialize the database containers (`exam-db` on port 5433, `world-db` on port 5434), perform healthchecks, and launch `exam-service` and `world-service`.
+Docker Compose will automatically pull the images from DockerHub, initialize the database containers (`exam-db` on 5433, `world-db` on 5434, `player-db` on 5435, `game-db` on 5436), perform healthchecks, and launch `exam-service`, `world-service`, `player-service` and `game-service`.
 
 To check container health and status:
 ```bash
