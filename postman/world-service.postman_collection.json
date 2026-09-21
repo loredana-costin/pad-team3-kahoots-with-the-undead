@@ -641,7 +641,172 @@
           "response": []
         }
       ]
+    },
+    {
+      "name": "Create Professor Spawn Point (201)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"roomId\": \"mathematicsExamHall\",\n  \"zombieCategoryAllowed\": \"professor\",\n  \"tiedCourseCategory\": \"mathematics\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/spawnPoints",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "spawnPoints"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Create Tourist Spawn Point (201)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"roomId\": \"library\",\n  \"zombieCategoryAllowed\": \"tourist\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/spawnPoints",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "spawnPoints"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get All Spawn Points (200)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/spawnPoints",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "spawnPoints"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Spawn Points By Room (200)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/rooms/mathematicsExamHall/spawnPoints",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "rooms",
+            "mathematicsExamHall",
+            "spawnPoints"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Delete Spawn Point (200)",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/spawnPoints/librarySpawnOne",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "spawnPoints",
+            "librarySpawnOne"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Room Connections (200)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/world/rooms/{{roomId}}/connections",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "world",
+            "rooms",
+            "{{roomId}}",
+            "connections"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Room Resource Node (200)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/world/rooms/{{roomId}}/resourceNode",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "world",
+            "rooms",
+            "{{roomId}}",
+            "resourceNode"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Zone Status (200)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/world/zones/{{zoneId}}/status",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "world",
+            "zones",
+            "{{zoneId}}",
+            "status"
+          ]
+        }
+      },
+      "response": []
     }
   ]
 }
-
