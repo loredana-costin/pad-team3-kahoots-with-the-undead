@@ -93,6 +93,7 @@ services:
       DB_USER: postgres
       DB_PASSWORD: postgres
       DB_NAME: exam_db
+      DATABASE_URL: "postgresql://postgres:postgres@exam-db:5432/exam_db?schema=public"
     ports:
       - "3000:3000"
     depends_on:
@@ -113,6 +114,7 @@ services:
       DB_USER: postgres
       DB_PASSWORD: postgres
       DB_NAME: world_db
+      DATABASE_URL: "postgresql://postgres:postgres@world-db:5432/world_db?schema=public"
     ports:
       - "3001:3001"
     depends_on:
