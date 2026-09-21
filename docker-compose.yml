@@ -103,7 +103,7 @@ services:
       - kahoots-network
 
   world-service:
-    image: mariaelenabotnari/world-service:1.0.0
+    image: mariaelenabotnari/world-service:1.1.0
     container_name: world-service
     restart: always
     environment:
