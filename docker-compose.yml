@@ -40,6 +40,46 @@ services:
     networks:
       - kahoots-network
 
+  player-db:
+    image: postgres:17-alpine
+    container_name: player-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: player_db
+    ports:
+      - "5435:5432"
+    volumes:
+      - player_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d player_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kahoots-network
+
+  game-db:
+    image: postgres:17-alpine
+    container_name: game-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: game_db
+    ports:
+      - "5436:5432"
+    volumes:
+      - game_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d game_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kahoots-network
+
   # --- Microservices (using uploaded DockerHub images) ---
   exam-service:
     image: mariaelenabotnari/exam-service:1.0.0
@@ -81,7 +121,44 @@ services:
     networks:
       - kahoots-network
 
+  player-service:
+    image: andrei045/player-service:1.0.0
+    container_name: player-service
+    restart: always
+    environment:
+      ConnectionStrings__Postgres: "Host=player-db;Port=5432;Database=player_db;Username=postgres;Password=postgres"
+      Jwt__Secret: "team-compose-development-secret-at-least-32-chars"
+      Jwt__Issuer: player-service
+      Jwt__Audience: kahoots-with-the-undead
+      ASPNETCORE_ENVIRONMENT: Development
+    ports:
+      - "3002:8080"
+    depends_on:
+      player-db:
+        condition: service_healthy
+    networks:
+      - kahoots-network
+
+  game-service:
+    image: andrei045/game-service:1.0.0
+    container_name: game-service
+    restart: always
+    environment:
+      ConnectionStrings__Postgres: "Host=game-db;Port=5432;Database=game_db;Username=postgres;Password=postgres"
+      ASPNETCORE_ENVIRONMENT: Development
+    ports:
+      - "3003:8080"
+    depends_on:
+      game-db:
+        condition: service_healthy
+    networks:
+      - kahoots-network
+
 volumes:
+  player_postgres_data:
+    driver: local
+  game_postgres_data:
+    driver: local
   exam_postgres_data:
     driver: local
   world_postgres_data:
