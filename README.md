@@ -799,6 +799,11 @@ Responsible for the player's survival base, initially represented by the FAF Cab
 - Kiki's interaction state and reward outcomes.
 - The transaction ledger keyed on the caller's idempotency key.
 
+### **DockerHub Image**
+- **Repository:** [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service)
+- **Image Tag:** `cristi150404/base-service:1.0.0`
+- **Default Port:** `5003`
+
 ### **Consumed API Endpoints**
 
 - `GET /world/rooms/{roomId}` *(World Service)* — confirms a room exists and its zone is unlocked.
@@ -941,6 +946,11 @@ Allows players to combine resources into useful survival equipment.
 - Recipe definitions and unlock conditions: Wood + Metal → Barricade Kit, Paper + Metal → Improvised Weapon, Food + Chemicals → Energy Booster, Metal + Electronics → Zombie Detector, Paper + Wood → Exam Cheat Sheet.
 - Which recipes each player has unlocked.
 - The craft transaction/saga state for each craft attempt.
+
+### **DockerHub Image**
+- **Repository:** [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service)
+- **Image Tag:** `cristi150404/crafting-service:1.0.0`
+- **Default Port:** `5004`
 
 ### **Consumed API Endpoints**
 
@@ -1229,6 +1239,8 @@ The microservices are containerized and published on DockerHub:
 | **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:1.0.0` | `3001` | Physical campus layout, rooms, zones, and spawn points |
 | **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:1.1.0` | `3002` | Player identity, progression, inventory, and trades |
 | **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:1.1.0` | `3003` | Game sessions, day/night cycle, and timed player actions |
+| **Base Service** | [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service) | `cristi150404/base-service:1.0.0` | `5003` | Player base rooms, barricades, facilities, decorations, and Kiki |
+| **Crafting Service** | [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service) | `cristi150404/crafting-service:1.0.0` | `5004` | Recipes, unlock conditions, and the crafting saga |
 
 ---
 
@@ -1248,6 +1260,10 @@ To run these services locally via Docker Compose, ensure the host machine meets 
    - `3003` — Game Service HTTP API
    - `5435` — Player PostgreSQL Database (`player-db`)
    - `5436` — Game PostgreSQL Database (`game-db`)
+   - `5003` — Base Service HTTP API
+   - `5004` — Crafting Service HTTP API
+   - `5437` — Base PostgreSQL Database (`base-db`)
+   - `5438` — Crafting PostgreSQL Database (`crafting-db`)
 3. **Resource Allocations**:
    - At least 2 GB of RAM available for Docker
    - 2 GB free disk space for Docker images and PostgreSQL data volumes
@@ -1290,6 +1306,16 @@ docker compose exec world-service npm run db:seed
   - **30 Rooms:** campus rooms with connection topology (student base room, main corridor, exam halls, classrooms, laboratories, libraries, canteens, diploma hall).
   - **54 Spawn Points:** generated programmatically in a loop (10 Professor spawn points in exam halls with tied course categories, and 44 Tourist spawn points in classrooms, labs, libraries, and canteens; safe rooms contain 0 spawns).
 
+##### Seed the Base and Crafting Service Databases
+Both databases are seeded by one script from the repository root, after the containers are healthy:
+```bash
+./db-scripts/seed-base-crafting.sh
+```
+- **Execution & Idempotency:** Waits for `base-service` (`:5003/health`) and `crafting-service` (`:5004/health`) so the services have created their tables, then pipes `db-scripts/base-service/seed.sql` and `db-scripts/crafting-service/seed.sql` into the two databases. Each script checks whether its main table already holds rows and skips itself if so, leaving existing data untouched.
+- **Data Seeded:** If empty, seeds:
+  - **Base Service:** 3 player bases with claimed rooms, barricade levels, facilities and decorations, plus 2 completed transactions in the idempotency ledger.
+  - **Crafting Service:** the **5 contract recipes** with their ingredients, one per unlock condition type (none, `zoneUnlocked`, `resourceDiscovered`, `playerLevel`, `examPassed`), 2 known players with their unlocks, and 1 completed craft.
+
 #### 3. Verify Endpoints
 Once seeded, you can verify the persistent data via HTTP requests (Postman, browser, or curl):
 
@@ -1302,6 +1328,12 @@ curl -s http://localhost:3001/zones
 
 # Verify World Service Rooms
 curl -s http://localhost:3001/rooms
+
+# Verify Base Service
+curl -s http://localhost:5003/api/base
+
+# Verify Crafting Service
+curl -s http://localhost:5004/api/recipes/definitions
 ```
 
 #### 4. Stopping the Stack
