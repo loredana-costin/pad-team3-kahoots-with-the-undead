@@ -80,6 +80,43 @@ services:
     networks:
       - kahoots-network
 
+  resource-db:
+    image: postgres:17-alpine
+    container_name: resource-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: resource_db
+    ports:
+      - "5437:5432"
+    volumes:
+      - resource_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d resource_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kahoots-network
+
+  # --- MongoDB Database ---
+  zombie-db:
+    image: mongo:8
+    container_name: zombie-db
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - zombie_mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kahoots-network
+
   # --- Microservices (using uploaded DockerHub images) ---
   exam-service:
     image: mariaelenabotnari/exam-service:1.0.0
@@ -156,6 +193,40 @@ services:
     networks:
       - kahoots-network
 
+  resource-service:
+    image: costinloredana/resource-service:1.0.1
+    container_name: resource-service
+    restart: always
+    environment:
+      PORT: 4002
+      POSTGRES_HOST: resource-db
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: resource_db
+    ports:
+      - "4002:4002"
+    depends_on:
+      resource-db:
+        condition: service_healthy
+    networks:
+      - kahoots-network
+
+  zombie-service:
+    image: costinloredana/zombie-service:1.0.1
+    container_name: zombie-service
+    restart: always
+    environment:
+      PORT: 4001
+      MONGO_URI: "mongodb://zombie-db:27017/zombie_db"
+    ports:
+      - "4001:4001"
+    depends_on:
+      zombie-db:
+        condition: service_healthy
+    networks:
+      - kahoots-network
+
 volumes:
   player_postgres_data:
     driver: local
@@ -164,6 +235,10 @@ volumes:
   exam_postgres_data:
     driver: local
   world_postgres_data:
+    driver: local
+  resource_postgres_data:
+    driver: local
+  zombie_mongo_data:
     driver: local
 
 networks:
