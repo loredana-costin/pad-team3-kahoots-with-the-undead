@@ -466,7 +466,7 @@ Owns the persistent physical state of the university.
 
 ### **DockerHub Image**
 - **Repository:** [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service)
-- **Image Tag:** `mariaelenabotnari/world-service:1.0.0`
+- **Image Tag:** `mariaelenabotnari/world-service:1.1.0`
 - **Default Port:** `3001`
 
 ### **Exposed API Endpoints**
@@ -533,7 +533,14 @@ Returns the spawn points available in a room and the zombie category allowed at 
 
 Response
 ```json
-{ "roomId": "mathematicsExamHall", "spawnPoints": [ { "spawnPointId": "mathematicsExamHallSpawnOne", "coordinates": { "x": 4, "y": 2 }, "zombieCategoryAllowed": "professor", "tiedCourseCategory": "mathematics" } ] }
+[
+  {
+    "spawnPointId": "mathematicsExamHallSpawnOne",
+    "roomId": "mathematicsExamHall",
+    "zombieCategoryAllowed": "professor",
+    "tiedCourseCategory": "mathematics"
+  }
+]
 ```
 
 **`POST /world/zones/unlock`** *(Internal handler, triggered by the `AchievementUnlocked` event; also usable by development team for testing)*
@@ -559,22 +566,82 @@ Response
 { "unlocked": true, "unlockedAt": "2026-09-08T10:45:00Z" }
 ```
 
-**`POST /world/roomTemplates`** *(Consumed by development team)*
+**`GET /world/spawnPoints`** *(Consumed by development team)*
 
-Defines a reusable room template, used when generating a wing zone.
-
-Payload
-```json
-{ "templateId": "standardWingTemplate", "rooms": [ { "type": "laboratory", "resourceType": "metal scraps" }, { "type": "library", "resourceType": "paper" }, { "type": "canteen", "resourceType": "food" } ] }
-```
-
-**`GET /world/roomTemplates`** *(Consumed by development team)*
-
-Lists the templates currently defined.
+Lists all defined zombie spawn points across campus.
 
 Response
 ```json
-{ "templates": ["standardWingTemplate", "extendedWingTemplate"] }
+[
+  {
+    "spawnPointId": "mathematicsExamHallSpawnOne",
+    "roomId": "mathematicsExamHall",
+    "zombieCategoryAllowed": "professor",
+    "tiedCourseCategory": "mathematics"
+  }
+]
+```
+
+**`POST /world/spawnPoints`** *(Consumed by development team)*
+
+Creates a new zombie spawn point tied to a specific room.
+
+Payload
+```json
+{
+  "roomId": "mathematicsExamHall",
+  "zombieCategoryAllowed": "professor",
+  "tiedCourseCategory": "mathematics"
+}
+```
+
+Response
+```json
+{
+  "spawnPointId": "spawn_123",
+  "roomId": "mathematicsExamHall",
+  "zombieCategoryAllowed": "professor",
+  "tiedCourseCategory": "mathematics"
+}
+```
+
+**`GET /world/spawnPoints/{spawnPointId}`** *(Consumed by development team)*
+
+Retrieves details of a specific spawn point.
+
+Response
+```json
+{
+  "spawnPointId": "mathematicsExamHallSpawnOne",
+  "roomId": "mathematicsExamHall",
+  "zombieCategoryAllowed": "professor",
+  "tiedCourseCategory": "mathematics"
+}
+```
+
+**`PUT /world/spawnPoints/{spawnPointId}`** *(Consumed by development team)*
+
+Updates spawn point parameters (allowed category or tied course category).
+
+Response
+```json
+{
+  "spawnPointId": "mathematicsExamHallSpawnOne",
+  "roomId": "mathematicsExamHall",
+  "zombieCategoryAllowed": "professor",
+  "tiedCourseCategory": "mathematics"
+}
+```
+
+**`DELETE /world/spawnPoints/{spawnPointId}`** *(Consumed by development team)*
+
+Removes a spawn point configuration.
+
+Response
+```json
+{
+  "deleted": true
+}
 ```
 
 ### **Message Queue Events**
@@ -1226,7 +1293,7 @@ The microservices are containerized and published on DockerHub:
 | Service | DockerHub Repository | Image Tag | Default Port | Description |
 |---|---|---|---|---|
 | **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:1.0.0` | `3000` | Academic progression, exams, and achievements |
-| **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:1.0.0` | `3001` | Physical campus layout, rooms, zones, and spawn points |
+| **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:1.1.0` | `3001` | Physical campus layout, rooms, zones, and spawn points |
 | **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:1.1.0` | `3002` | Player identity, progression, inventory, and trades |
 | **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:1.1.0` | `3003` | Game sessions, day/night cycle, and timed player actions |
 
@@ -1302,6 +1369,9 @@ curl -s http://localhost:3001/zones
 
 # Verify World Service Rooms
 curl -s http://localhost:3001/rooms
+
+# Verify World Service Spawn Points
+curl -s http://localhost:3001/spawnPoints
 ```
 
 #### 4. Stopping the Stack
