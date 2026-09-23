@@ -669,86 +669,155 @@ Response
 Owns the persistent definitions and short-lived instance state of zombies.
 
 ### **Owns**
-- Zombie type definitions: stats, sprites, behavior configuration, special abilities.
-- Two major categories — Professor Zombies (initiate exams) and Tourist Zombies (roam, steal resources/XP). (other categories will be discussed)
-- Short-lived zombie instance state during a game cycle (health, position reference, status).
+- Zombie type definitions: stats, behavior configuration, special abilities.
+- Three categories — Professor Zombies (initiate exams), Tourist Zombies (roam, steal resources/XP) and Infected Zombies (students who can be cured instead of fought, at a resource cost). Other categories may be added later.
+- Short-lived zombie instance state during a game cycle (health, spawn point reference, cycle and zone). Instances expire automatically 4 hours after they are spawned.
+
+### **DockerHub Image**
+- **Repository:** [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service)
+- **Image Tag:** `costinloredana/zombie-service:1.0.1`
+- **Default Port:** `4001`
+
+### **Consumed API Endpoints**
+
+None. Zombie Service never calls other services; Game Service coordinates anything that follows from a zombie action (e.g. calling Resource Service for a steal or a cure).
 
 ### **Exposed API Endpoints**
 
-**`GET /api/zombie-types?category=professor|tourist`** *(Consumed by Game Service)*
+Every error response has the shape `{ "error": "<code>", "message": "<reason>" }`.
 
-Returns zombie type definitions, optionally filtered by category.
+**`GET /health`** *(Consumed by Docker healthcheck)*
 
 Response
 ```json
-[ { "typeId": "prof_calc", "category": "professor", "baseHealth": 40, "attackStrength": 5, "moveSpeed": 1.0, "perceptionRadius": 6, "specialAbility": "initiate_exam" } ]
+{ "status": "ok", "service": "zombie-service" }
 ```
+
+**`GET /api/zombie-types?category=professor|tourist|infected`** *(Consumed by Game Service)*
+
+Returns zombie type definitions, optionally filtered by category. `curable` and `cureRequirement` are only present on curable (infected) types.
+
+Response
+```json
+[
+  { "typeId": "prof_calc", "category": "professor", "name": "Calculus Professor", "baseHealth": 40, "attackStrength": 5, "moveSpeed": 1.0, "perceptionRadius": 6, "specialAbility": "initiate_exam" },
+  { "typeId": "infected_student", "category": "infected", "name": "Infected Student", "baseHealth": 22, "attackStrength": 1, "moveSpeed": 1.2, "perceptionRadius": 7, "specialAbility": "seek_cure", "curable": true, "cureRequirement": { "resourceType": "chemicals", "amount": 2 } }
+]
+```
+
+400 Bad Request — unknown `category` value:
+```json
+{ "error": "invalid_zombie_type", "message": "category must be 'professor', 'tourist', or 'infected'" }
+```
+
+**`GET /api/zombie-types/{typeId}`** *(Consumed by Game Service)*
+
+Returns a single zombie type (same shape as above), or `404 not_found`.
 
 **`POST /api/zombie-types`** *(Consumed by development team, Admin only)*
 
-Defines a new zombie variant.
+Defines a new zombie variant. `typeId` is generated as `<category>_<8 hex chars>`. `curable` and `cureRequirement` are optional, but `cureRequirement` is required when `curable` is `true`.
 
 Payload
 ```json
-{ "category": "tourist", "name": "Backpacker Horde", "baseHealth": 20, "attackStrength": 2, "moveSpeed": 1.8, "perceptionRadius": 10, "specialAbility": "steal_resource" }
+{ "category": "tourist", "name": "Exchange Student", "baseHealth": 15, "attackStrength": 1, "moveSpeed": 2.0, "perceptionRadius": 8, "specialAbility": "steal_xp" }
 ```
 
 Response — 201 Created:
 
 ```json
 {
-  "typeId": "tourist_backpacker",
+  "typeId": "tourist_1a2b3c4d",
   "category": "tourist",
-  "name": "Backpacker Horde",
-  "baseHealth": 20,
-  "attackStrength": 2,
-  "moveSpeed": 1.8,
-  "perceptionRadius": 10,
-  "specialAbility": "steal_resource"
+  "name": "Exchange Student",
+  "baseHealth": 15,
+  "attackStrength": 1,
+  "moveSpeed": 2.0,
+  "perceptionRadius": 8,
+  "specialAbility": "steal_xp"
 }
 ```
 
-400 Bad Request
+400 Bad Request — a required field is missing, `category` is invalid, or `curable: true` comes without a valid `cureRequirement`:
 ```json
-{
-  "error": "invalid_zombie_type",
-  "message": "Invalid zombie type data."
-}
+{ "error": "invalid_zombie_type", "message": "Missing fields: baseHealth, moveSpeed" }
 ```
-409 Conflict — if a zombie type with the same identifier/name already exists:
+409 Conflict — a zombie type with the same `name` already exists:
 ```json
-{
-  "error": "zombie_type_exists",
-  "message": "A zombie type with this identifier already exists."
-}
+{ "error": "zombie_type_exists", "message": "A zombie type with this name already exists." }
 ```
+
+**`PUT /api/zombie-types/{typeId}`** *(Consumed by development team, Admin only)*
+
+Partially updates a zombie type; only the fields sent are changed, validated with the same rules as create.
+
+Payload
+```json
+{ "baseHealth": 25 }
+```
+
+Returns `200 OK` with the updated type, `400 invalid_zombie_type`, or `404 not_found`.
+
+**`DELETE /api/zombie-types/{typeId}`** *(Consumed by development team, Admin only)*
+
+Returns `204 No Content`, or `404 not_found`.
 
 **`POST /api/zombies/spawn`** *(Consumed by Game Service)*
 
-Instantiates zombies at cycle start.
+Instantiates zombies at cycle start. For each instance a category is picked using `typeWeights` (keys `professor`, `tourist` or `infected`; non-negative numbers, at least one above 0), then a random zombie type from that category. Instances start with the type's `baseHealth`.
 
 Payload
 ```json
 { "cycleId": "cyc_884", "worldZoneId": "zone_12", "spawnCount": 5, "typeWeights": { "professor": 0.3, "tourist": 0.7 } }
 ```
 
-Response
+Response — 201 Created:
 ```json
-{ "zombies": [ { "instanceId": "z_991", "typeId": "prof_calc", "health": 40, "spawnPoint": "node_7" } ] }
+{
+  "zombies": [
+    { "instanceId": "z_a3cecfcc", "typeId": "prof_calc", "category": "professor", "health": 40, "spawnPoint": "zone_12_spawn_1", "cycleId": "cyc_884", "worldZoneId": "zone_12", "createdAt": "2026-09-23T15:15:45.963Z" }
+  ]
+}
+```
+
+400 Bad Request — a field is missing or invalid, or a weighted category has no zombie types yet:
+```json
+{ "error": "invalid_spawn_request", "message": "spawnCount must be a positive integer." }
 ```
 
 **`POST /api/zombies/{instance_id}/special-action`** *(Consumed by Game Service)*
 
-Triggers a zombie's special action against a player. For a Professor Zombie, this can initiate an exam encounter. For a Tourist Zombie, this can generate a resource or XP stealing action.
+Triggers a zombie's special action against a player. The response always carries `actionType` (the type's `specialAbility`) and `targetPlayerId`, plus one category-specific field:
+
+| Category | Extra field | Meaning for Game Service |
+|---|---|---|
+| `professor` | `suggestedExamCategory` | Start an exam encounter in that course category via Exam Service |
+| `tourist` | `suggestedAmount` | Resources/XP to steal from the player via Resource Service |
+| `infected` | `cureRequirement` | What the player must spend (via Resource Service) to cure the zombie |
 
 Payload
 ```json
 { "targetPlayerId": "p_44" }
 ```
 
-Response
+Response — 200 OK (one example per category):
 ```json
-{ "actionType": "steal_resource", "targetPlayerId": "p_44", "suggestedAmount": { "food": 5 } }
+{ "actionType": "initiate_exam", "targetPlayerId": "p_44", "suggestedExamCategory": "Programming" }
+```
+```json
+{ "actionType": "steal_resource", "targetPlayerId": "p_44", "suggestedAmount": { "food": 4 } }
+```
+```json
+{ "actionType": "seek_cure", "targetPlayerId": "p_44", "cureRequirement": { "resourceType": "chemicals", "amount": 2 } }
+```
+
+400 Bad Request — `targetPlayerId` missing:
+```json
+{ "error": "invalid_special_action_request", "message": "targetPlayerId is required." }
+```
+404 Not Found — the instance was never spawned, has expired, or its zombie type was deleted:
+```json
+{ "error": "not_found", "message": "Zombie instance not found. It may not have been spawned yet." }
 ```
 
 ---
@@ -758,16 +827,59 @@ Response
 Owns the university's resource economy independently from the physical map.
 
 ### **Owns**
-- Resource type definitions (wood, metal scraps, paper, food, chemicals, electronics)
+- Resource type definitions (wood, metal scraps, paper, food, chemicals, electronics). Ids are the lowercase name with spaces replaced by `_` (e.g. `metal_scraps`).
 - Player resource inventories/balances.
 - Resource node state (how much is available at a given gatherable location).
 - The full transaction/idempotency ledger for every resource change.
 
+### **DockerHub Image**
+- **Repository:** [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service)
+- **Image Tag:** `costinloredana/resource-service:1.0.1`
+- **Default Port:** `4002`
+
 ### **Consumed API Endpoints**
 
-- `GET /world/rooms/{roomId}/resourceNode` *(World Service)* — determines what resource type a node produces when initializing or validating a node.
+None. Resource Service never calls other services. Node state is stored in its own database; Game Service reads which node a room has from World Service (`GET /world/rooms/{roomId}/resourceNode`) and passes that `nodeId` to `POST /api/gather`.
 
 ### **Exposed API Endpoints**
+
+Errors use the shape `{ "error": "<code>", "message": "<reason>" }` (`invalid_body` / `invalid_resource_type` for 400, `not_found` for 404, `resource_type_exists` / `inventory_exists` for 409). The only exception is the 402 from `/api/spend`, shown below.
+
+**`GET /health`** *(Consumed by Docker healthcheck)*
+
+Response
+```json
+{ "status": "ok", "service": "resource-service" }
+```
+
+**`GET /api/resource-types`**, **`GET /api/resource-types/{id}`** *(Consumed by development team and any service that needs resource metadata)*
+
+Returns all resource types (sorted by name) or a single one (`404 not_found` if missing).
+
+Response
+```json
+[ { "resourceTypeId": "food", "name": "Food", "description": "Gathered from canteens, consumed by Kiki and players.", "stackable": true } ]
+```
+
+**`POST /api/resource-types`**, **`PUT /api/resource-types/{id}`**, **`DELETE /api/resource-types/{id}`** *(Consumed by development team, Admin only)*
+
+Creates, partially updates, or deletes a resource type. On create, `name` (string) and `stackable` (boolean) are required and `description` is optional.
+
+Payload
+```json
+{ "name": "Metal Scraps", "description": "Used in barricades and crafting.", "stackable": true }
+```
+
+Response — 201 Created:
+```json
+{ "resourceTypeId": "metal_scraps", "name": "Metal Scraps", "description": "Used in barricades and crafting.", "stackable": true }
+```
+
+Create returns `400 invalid_resource_type` for a missing field and `409 resource_type_exists` for a duplicate. Update returns `200`, delete returns `204`, and both return `404 not_found` for an unknown id.
+
+**`POST /api/inventory/{player_id}`** *(Consumed by Game Service)*
+
+Creates an empty inventory. No body. Returns `201` with `{ "playerId": "p_44", "resources": {} }`, or `409 inventory_exists`. Optional, because the transaction endpoints below also create the inventory on first use.
 
 **`GET /api/inventory/{player_id}`** *(Consumed by Gateway, Base Service, Crafting Service)*
 
@@ -775,12 +887,23 @@ Returns a player's current resource balances.
 
 Response
 ```json
-{ "playerId": "p_44", "resources": { "wood": 10, "metal": 4, "paper": 6, "food": 42 } }
+{ "playerId": "p_44", "resources": { "wood": 10, "metal_scraps": 4, "paper": 6, "food": 42 } }
+```
+
+404 Not Found — the player has no inventory yet.
+
+**`PUT /api/inventory/{player_id}`**, **`DELETE /api/inventory/{player_id}`** *(Consumed by development team, Admin only)*
+
+`PUT` overwrites all balances (creating the inventory if needed) and isn't idempotency-gated, so gameplay must use `gather`/`spend`/`refund` instead. `DELETE` returns `204`, or `404 not_found`.
+
+Payload (PUT)
+```json
+{ "resources": { "food": 10, "wood": 3 } }
 ```
 
 **`POST /api/gather`** *(Consumed by Game Service — idempotent)*
 
-Applies a resource change when a timed gathering action completes.
+Applies a resource change when a timed gathering action completes. `nodeId` is optional; when it names a known node, that node's `quantityAvailable` goes down by `amount` (never below 0).
 
 Payload
 ```json
@@ -797,24 +920,36 @@ Duplicate Response (200 OK)
 { "status": "already_applied", "newBalance": { "food": 42 } }
 ```
 
+400 Bad Request — a required field is missing or `amount` isn't positive:
+```json
+{ "error": "invalid_body", "message": "amount must be a positive number." }
+```
+
 **`POST /api/spend`** *(Consumed by Base Service, Crafting Service — idempotent)*
 
-Deducts resources for barricading, upgrades, crafting, or feeding Kiki.
+Deducts resources for barricading, upgrades, crafting, or feeding Kiki. Either every cost is deducted or none is: the player's row is locked and every balance is checked first.
 
 Payload
 ```json
-{ "idempotencyKey": "spend_p44_barricade_room9", "playerId": "p_44", "reason": "barricade", "costs": [ { "resourceType": "wood", "amount": 5 }, { "resourceType": "metal", "amount": 2 } ] }
+{ "idempotencyKey": "spend_p44_barricade_room9", "playerId": "p_44", "reason": "barricade", "costs": [ { "resourceType": "wood", "amount": 5 }, { "resourceType": "metal_scraps", "amount": 2 } ] }
 ```
 
 Success Response (200 OK)
 ```json
-{ "status": "applied", "newBalance": { "wood": 5, "metal": 2 } }
+{ "status": "applied", "newBalance": { "wood": 5, "metal_scraps": 2 } }
 ```
 
-Error Response (402 Payment Required)
+Duplicate Response (200 OK)
+```json
+{ "status": "already_applied", "newBalance": { "wood": 5, "metal_scraps": 2 } }
+```
+
+Error Response (402 Payment Required) — nothing is deducted and the key isn't stored, so the same key can be retried later:
 ```json
 { "status": "rejected_insufficient", "missing": { "wood": 2 } }
 ```
+
+400 Bad Request — missing `idempotencyKey`/`playerId`/`reason`, or `costs` isn't a non-empty array of `{ resourceType, amount }` with positive amounts.
 
 **`GET /api/nodes/{node_id}`** *(Consumed by Game Service)*
 
@@ -825,11 +960,13 @@ Response
 { "nodeId": "node_7", "resourceType": "food", "quantityAvailable": 30, "respawnRate": "5/hour" }
 ```
 
+404 Not Found — unknown node.
+
 **`POST /api/refund`** *(Consumed by Base Service, Crafting Service — idempotent)*
 
 Returns previously spent resources when a multi-service operation cannot be completed.
 
-This endpoint is used as the compensation step of a saga. The refund is idempotent so that retrying the compensation cannot return the same resources more than once.
+This endpoint is used as the compensation step of a saga. The refund is idempotent so that retrying the compensation cannot return the same resources more than once. The payload has the same shape and validation as `/api/spend`.
 
 Payload
 
@@ -838,7 +975,7 @@ Payload
   "idempotencyKey": "refund_craft_p44_barricadekit_001", "playerId": "p_44", "reason": "craft_rollback",
   "costs": [
     { "resourceType": "wood", "amount": 3 },
-    { "resourceType": "metal", "amount": 1 }
+    { "resourceType": "metal_scraps", "amount": 1 }
   ]
 }
 ```
@@ -848,7 +985,7 @@ Success Response (200 OK)
 ```json
 {
   "status": "refunded",
-  "newBalance": { "wood": 13, "metal": 5 }
+  "newBalance": { "wood": 13, "metal_scraps": 5 }
 }
 ```
 Duplicate Response (200 OK)
@@ -856,7 +993,7 @@ Duplicate Response (200 OK)
 ```json
 {
   "status": "already_refunded",
-  "newBalance": { "wood": 13, "metal": 5 }
+  "newBalance": { "wood": 13, "metal_scraps": 5 }
 }
 ```
 
@@ -1313,8 +1450,8 @@ The microservices are containerized and published on DockerHub:
 | **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:1.1.0` | `3001` | Physical campus layout, rooms, zones, and spawn points |
 | **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:1.1.0` | `3002` | Player identity, progression, inventory, and trades |
 | **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:1.1.0` | `3003` | Game sessions, day/night cycle, and timed player actions |
-| **Base Service** | [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service) | `cristi150404/base-service:1.0.0` | `5003` | Player base rooms, barricades, facilities, decorations, and Kiki |
-| **Crafting Service** | [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service) | `cristi150404/crafting-service:1.0.0` | `5004` | Recipes, unlock conditions, and the crafting saga |
+| **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:1.0.1` | `4001` | Zombie type definitions, spawned instances, and special actions |
+| **Resource Service** | [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service) | `costinloredana/resource-service:1.0.1` | `4002` | Resource types, player balances, nodes, and idempotent transactions |
 
 ---
 
@@ -1334,26 +1471,58 @@ To run these services locally via Docker Compose, ensure the host machine meets 
    - `3003` — Game Service HTTP API
    - `5435` — Player PostgreSQL Database (`player-db`)
    - `5436` — Game PostgreSQL Database (`game-db`)
+   - `4001` — Zombie Service HTTP API
+   - `4002` — Resource Service HTTP API
+   - `5437` — Resource PostgreSQL Database (`resource-db`)
+   - `27017` — Zombie MongoDB Database (`zombie-db`)
    - `5003` — Base Service HTTP API
    - `5004` — Crafting Service HTTP API
    - `5438` — Base PostgreSQL Database (`base-db`)
    - `5439` — Crafting PostgreSQL Database (`crafting-db`)
 3. **Resource Allocations**:
-   - At least 2 GB of RAM available for Docker
-   - 2 GB free disk space for Docker images and PostgreSQL data volumes
+   - At least 3 GB of RAM available for Docker (twelve containers, including one MongoDB instance)
+   - 3 GB free disk space for Docker images and the PostgreSQL/MongoDB data volumes
 4. **Environment Configuration**:
    - Self-contained in `docker-compose.yml`; no manual `.env` file setup is required to start up the stack.
+
+#### Zombie Service & Resource Service images
+
+Both images are multi-stage Node.js 20 builds that run as the non-root `node` user and ship a `HEALTHCHECK` against `GET /health`. Each one only needs its own database; neither calls another microservice, so they can be started on their own.
+
+| | Zombie Service | Resource Service |
+|---|---|---|
+| **Image** | `costinloredana/zombie-service:1.0.1` (`node:20-alpine`) | `costinloredana/resource-service:1.0.1` (`node:20-slim` + OpenSSL for Prisma) |
+| **Database** | MongoDB 8 (`mongo:8`) | PostgreSQL 17 (`postgres:17-alpine`) |
+| **Required env** | `MONGO_URI`, e.g. `mongodb://zombie-db:27017/zombie_db` | `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, or a single `DATABASE_URL` that takes precedence over them |
+| **Optional env** | `PORT` (default `4001`) | `PORT` (default `4002`) |
+| **Schema setup** | None, Mongoose creates the collections and the 4-hour TTL index on instances | Automatic, tables are created with `CREATE TABLE IF NOT EXISTS` on startup (no `prisma migrate` step) |
+| **Seed** | `npm run db:seed`: 3 zombie types | `npm run db:seed`: 5 resource types and 4 nodes |
+
+The service exits on startup if its database is unreachable, so start it only after the database is healthy (the team compose file does this with `depends_on: condition: service_healthy`). To run one on its own, outside the team compose file:
+
+```bash
+
+# Zombie Service
+docker run -d --name zombie-db --network kahoots-net mongo:8
+docker run -d --name zombie-service --network kahoots-net -p 4001:4001   -e MONGO_URI=mongodb://zombie-db:27017/zombie_db   costinloredana/zombie-service:1.0.1
+
+# Resource Service
+docker run -d --name resource-db --network kahoots-net   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=resource_db postgres:17-alpine
+docker run -d --name resource-service --network kahoots-net -p 4002:4002   -e POSTGRES_HOST=resource-db -e POSTGRES_PORT=5432 -e POSTGRES_USER=postgres   -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=resource_db   costinloredana/resource-service:1.0.1
+```
+
+If a container exits right away, the database probably wasn't ready yet. Wait a few seconds and run `docker start zombie-service` or `docker start resource-service`.
 
 ---
 
 ### Step-by-Step Execution Guide
 
 #### 1. Start the Microservices & Databases
-From the repository root, start all eight containers in detached mode:
+From the repository root, start all twelve containers in detached mode:
 ```bash
 docker compose up -d
 ```
-Docker Compose will automatically pull the images from DockerHub, initialize the database containers (`exam-db` on 5433, `world-db` on 5434, `player-db` on 5435, `game-db` on 5436), perform healthchecks, and launch `exam-service`, `world-service`, `player-service` and `game-service`.
+Docker Compose will automatically pull the images from DockerHub, initialize the database containers (`exam-db` on 5433, `world-db` on 5434, `player-db` on 5435, `game-db` on 5436, `resource-db` on 5437, `zombie-db` on 27017), perform healthchecks, and launch `exam-service`, `world-service`, `player-service`, `game-service`, `zombie-service` and `resource-service`.
 
 To check container health and status:
 ```bash
@@ -1361,7 +1530,7 @@ docker compose ps
 ```
 
 #### 2. Run Database Seeding
-Both microservices include idempotent database seed scripts. Run them inside the containers using `docker compose exec`:
+Exam, World, Zombie and Resource Service include idempotent database seed scripts. Run them inside the containers using `docker compose exec`:
 
 ##### Seed the Exam Service Database
 ```bash
@@ -1390,6 +1559,20 @@ Both databases are seeded by one script from the repository root, after the cont
   - **Base Service:** 3 player bases with claimed rooms, barricade levels, facilities and decorations, plus 2 completed transactions in the idempotency ledger.
   - **Crafting Service:** the **5 contract recipes** with their ingredients, one per unlock condition type (none, `zoneUnlocked`, `resourceDiscovered`, `playerLevel`, `examPassed`), 2 known players with their unlocks, and 1 completed craft.
 
+##### Seed the Zombie Service Database
+```bash
+docker compose exec zombie-service npm run db:seed
+```
+- **Execution & Idempotency:** Connects to `zombie_db` and checks if the `zombieTypes` collection contains any documents. If it does, seeding is skipped.
+- **Data Seeded:** If empty, seeds **3 zombie types**: `prof_calc` (professor, `initiate_exam`), `tourist_backpacker` (tourist, `steal_resource`) and `infected_student` (infected, `seek_cure`, curable with 2 × `chemicals`).
+
+##### Seed the Resource Service Database
+```bash
+docker compose exec resource-service npm run db:seed
+```
+- **Execution & Idempotency:** Connects to `resource_db` and checks the `resource_types` and `resource_nodes` tables separately. Each one is only seeded if it's empty.
+- **Data Seeded:** If empty, seeds **5 resource types** (`wood`, `metal_scraps`, `food`, `paper`, `chemicals`) and **4 resource nodes** (`node_1` to `node_4`).
+
 #### 3. Verify Endpoints
 Once seeded, you can verify the persistent data via HTTP requests (Postman, browser, or curl):
 
@@ -1412,6 +1595,19 @@ curl -s http://localhost:5004/api/recipes/definitions
 # Verify World Service Spawn Points
 curl -s http://localhost:3001/spawnPoints
 ```
+
+# Verify Zombie Service types, then spawn instances for a cycle
+```bash
+curl -s http://localhost:4001/api/zombie-types
+curl -s -X POST http://localhost:4001/api/zombies/spawn -H "Content-Type: application/json"   -d '{"cycleId":"cyc_1","worldZoneId":"zoneZero","spawnCount":3,"typeWeights":{"professor":0.5,"tourist":0.5}}'
+
+# Verify Resource Service types, nodes and an idempotent gather (run it twice: the second returns "already_applied")
+curl -s http://localhost:4002/api/resource-types
+curl -s http://localhost:4002/api/nodes/node_1
+curl -s -X POST http://localhost:4002/api/gather -H "Content-Type: application/json"   -d '{"idempotencyKey":"verify_1","playerId":"p_1","nodeId":"node_1","resourceType":"wood","amount":5}'
+```
+
+Postman collections for every service are in [`postman/`](postman/README.md).
 
 #### 4. Stopping the Stack
 ```bash
