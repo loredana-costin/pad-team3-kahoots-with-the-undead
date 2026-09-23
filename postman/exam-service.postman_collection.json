@@ -12,7 +12,7 @@
       "type": "string"
     },
     {
-      "key": "examId",
+      "key": "id",
       "value": "",
       "type": "string"
     }
@@ -30,8 +30,8 @@
               "});",
               "pm.test(\"Response has generated examId\", function () {",
               "    const jsonData = pm.response.json();",
-              "    pm.expect(jsonData).to.have.property(\"examId\");",
-              "    pm.collectionVariables.set(\"examId\", jsonData.examId);",
+              "    pm.expect(jsonData).to.have.property(\"id\");",
+              "    pm.collectionVariables.set(\"id\", jsonData.id);",
               "});"
             ],
             "type": "text/javascript"
@@ -48,7 +48,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"courseCategory\": \"mathematics\",\n  \"courseName\": \"Discrete Mathematics\",\n  \"passingThreshold\": 60,\n  \"questions\": [\n    {\n      \"id\": \"q1\",\n      \"text\": \"Which of the following is a valid proposition?\",\n      \"options\": [\n        \"2 plus 2\",\n        \"It is raining today\",\n        \"Close the door\",\n        \"Blue\"\n      ],\n      \"correctOptionId\": 1\n    },\n    {\n      \"id\": \"q2\",\n      \"text\": \"What is the cardinality of the power set of a set with 3 elements?\",\n      \"options\": [\n        \"3\",\n        \"6\",\n        \"8\",\n        \"9\"\n      ],\n      \"correctOptionId\": 2\n    }\n  ]\n}"
+          "raw": "{\n  \"courseCategory\": \"mathematics\",\n  \"courseName\": \"Software Architecture\",\n  \"passingThreshold\": 60,\n  \"questions\": [\n    {\n      \"id\": \"q1\",\n      \"text\": \"Which of the following is a valid proposition?\",\n      \"options\": [\n        \"2 plus 2\",\n        \"It is raining today\",\n        \"Close the door\",\n        \"Blue\"\n      ],\n      \"correctOptionId\": 1\n    },\n    {\n      \"id\": \"q2\",\n      \"text\": \"What is the cardinality of the power set of a set with 3 elements?\",\n      \"options\": [\n        \"3\",\n        \"6\",\n        \"8\",\n        \"9\"\n      ],\n      \"correctOptionId\": 2\n    }\n  ]\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/exams",
@@ -198,7 +198,7 @@
               "});",
               "pm.test(\"Returned exam matches examId\", function () {",
               "    const jsonData = pm.response.json();",
-              "    pm.expect(jsonData.examId).to.eql(pm.collectionVariables.get(\"examId\"));",
+              "    pm.expect(String(jsonData.id)).to.eql(String(pm.collectionVariables.get(\"id\")));",
               "});"
             ],
             "type": "text/javascript"
@@ -209,13 +209,13 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/exams/{{examId}}",
+          "raw": "{{baseUrl}}/exams/{{id}}",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "exams",
-            "{{examId}}"
+            "{{id}}"
           ]
         },
         "description": "Fetches a specific exam using the saved examId."
@@ -245,13 +245,13 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/exams/00000000-0000-0000-0000-000000000000",
+          "raw": "{{baseUrl}}/exams/99999",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "exams",
-            "00000000-0000-0000-0000-000000000000"
+            "99999"
           ]
         },
         "description": "Checks 404 behavior for a non-existent exam ID."
@@ -271,7 +271,7 @@
               "pm.test(\"Updated fields are reflected\", function () {",
               "    const jsonData = pm.response.json();",
               "    pm.expect(jsonData.passingThreshold).to.eql(75);",
-              "    pm.expect(jsonData.courseName).to.eql(\"Advanced Discrete Mathematics\");",
+              "    pm.expect(jsonData.courseName).to.eql(\"Advanced Software Architecture\");",
               "});"
             ],
             "type": "text/javascript"
@@ -288,16 +288,16 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"passingThreshold\": 75,\n  \"courseName\": \"Advanced Discrete Mathematics\"\n}"
+          "raw": "{\n  \"passingThreshold\": 75,\n  \"courseName\": \"Advanced Software Architecture\"\n}"
         },
         "url": {
-          "raw": "{{baseUrl}}/exams/{{examId}}",
+          "raw": "{{baseUrl}}/exams/{{id}}",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "exams",
-            "{{examId}}"
+            "{{id}}"
           ]
         },
         "description": "Updates fields of an existing exam."
@@ -332,13 +332,13 @@
           "raw": "{\n  \"passingThreshold\": 80\n}"
         },
         "url": {
-          "raw": "{{baseUrl}}/exams/00000000-0000-0000-0000-000000000000",
+          "raw": "{{baseUrl}}/exams/99999",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "exams",
-            "00000000-0000-0000-0000-000000000000"
+            "99999"
           ]
         },
         "description": "Attempts to update a non-existent exam ID, verifying 404 response."
@@ -368,13 +368,13 @@
         "method": "DELETE",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/exams/{{examId}}",
+          "raw": "{{baseUrl}}/exams/{{id}}",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "exams",
-            "{{examId}}"
+            "{{id}}"
           ]
         },
         "description": "Deletes the exam created in Step 1."
@@ -400,13 +400,13 @@
         "method": "DELETE",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/exams/{{examId}}",
+          "raw": "{{baseUrl}}/exams/{{id}}",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "exams",
-            "{{examId}}"
+            "{{id}}"
           ]
         },
         "description": "Tries to delete the already deleted exam, confirming 404."
