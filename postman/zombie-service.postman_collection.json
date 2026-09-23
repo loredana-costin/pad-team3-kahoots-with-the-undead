@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Zombie Service",
-    "description": "In Kahoots with the Undead \u2014 Zombie Service API. Covers the currently implemented CRUD endpoints over /api/zombie-types. Owner: Costin Loredana.",
+    "description": "In Kahoots with the Undead \u2014 Zombie Service API. Covers the implemented CRUD endpoints over /api/zombie-types, plus the mocked spawn / special-action endpoints that Game Service will call once it exists (see the CPR communication contract). Owner: Costin Loredana.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -21,6 +21,12 @@
       "value": "infected_student",
       "type": "string",
       "description": "Set automatically by 'Create Curable Zombie Type' via its test script; kept separate from {{typeId}} so it doesn't interfere with the main create/update/delete flow."
+    },
+    {
+      "key": "spawnedInstanceId",
+      "value": "",
+      "type": "string",
+      "description": "Set automatically by 'Spawn Zombies' via its test script (first zombie in the response)."
     }
   ],
   "item": [
@@ -606,6 +612,217 @@
             }
           ],
           "response": []
+        }
+      ]
+    },
+    {
+      "name": "Zombie Instances (Mocked)",
+      "description": "Mocked business logic for the endpoints the CPR contract documents as consumed by Game Service (which doesn't exist yet). Spawning picks real, weighted zombie types from /api/zombie-types; special-action responses are shaped by the real category/specialAbility/cureRequirement on that type. Instances are in-memory and short-lived by design (they don't survive a restart) \u2014 run 'Spawn Zombies' before 'Trigger Special Action' in the same session.",
+      "item": [
+        {
+          "name": "Spawn Zombies",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/zombies/spawn",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "zombies",
+                "spawn"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cycleId\": \"cyc_884\",\n  \"worldZoneId\": \"zone_12\",\n  \"spawnCount\": 5,\n  \"typeWeights\": {\n    \"professor\": 0.3,\n    \"tourist\": 0.7\n  }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 201', function () { pm.response.to.have.status(201); });",
+                  "pm.test('Returns spawnCount zombies with real type data', function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.zombies).to.have.lengthOf(5);",
+                  "  body.zombies.forEach(z => {",
+                  "    pm.expect(z.instanceId).to.be.a('string');",
+                  "    pm.expect(['professor','tourist']).to.include(z.category);",
+                  "    pm.expect(z.health).to.be.a('number');",
+                  "  });",
+                  "  pm.collectionVariables.set('spawnedInstanceId', body.zombies[0].instanceId);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Spawn Zombies - Invalid Category (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/zombies/spawn",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "zombies",
+                "spawn"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cycleId\": \"cyc_1\",\n  \"worldZoneId\": \"zone_1\",\n  \"spawnCount\": 1,\n  \"typeWeights\": {\n    \"ghost\": 1\n  }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 400', function () { pm.response.to.have.status(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Spawn Zombies - Missing spawnCount (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/zombies/spawn",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "zombies",
+                "spawn"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cycleId\": \"cyc_1\",\n  \"worldZoneId\": \"zone_1\",\n  \"typeWeights\": {\n    \"professor\": 1\n  }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 400', function () { pm.response.to.have.status(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Trigger Special Action",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/zombies/{{spawnedInstanceId}}/special-action",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "zombies",
+                "{{spawnedInstanceId}}",
+                "special-action"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"targetPlayerId\": \"p_44\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Response has an actionType', function () {",
+                  "  pm.expect(pm.response.json().actionType).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Trigger Special Action - Instance Not Found (404)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/zombies/does_not_exist/special-action",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "zombies",
+                "does_not_exist",
+                "special-action"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"targetPlayerId\": \"p_44\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 404', function () { pm.response.to.have.status(404); });"
+                ]
+              }
+            }
+          ]
         }
       ]
     }

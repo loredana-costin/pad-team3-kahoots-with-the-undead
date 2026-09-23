@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Resource Service",
-    "description": "In Kahoots with the Undead — Resource Service API. Covers the currently implemented CRUD endpoints over /api/resource-types and /api/inventory. Owner: Costin Loredana.",
+    "description": "In Kahoots with the Undead \u2014 Resource Service API. Covers the implemented CRUD endpoints over /api/resource-types and /api/inventory, plus the mocked idempotent gather/spend/refund endpoints and the mocked node lookup that Game/Base/Crafting Service will call once they exist (see the CPR communication contract). Owner: Costin Loredana.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -19,7 +19,32 @@
     {
       "key": "playerId",
       "value": "p_44",
-      "type": "string"
+      "type": "string",
+      "description": "Set to a fresh 'p_<timestamp>' by 'Create Inventory' on every run so the collection can be re-run against the same database."
+    },
+    {
+      "key": "spendIdempotencyKey",
+      "value": "spend_p44_barricade_{{$randomInt}}",
+      "type": "string",
+      "description": "Set to a fresh per-run key by 'Create Inventory'."
+    },
+    {
+      "key": "refundIdempotencyKey",
+      "value": "refund_p44_craft_{{$randomInt}}",
+      "type": "string",
+      "description": "Set to a fresh per-run key by 'Create Inventory'."
+    },
+    {
+      "key": "nodeId",
+      "value": "node_1",
+      "type": "string",
+      "description": "One of the mocked nodes seeded in InMemoryNodeRepository (node_1..node_4)."
+    },
+    {
+      "key": "gatherIdempotencyKey",
+      "value": "",
+      "type": "string",
+      "description": "Set by 'Gather - Apply''s pre-request script to a fresh, concrete key; 'Gather - Duplicate' reuses that exact value on purpose."
     }
   ],
   "item": [
@@ -27,7 +52,15 @@
       "name": "Health Check",
       "request": {
         "method": "GET",
-        "url": { "raw": "{{baseUrl}}/health", "host": ["{{baseUrl}}"], "path": ["health"] }
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "health"
+          ]
+        }
       },
       "response": []
     },
@@ -38,7 +71,16 @@
           "name": "List All Resource Types",
           "request": {
             "method": "GET",
-            "url": { "raw": "{{baseUrl}}/api/resource-types", "host": ["{{baseUrl}}"], "path": ["api", "resource-types"] }
+            "url": {
+              "raw": "{{baseUrl}}/api/resource-types",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "resource-types"
+              ]
+            }
           },
           "event": [
             {
@@ -59,8 +101,14 @@
             "method": "GET",
             "url": {
               "raw": "{{baseUrl}}/api/resource-types/{{resourceTypeId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "resource-types", "{{resourceTypeId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "resource-types",
+                "{{resourceTypeId}}"
+              ]
             }
           },
           "event": [
@@ -81,8 +129,14 @@
             "method": "GET",
             "url": {
               "raw": "{{baseUrl}}/api/resource-types/does_not_exist",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "resource-types", "does_not_exist"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "resource-types",
+                "does_not_exist"
+              ]
             }
           },
           "event": [
@@ -101,12 +155,26 @@
           "name": "Create Resource Type",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Chemicals {{$randomInt}}\",\n  \"stackable\": true,\n  \"description\": \"Used for energy boosters.\"\n}"
             },
-            "url": { "raw": "{{baseUrl}}/api/resource-types", "host": ["{{baseUrl}}"], "path": ["api", "resource-types"] }
+            "url": {
+              "raw": "{{baseUrl}}/api/resource-types",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "resource-types"
+              ]
+            }
           },
           "event": [
             {
@@ -129,12 +197,26 @@
           "name": "Create Resource Type - Missing Fields (400)",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Incomplete\"\n}"
             },
-            "url": { "raw": "{{baseUrl}}/api/resource-types", "host": ["{{baseUrl}}"], "path": ["api", "resource-types"] }
+            "url": {
+              "raw": "{{baseUrl}}/api/resource-types",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "resource-types"
+              ]
+            }
           },
           "event": [
             {
@@ -152,12 +234,26 @@
           "name": "Create Resource Type - Duplicate Name (409)",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Wood\",\n  \"stackable\": true\n}"
             },
-            "url": { "raw": "{{baseUrl}}/api/resource-types", "host": ["{{baseUrl}}"], "path": ["api", "resource-types"] }
+            "url": {
+              "raw": "{{baseUrl}}/api/resource-types",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "resource-types"
+              ]
+            }
           },
           "event": [
             {
@@ -175,15 +271,26 @@
           "name": "Update Resource Type",
           "request": {
             "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"description\": \"Updated description\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/resource-types/{{resourceTypeId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "resource-types", "{{resourceTypeId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "resource-types",
+                "{{resourceTypeId}}"
+              ]
             }
           },
           "event": [
@@ -204,8 +311,14 @@
             "method": "DELETE",
             "url": {
               "raw": "{{baseUrl}}/api/resource-types/{{resourceTypeId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "resource-types", "{{resourceTypeId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "resource-types",
+                "{{resourceTypeId}}"
+              ]
             }
           },
           "event": [
@@ -226,8 +339,14 @@
             "method": "DELETE",
             "url": {
               "raw": "{{baseUrl}}/api/resource-types/{{resourceTypeId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "resource-types", "{{resourceTypeId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "resource-types",
+                "{{resourceTypeId}}"
+              ]
             }
           },
           "event": [
@@ -253,11 +372,32 @@
             "method": "POST",
             "url": {
               "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "inventory", "{{playerId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "{{playerId}}"
+              ]
             }
           },
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Use a fresh player (and fresh spend/refund keys) on every run. The gather/spend/refund",
+                  "// requests later in this collection re-create the player's inventory after 'Delete Inventory',",
+                  "// so a fixed playerId would make this request return 409 on the next run.",
+                  "const runId = Date.now();",
+                  "pm.collectionVariables.set('playerId', 'p_' + runId);",
+                  "pm.collectionVariables.set('spendIdempotencyKey', 'spend_barricade_' + runId);",
+                  "pm.collectionVariables.set('refundIdempotencyKey', 'refund_craft_' + runId);"
+                ]
+              }
+            },
             {
               "listen": "test",
               "script": {
@@ -278,8 +418,14 @@
             "method": "POST",
             "url": {
               "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "inventory", "{{playerId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "{{playerId}}"
+              ]
             }
           },
           "event": [
@@ -300,8 +446,14 @@
             "method": "GET",
             "url": {
               "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "inventory", "{{playerId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "{{playerId}}"
+              ]
             }
           },
           "event": [
@@ -322,8 +474,14 @@
             "method": "GET",
             "url": {
               "raw": "{{baseUrl}}/api/inventory/does_not_exist",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "inventory", "does_not_exist"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "does_not_exist"
+              ]
             }
           },
           "event": [
@@ -342,15 +500,26 @@
           "name": "Set Inventory Balances",
           "request": {
             "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"resources\": {\n    \"wood\": 10,\n    \"food\": 42\n  }\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "inventory", "{{playerId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "{{playerId}}"
+              ]
             }
           },
           "event": [
@@ -372,15 +541,26 @@
           "name": "Set Inventory Balances - Malformed Body (400)",
           "request": {
             "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"resources\": \"not-an-object\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "inventory", "{{playerId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "{{playerId}}"
+              ]
             }
           },
           "event": [
@@ -401,8 +581,14 @@
             "method": "DELETE",
             "url": {
               "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "inventory", "{{playerId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "{{playerId}}"
+              ]
             }
           },
           "event": [
@@ -423,8 +609,14 @@
             "method": "DELETE",
             "url": {
               "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "inventory", "{{playerId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "{{playerId}}"
+              ]
             }
           },
           "event": [
@@ -438,6 +630,326 @@
             }
           ],
           "response": []
+        }
+      ]
+    },
+    {
+      "name": "Resource Economy (Mocked)",
+      "description": "Mocked business logic for the endpoints the CPR contract documents as consumed by Game/Base/Crafting Service (none of which exist yet). Idempotency is real: these are backed by the resource_transactions ledger table. Node data is an in-memory stand-in for the node placement World Service will eventually own. Run 'Gather - Apply' before 'Gather - Duplicate' so the idempotency key exists.",
+      "item": [
+        {
+          "name": "Gather - Apply",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/gather",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "gather"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"idempotencyKey\": \"{{gatherIdempotencyKey}}\",\n    \"playerId\": \"{{playerId}}\",\n    \"nodeId\": \"{{nodeId}}\",\n    \"resourceType\": \"wood\",\n    \"amount\": 12\n  }"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// Generate the key once here so 'Gather - Duplicate' can reuse the",
+                  "// exact same literal string; {{$randomInt}} re-evaluates on every",
+                  "// use, so it can't safely live inside the stored variable itself.",
+                  "pm.collectionVariables.set('gatherIdempotencyKey', 'gather_p44_node1_' + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Status is applied', function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.status).to.eql('applied');",
+                  "  pm.expect(body.newBalance).to.be.an('object');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Gather - Duplicate (Idempotent)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/gather",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "gather"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"idempotencyKey\": \"{{gatherIdempotencyKey}}\",\n    \"playerId\": \"{{playerId}}\",\n    \"nodeId\": \"{{nodeId}}\",\n    \"resourceType\": \"wood\",\n    \"amount\": 12\n  }"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Replays result instead of applying twice', function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.status).to.eql('already_applied');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Gather - Missing Fields (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/gather",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "gather"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"playerId\": \"{{playerId}}\"\n  }"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 400', function () { pm.response.to.have.status(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Spend - Sufficient Balance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/spend",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "spend"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"idempotencyKey\": \"{{spendIdempotencyKey}}\",\n    \"playerId\": \"{{playerId}}\",\n    \"reason\": \"barricade\",\n    \"costs\": [\n      {\n        \"resourceType\": \"wood\",\n        \"amount\": 5\n      }\n    ]\n  }"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Status is applied', function () {",
+                  "  pm.expect(pm.response.json().status).to.eql('applied');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Spend - Insufficient Balance (402)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/spend",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "spend"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"idempotencyKey\": \"spend_p44_insufficient_{{$randomInt}}\",\n    \"playerId\": \"{{playerId}}\",\n    \"reason\": \"barricade\",\n    \"costs\": [\n      {\n        \"resourceType\": \"wood\",\n        \"amount\": 999999\n      }\n    ]\n  }"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 402', function () { pm.response.to.have.status(402); });",
+                  "pm.test('Reports what is missing', function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.status).to.eql('rejected_insufficient');",
+                  "  pm.expect(body.missing).to.be.an('object');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refund",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/refund",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "refund"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"idempotencyKey\": \"{{refundIdempotencyKey}}\",\n    \"playerId\": \"{{playerId}}\",\n    \"reason\": \"craft_rollback\",\n    \"costs\": [\n      {\n        \"resourceType\": \"wood\",\n        \"amount\": 5\n      }\n    ]\n  }"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Status is refunded', function () {",
+                  "  pm.expect(pm.response.json().status).to.eql('refunded');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Node",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/nodes/{{nodeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "nodes",
+                "{{nodeId}}"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Response has quantityAvailable', function () {",
+                  "  pm.expect(pm.response.json().quantityAvailable).to.be.a('number');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Node - Not Found (404)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/nodes/does_not_exist",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "nodes",
+                "does_not_exist"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 404', function () { pm.response.to.have.status(404); });"
+                ]
+              }
+            }
+          ]
         }
       ]
     }
