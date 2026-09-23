@@ -12,12 +12,12 @@
       "type": "string"
     },
     {
-      "key": "roomId",
+      "key": "roomName",
       "value": "",
       "type": "string"
     },
     {
-      "key": "zoneId",
+      "key": "zoneName",
       "value": "",
       "type": "string"
     }
@@ -36,10 +36,10 @@
                   "pm.test(\"Status code is 201 Created\", function () {",
                   "    pm.response.to.have.status(201);",
                   "});",
-                  "pm.test(\"Response has generated roomId\", function () {",
+                  "pm.test(\"Response has generated roomName\", function () {",
                   "    const jsonData = pm.response.json();",
-                  "    pm.expect(jsonData).to.have.property(\"roomId\");",
-                  "    pm.collectionVariables.set(\"roomId\", jsonData.roomId);",
+                  "    pm.expect(jsonData).to.have.property(\"roomName\");",
+                  "    pm.collectionVariables.set(\"roomName\", jsonData.roomName);",
                   "});"
                 ],
                 "type": "text/javascript"
@@ -56,7 +56,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"fullRoomName\": \"Physics Laboratory A\",\n  \"type\": \"laboratory\",\n  \"resourceType\": \"metal scraps\",\n  \"zoneId\": \"zone-science-wing\",\n  \"connectsTo\": [\"hallway-101\", \"storage-room\"]\n}"
+              "raw": "{\n  \"roomName\": \"physicsLaboratoryA\",\n  \"fullRoomName\": \"Physics Laboratory A\",\n  \"type\": \"laboratory\",\n  \"resourceType\": \"metal scraps\",\n  \"zoneName\": \"mainCorridorZone\",\n  \"connectsTo\": [\"hallway-101\", \"storage-room\"]\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/rooms",
@@ -67,7 +67,7 @@
                 "rooms"
               ]
             },
-            "description": "Creates a new room. Saves roomId to collection variables."
+            "description": "Creates a new room. Saves roomName to collection variables."
           },
           "response": []
         },
@@ -100,7 +100,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"fullRoomName\": \"Secret Lounge\",\n  \"type\": \"bedroom\",\n  \"zoneId\": \"zone-science-wing\",\n  \"connectsTo\": []\n}"
+              "raw": "{\n  \"roomName\": \"secretLounge\",\n  \"fullRoomName\": \"Secret Lounge\",\n  \"type\": \"bedroom\",\n  \"zoneName\": \"mainCorridorZone\",\n  \"connectsTo\": []\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/rooms",
@@ -160,10 +160,10 @@
                   "pm.test(\"Status code is 200 OK\", function () {",
                   "    pm.response.to.have.status(200);",
                   "});",
-                  "pm.test(\"All filtered rooms belong to zoneId\", function () {",
+                  "pm.test(\"All filtered rooms belong to zoneName\", function () {",
                   "    const jsonData = pm.response.json();",
                   "    jsonData.forEach(room => {",
-                  "        pm.expect(room.zoneId).to.eql(\"zone-science-wing\");",
+                  "        pm.expect(room.zoneName).to.eql(\"mainCorridorZone\");",
                   "    });",
                   "});"
                 ],
@@ -175,7 +175,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/rooms?zoneId=zone-science-wing",
+              "raw": "{{baseUrl}}/rooms?zoneName=mainCorridorZone",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -184,12 +184,12 @@
               ],
               "query": [
                 {
-                  "key": "zoneId",
+                  "key": "zoneName",
                   "value": "zone-science-wing"
                 }
               ]
             },
-            "description": "Filters rooms by zoneId query parameter."
+            "description": "Filters rooms by zoneName query parameter."
           },
           "response": []
         },
@@ -203,9 +203,9 @@
                   "pm.test(\"Status code is 200 OK\", function () {",
                   "    pm.response.to.have.status(200);",
                   "});",
-                  "pm.test(\"Matches roomId\", function () {",
+                  "pm.test(\"Matches roomName\", function () {",
                   "    const jsonData = pm.response.json();",
-                  "    pm.expect(jsonData.roomId).to.eql(pm.collectionVariables.get(\"roomId\"));",
+                  "    pm.expect(jsonData.roomName).to.eql(pm.collectionVariables.get(\"roomName\"));",
                   "});"
                 ],
                 "type": "text/javascript"
@@ -216,16 +216,16 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/rooms/{{roomId}}",
+              "raw": "{{baseUrl}}/rooms/{{roomName}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "rooms",
-                "{{roomId}}"
+                "{{roomName}}"
               ]
             },
-            "description": "Retrieves the specific room using the saved roomId variable."
+            "description": "Retrieves the specific room using the saved roomName variable."
           },
           "response": []
         },
@@ -293,13 +293,13 @@
               "raw": "{\n  \"fullRoomName\": \"Renovated Physics Lab A\",\n  \"resourceType\": \"electronics\"\n}"
             },
             "url": {
-              "raw": "{{baseUrl}}/rooms/{{roomId}}",
+              "raw": "{{baseUrl}}/rooms/{{roomName}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "rooms",
-                "{{roomId}}"
+                "{{roomName}}"
               ]
             },
             "description": "Updates fields of an existing room."
@@ -329,13 +329,13 @@
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/rooms/{{roomId}}",
+              "raw": "{{baseUrl}}/rooms/{{roomName}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "rooms",
-                "{{roomId}}"
+                "{{roomName}}"
               ]
             },
             "description": "Deletes the room created in Step 1."
@@ -361,13 +361,13 @@
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/rooms/{{roomId}}",
+              "raw": "{{baseUrl}}/rooms/{{roomName}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "rooms",
-                "{{roomId}}"
+                "{{roomName}}"
               ]
             },
             "description": "Attempts deleting the room again, expecting 404."
@@ -389,10 +389,10 @@
                   "pm.test(\"Status code is 201 Created\", function () {",
                   "    pm.response.to.have.status(201);",
                   "});",
-                  "pm.test(\"Response has generated zoneId\", function () {",
+                  "pm.test(\"Response has generated zoneName\", function () {",
                   "    const jsonData = pm.response.json();",
-                  "    pm.expect(jsonData).to.have.property(\"zoneId\");",
-                  "    pm.collectionVariables.set(\"zoneId\", jsonData.zoneId);",
+                  "    pm.expect(jsonData).to.have.property(\"zoneName\");",
+                  "    pm.collectionVariables.set(\"zoneName\", jsonData.zoneName);",
                   "});"
                 ],
                 "type": "text/javascript"
@@ -420,7 +420,7 @@
                 "zones"
               ]
             },
-            "description": "Creates a new zone. Saves zoneId to collection variables."
+            "description": "Creates a new zone. Saves zoneName to collection variables."
           },
           "response": []
         },
@@ -469,9 +469,9 @@
                   "pm.test(\"Status code is 200 OK\", function () {",
                   "    pm.response.to.have.status(200);",
                   "});",
-                  "pm.test(\"Matches zoneId\", function () {",
+                  "pm.test(\"Matches zoneName\", function () {",
                   "    const jsonData = pm.response.json();",
-                  "    pm.expect(jsonData.zoneId).to.eql(pm.collectionVariables.get(\"zoneId\"));",
+                  "    pm.expect(jsonData.zoneName).to.eql(pm.collectionVariables.get(\"zoneName\"));",
                   "});"
                 ],
                 "type": "text/javascript"
@@ -482,13 +482,13 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/zones/{{zoneId}}",
+              "raw": "{{baseUrl}}/zones/{{zoneName}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "zones",
-                "{{zoneId}}"
+                "{{zoneName}}"
               ]
             },
             "description": "Retrieves a specific zone by ID."
@@ -559,13 +559,13 @@
               "raw": "{\n  \"unlocked\": false\n}"
             },
             "url": {
-              "raw": "{{baseUrl}}/zones/{{zoneId}}",
+              "raw": "{{baseUrl}}/zones/{{zoneName}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "zones",
-                "{{zoneId}}"
+                "{{zoneName}}"
               ]
             },
             "description": "Updates zone status."
@@ -595,13 +595,13 @@
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/zones/{{zoneId}}",
+              "raw": "{{baseUrl}}/zones/{{zoneName}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "zones",
-                "{{zoneId}}"
+                "{{zoneName}}"
               ]
             },
             "description": "Deletes the zone created in Step 1."
@@ -627,13 +627,13 @@
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/zones/{{zoneId}}",
+              "raw": "{{baseUrl}}/zones/{{zoneName}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "zones",
-                "{{zoneId}}"
+                "{{zoneName}}"
               ]
             },
             "description": "Attempts deleting the zone again, expecting 404."
@@ -654,7 +654,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"roomId\": \"mathematicsExamHall\",\n  \"zombieCategoryAllowed\": \"professor\",\n  \"tiedCourseCategory\": \"mathematics\"\n}"
+          "raw": "{\n  \"roomName\": \"mathematicsExamHall\",\n  \"zombieCategoryAllowed\": \"professor\",\n  \"tiedCourseCategory\": \"mathematics\"\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/spawnPoints",
@@ -680,7 +680,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"roomId\": \"library\",\n  \"zombieCategoryAllowed\": \"tourist\"\n}"
+          "raw": "{\n  \"roomName\": \"library\",\n  \"zombieCategoryAllowed\": \"tourist\"\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/spawnPoints",
@@ -754,14 +754,14 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/world/rooms/{{roomId}}/connections",
+          "raw": "{{baseUrl}}/world/rooms/{{roomName}}/connections",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "world",
             "rooms",
-            "{{roomId}}",
+            "{{roomName}}",
             "connections"
           ]
         }
@@ -774,14 +774,14 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/world/rooms/{{roomId}}/resourceNode",
+          "raw": "{{baseUrl}}/world/rooms/{{roomName}}/resourceNode",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "world",
             "rooms",
-            "{{roomId}}",
+            "{{roomName}}",
             "resourceNode"
           ]
         }
@@ -794,14 +794,14 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/world/zones/{{zoneId}}/status",
+          "raw": "{{baseUrl}}/world/zones/{{zoneName}}/status",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "world",
             "zones",
-            "{{zoneId}}",
+            "{{zoneName}}",
             "status"
           ]
         }
