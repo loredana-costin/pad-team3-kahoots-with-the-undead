@@ -80,6 +80,43 @@ services:
     networks:
       - kahoots-network
 
+  resource-db:
+    image: postgres:17-alpine
+    container_name: resource-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: resource_db
+    ports:
+      - "5437:5432"
+    volumes:
+      - resource_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d resource_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kahoots-network
+
+  # --- MongoDB Database ---
+  zombie-db:
+    image: mongo:8
+    container_name: zombie-db
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - zombie_mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kahoots-network
+
   base-db:
     image: postgres:16-alpine
     container_name: base-db
@@ -89,7 +126,7 @@ services:
       POSTGRES_PASSWORD: ${BASE_DB_PASSWORD:-postgres}
       POSTGRES_DB: base_db
     ports:
-      - "5435:5432"
+      - "5438:5432"
     volumes:
       - base_postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -109,7 +146,7 @@ services:
       POSTGRES_PASSWORD: ${CRAFTING_DB_PASSWORD:-postgres}
       POSTGRES_DB: crafting_db
     ports:
-      - "5436:5432"
+      - "5439:5432"
     volumes:
       - crafting_postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -133,6 +170,7 @@ services:
       DB_USER: postgres
       DB_PASSWORD: postgres
       DB_NAME: exam_db
+      DATABASE_URL: "postgresql://postgres:postgres@exam-db:5432/exam_db?schema=public"
     ports:
       - "3000:3000"
     depends_on:
@@ -142,7 +180,7 @@ services:
       - kahoots-network
 
   world-service:
-    image: mariaelenabotnari/world-service:1.0.0
+    image: mariaelenabotnari/world-service:1.1.0
     container_name: world-service
     restart: always
     environment:
@@ -153,6 +191,7 @@ services:
       DB_USER: postgres
       DB_PASSWORD: postgres
       DB_NAME: world_db
+      DATABASE_URL: "postgresql://postgres:postgres@world-db:5432/world_db?schema=public"
     ports:
       - "3001:3001"
     depends_on:
@@ -190,6 +229,40 @@ services:
       - "3003:8080"
     depends_on:
       game-db:
+        condition: service_healthy
+    networks:
+      - kahoots-network
+
+  resource-service:
+    image: costinloredana/resource-service:1.0.1
+    container_name: resource-service
+    restart: always
+    environment:
+      PORT: 4002
+      POSTGRES_HOST: resource-db
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: resource_db
+    ports:
+      - "4002:4002"
+    depends_on:
+      resource-db:
+        condition: service_healthy
+    networks:
+      - kahoots-network
+
+  zombie-service:
+    image: costinloredana/zombie-service:1.0.1
+    container_name: zombie-service
+    restart: always
+    environment:
+      PORT: 4001
+      MONGO_URI: "mongodb://zombie-db:27017/zombie_db"
+    ports:
+      - "4001:4001"
+    depends_on:
+      zombie-db:
         condition: service_healthy
     networks:
       - kahoots-network
@@ -253,6 +326,10 @@ volumes:
   exam_postgres_data:
     driver: local
   world_postgres_data:
+    driver: local
+  resource_postgres_data:
+    driver: local
+  zombie_mongo_data:
     driver: local
 
 networks:

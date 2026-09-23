@@ -252,13 +252,13 @@ Response
 
 ## **3. Exam Service**
 
-Responsible for the academic progression of players.
+Owns the definitions of all courses, questions, and the logic to grade them.
 
 ### **Owns**
-- Every exam offered in the game, across all fifteen university courses, including questions, answer options and passing threshold.
-- Every attempt a player makes, including submitted answers, grade and status.
-- The six achievements tied to completing course categories, including their unlock conditions and effects.
-- A player's progress per course and per category.
+- Exam definitions (questions, options, correct answers, threshold).
+- Exam attempts (in progress, abandoned, passed, failed).
+- Achievements and unlock conditions.
+- Progress (which exams are passed).
 
 ### **DockerHub Image**
 - **Repository:** [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service)
@@ -267,34 +267,27 @@ Responsible for the academic progression of players.
 
 ### **Exposed API Endpoints**
 
-**`POST /exams`** *(Consumed by development team for content seeding)*
+**`POST /exams`** *(Consumed by development team)*
 
-Creates a new exam definition, including its questions and correct answers.
+Creates a new exam definition.
 
 Payload
 ```json
-{
-  "courseCategory": "mathematics",
-  "examId": "discreteMathematicsExam",
-  "courseName": "Discrete Mathematics",
-  "questions": [
-    { "text": "Which of the following is a valid proposition?", "options": ["2 plus 2", "It is raining today", "Close the door", "Blue"], "correctOptionId": 1 }
-  ]
-}
+{ "courseCategory": "mathematics", "courseName": "Discrete Mathematics", "passingThreshold": 60, "questions": [ { "id": "q1", "text": "Which of the following is a valid proposition?", "options": ["2 plus 2", "It is raining today", "Close the door", "Blue"], "correctOptionId": 1 } ] }
 ```
 
 Response
 ```json
-{ "examId": "discreteMathematicsExam", "created": true }
+{ "examId": "discreteMathematicsExam", "courseCategory": "mathematics", "courseName": "Discrete Mathematics", "passingThreshold": 60, "questions": [ { "id": "q1", "text": "Which of the following is a valid proposition?", "options": ["2 plus 2", "It is raining today", "Close the door", "Blue"] } ] }
 ```
 
-**`GET /exams/course/{courseCategory}`** *(Consumed by development team, Gateway)*
+**`GET /exams?courseCategory={courseCategory}`** *(Consumed by development team, Gateway)*
 
-Lists the exams that exist for a given course category.
+Lists the exams, optionally filtered by a course category.
 
 Response
 ```json
-{ "courseCategory": "mathematics", "exams": [ { "examId": "discreteMathematicsExam", "courseName": "Discrete Mathematics" }, { "examId": "calculus2Exam", "courseName": "Calculus 2" } ] }
+[ { "examId": "discreteMathematicsExam", "courseCategory": "mathematics", "courseName": "Discrete Mathematics", "passingThreshold": 60, "questions": [...] } ]
 ```
 
 **`GET /exams/{examId}`** *(Consumed by Game Service, Gateway)*
@@ -303,7 +296,7 @@ Retrieves an exam's questions and options for a player, without exposing the cor
 
 Response
 ```json
-{ "examId": "discreteMathematicsExam", "courseCategory": "mathematics", "courseName": "Discrete Mathematics", "questions": [ { "id": "q1", "text": "Which of the following is a valid proposition?", "options": ["2 plus 2", "It is raining today", "Close the door", "Blue"] } ] }
+{ "examId": "discreteMathematicsExam", "courseCategory": "mathematics", "courseName": "Discrete Mathematics", "passingThreshold": 60, "questions": [ { "id": "q1", "text": "Which of the following is a valid proposition?", "options": ["2 plus 2", "It is raining today", "Close the door", "Blue"] } ] }
 ```
 
 **`PUT /exams/{examId}`** *(Consumed by development team)*
@@ -340,7 +333,7 @@ Payload
 
 Response
 ```json
-{ "attemptId": "attempt_456", "examId": "discreteMathematicsExam", "questions": [ { "id": "q1", "text": "Which of the following is a valid proposition?", "options": ["2 plus 2", "It is raining today", "Close the door", "Blue"] } ] }
+{ "attemptId": "attempt_456", "questions": [ { "id": "q1", "text": "Which of the following is a valid proposition?", "options": ["2 plus 2", "It is raining today", "Close the door", "Blue"] } ] }
 ```
 
 **`POST /exams/{attemptId}/submit`** *(Consumed by Game Service)*
@@ -349,12 +342,12 @@ Records submitted answers, grades the attempt, determines pass or fail, and eval
 
 Payload
 ```json
-{ "answers": [ { "questionId": "q1", "answer": 1 } ] }
+{ "playerId": "player_123", "examId": "discreteMathematicsExam", "answers": { "q1": 1 } }
 ```
 
 Response
 ```json
-{ "passed": true, "grade": 70, "correctCount": 7, "totalQuestions": 10, "achievementsUnlocked": ["achievementSurvivedMathematics"] }
+{ "passed": true, "score": 70 }
 ```
 
 **`POST /exams/{attemptId}/abandon`** *(Consumed by Game Service)*
@@ -363,48 +356,30 @@ Marks an attempt as abandoned, called when a player disconnects or leaves the en
 
 Payload
 ```json
-{ "reason": "disconnected" }
+{}
 ```
 
 Response
 ```json
-{ "abandoned": true }
+{ "message": "Exam abandoned successfully" }
 ```
 
-**`GET /exams/{attemptId}`** *(Consumed by Game Service, Gateway)*
+**`GET /exams/{examId}/retryEligibility?playerId={playerId}`** *(Consumed by Game Service)*
 
-Retrieves the current status and result of a specific attempt.
+Reports whether the player can retry the specified exam.
 
 Response
 ```json
-{ "attemptId": "attempt_456", "playerId": "player_123", "examId": "discreteMathematicsExam", "status": "passed", "grade": 70 }
-```
-
-**`GET /exams/{attemptId}/retryEligibility`** *(Consumed by Game Service)*
-
-Reports whether the player can retry the exam tied to this attempt.
-
-Response
-```json
-{ "canRetry": false, "availableAt": "2026-09-08T10:35:00Z" }
+{ "canRetry": false, "availableAt": "2026-09-08T10:35:00.000Z" }
 ```
 
 **`GET /players/{playerId}/progress`** *(Consumed by Gateway, Player Service, Crafting Service)*
 
-Reports the player's status for every course and every category.
+Reports the player's status for every exam.
 
 Response
 ```json
-{ "playerId": "player_123", "categories": [ { "courseCategory": "mathematics", "status": "in_progress", "exams": [ { "examId": "discreteMathematicsExam", "status": "passed" }, { "examId": "calculus2Exam", "status": "not_started" } ] } ] }
-```
-
-**`GET /players/{playerId}/attempts`** *(Consumed by Gateway)*
-
-Reports the full history of a player's exam attempts.
-
-Response
-```json
-{ "attempts": [ { "attemptId": "attempt_456", "examId": "discreteMathematicsExam", "courseCategory": "mathematics", "status": "passed", "grade": 70, "timestamp": "2026-09-08T10:30:00Z" } ] }
+{ "discreteMathematicsExam": "passed", "calculus2Exam": "not_started" }
 ```
 
 **`GET /players/{playerId}/achievements`** *(Consumed by Gateway, Player Service)*
@@ -413,41 +388,27 @@ Reports which achievements a player has unlocked and when.
 
 Response
 ```json
-{ "achievements": [ { "achievementId": "achievementSurvivedMathematics", "fullAchievementName": "Achievement, Survived Mathematics", "unlockedAt": "2026-09-08T10:30:00Z" } ] }
-```
-
-**`POST /achievements`** *(Consumed by development team)*
-
-Defines or updates an achievement's unlock condition and effect.
-
-Payload
-```json
-{ "achievementId": "achievementSurvivedMathematics", "fullAchievementName": "Achievement, Survived Mathematics", "description": "Awarded for passing all six Mathematics exams", "condition": "allExamsPassed:mathematics", "effect": "unlockZone:mathematicsWing" }
-```
-
-Response
-```json
-{ "achievementId": "achievementSurvivedMathematics", "created": true }
+[ { "achievementId": "achievementSurvivedMathematics", "fullAchievementName": "Achievement, Survived Mathematics", "unlockedAt": "2026-09-08T10:30:00.000Z" } ]
 ```
 
 ### **Message Queue Events**
 
-**PUBLISH `ExamPassed`** *(Consumed by Player Service)*
+**PUBLISH `ExamPassedEvent`** *(Consumed by Player Service)*
 ```json
 { "playerId": "player_123", "courseCategory": "mathematics", "examId": "discreteMathematicsExam", "attemptId": "attempt_456", "grade": 70, "xpAwarded": 100, "timestamp": "2026-09-08T10:30:00Z" }
 ```
 
-**PUBLISH `ExamFailed`** *(Consumed by Game Service)*
+**PUBLISH `ExamFailedEvent`** *(Consumed by Game Service)*
 ```json
 { "playerId": "player_123", "courseCategory": "mathematics", "examId": "discreteMathematicsExam", "attemptId": "attempt_457", "timestamp": "2026-09-08T10:40:00Z" }
 ```
 
-**PUBLISH `CourseCompleted`** *(Consumed by Player Service)*
+**PUBLISH `CourseCompletedEvent`** *(Consumed by Player Service)*
 ```json
 { "playerId": "player_123", "courseCategory": "mathematics", "timestamp": "2026-09-08T10:45:00Z" }
 ```
 
-**PUBLISH `AchievementUnlocked`** *(Consumed by World Service, Player Service, Crafting Service)*
+**PUBLISH `AchievementUnlockedEvent`** *(Consumed by World Service, Player Service, Crafting Service)*
 ```json
 { "playerId": "player_123", "achievementId": "achievementSurvivedMathematics", "fullAchievementName": "Achievement, Survived Mathematics", "xpAwarded": 500, "timestamp": "2026-09-08T10:45:00Z" }
 ```
@@ -466,18 +427,32 @@ Owns the persistent physical state of the university.
 
 ### **DockerHub Image**
 - **Repository:** [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service)
-- **Image Tag:** `mariaelenabotnari/world-service:1.0.0`
+- **Image Tag:** `mariaelenabotnari/world-service:1.1.0`
 - **Default Port:** `3001`
 
 ### **Exposed API Endpoints**
 
-**`GET /world/map`** *(Consumed by Game Service, Gateway, Crafting Service)*
+**`POST /world/zones`** *(Consumed by development team)*
+
+Creates a new zone.
+
+Payload
+```json
+{ "zoneId": "mathematicsWing", "name": "Mathematics Wing", "unlocked": false }
+```
+
+Response
+```json
+{ "zoneId": "mathematicsWing", "name": "Mathematics Wing", "unlocked": false, "unlockedAt": null }
+```
+
+**`GET /world/zones`** *(Consumed by Game Service, Gateway, Crafting Service)*
 
 Returns the full list of zones and their unlocked status.
 
 Response
 ```json
-{ "zones": [ { "zoneId": "zoneZero", "name": "Technical University of Moldova Main Campus", "unlocked": true }, { "zoneId": "mathematicsWing", "name": "Mathematics Wing", "unlocked": false } ] }
+[ { "zoneId": "zoneZero", "name": "Technical University of Moldova Main Campus", "unlocked": true }, { "zoneId": "mathematicsWing", "name": "Mathematics Wing", "unlocked": false } ]
 ```
 
 **`GET /world/zones/{zoneId}`** *(Consumed by Game Service, Gateway)*
@@ -489,6 +464,42 @@ Response
 { "zoneId": "mathematicsWing", "name": "Mathematics Wing", "unlocked": false, "rooms": ["physicsLaboratory", "mathematicsWingLibrary", "mathematicsWingCanteen"] }
 ```
 
+**`GET /world/zones/{zoneId}/status`** *(Consumed by Gateway, Game Service)*
+
+Reports whether a specific zone is currently unlocked and when it was unlocked.
+
+Response
+```json
+{ "unlocked": true, "unlockedAt": "2026-09-08T10:45:00.000Z" }
+```
+
+**`PUT /world/zones/{zoneId}`** *(Consumed by development team)*
+
+Updates a zone's properties.
+
+Response
+```json
+{ "zoneId": "mathematicsWing", "name": "Mathematics Wing Updated", "unlocked": true }
+```
+
+**`DELETE /world/zones/{zoneId}`** *(Consumed by development team)*
+
+Deletes a zone.
+
+Response
+```json
+{ "deleted": true }
+```
+
+**`POST /world/rooms`** *(Consumed by development team)*
+
+Creates a new room.
+
+Response
+```json
+{ "roomId": "mathematicsExamHall", "fullRoomName": "Mathematics Exam Hall", "type": "classroom", "zoneId": "zoneZero", "connectsTo": ["mainCorridor"] }
+```
+
 **`GET /world/rooms`** *(Consumed by Game Service)*
 
 Returns the list of rooms, optionally filtered by zone and unlocked status.
@@ -497,7 +508,7 @@ Query Parameters: `zoneId`, `unlockedOnly`
 
 Response
 ```json
-{ "rooms": [ { "roomId": "mathematicsExamHall", "fullRoomName": "Mathematics Exam Hall", "type": "classroom", "zoneId": "zoneZero", "connectsTo": ["mainCorridor"] } ] }
+[ { "roomId": "mathematicsExamHall", "fullRoomName": "Mathematics Exam Hall", "type": "classroom", "zoneId": "zoneZero", "connectsTo": ["mainCorridor"] } ]
 ```
 
 **`GET /world/rooms/{roomId}`** *(Consumed by Game Service, Base Service)*
@@ -509,13 +520,31 @@ Response
 { "roomId": "mathematicsExamHall", "fullRoomName": "Mathematics Exam Hall", "type": "classroom", "zoneId": "zoneZero", "connectsTo": ["mainCorridor"] }
 ```
 
+**`PUT /world/rooms/{roomId}`** *(Consumed by development team)*
+
+Updates a room.
+
+Response
+```json
+{ "roomId": "mathematicsExamHall", "fullRoomName": "Mathematics Exam Hall Updated", "type": "classroom", "zoneId": "zoneZero", "connectsTo": ["mainCorridor"] }
+```
+
+**`DELETE /world/rooms/{roomId}`** *(Consumed by development team)*
+
+Deletes a room.
+
+Response
+```json
+{ "deleted": true }
+```
+
 **`GET /world/rooms/{roomId}/connections`** *(Consumed by Game Service)*
 
 Returns the list of rooms directly reachable from a given room.
 
 Response
 ```json
-{ "roomId": "mathematicsExamHall", "connections": ["mainCorridor"] }
+["mainCorridor"]
 ```
 
 **`GET /world/rooms/{roomId}/resourceNode`** *(Consumed by Game Service, Resource Service)*
@@ -524,7 +553,7 @@ Returns the resource type a given room produces.
 
 Response
 ```json
-{ "roomId": "physicsLaboratory", "resourceType": "metal scraps" }
+{ "resourceType": "metal scraps" }
 ```
 
 **`GET /world/rooms/{roomId}/spawnPoints`** *(Consumed by Game Service)*
@@ -533,61 +562,106 @@ Returns the spawn points available in a room and the zombie category allowed at 
 
 Response
 ```json
-{ "roomId": "mathematicsExamHall", "spawnPoints": [ { "spawnPointId": "mathematicsExamHallSpawnOne", "coordinates": { "x": 4, "y": 2 }, "zombieCategoryAllowed": "professor", "tiedCourseCategory": "mathematics" } ] }
+[
+  {
+    "spawnPointId": "mathematicsExamHallSpawnOne",
+    "roomId": "mathematicsExamHall",
+    "zombieCategoryAllowed": "professor",
+    "tiedCourseCategory": "mathematics"
+  }
+]
 ```
 
-**`POST /world/zones/unlock`** *(Internal handler, triggered by the `AchievementUnlocked` event; also usable by development team for testing)*
+**`GET /world/spawnPoints`** *(Consumed by development team)*
 
-Unlocks a zone according to the mapping between an achievement and its matching zone. Checks the zone's unlocked flag first so the same zone is never unlocked twice.
+Lists all defined zombie spawn points across campus.
+
+Response
+```json
+[
+  {
+    "spawnPointId": "mathematicsExamHallSpawnOne",
+    "roomId": "mathematicsExamHall",
+    "zombieCategoryAllowed": "professor",
+    "tiedCourseCategory": "mathematics"
+  }
+]
+```
+
+**`POST /world/spawnPoints`** *(Consumed by development team)*
+
+Creates a new zombie spawn point tied to a specific room.
 
 Payload
 ```json
-{ "achievementId": "achievementSurvivedMathematics", "playerId": "player_123" }
+{
+  "roomId": "mathematicsExamHall",
+  "zombieCategoryAllowed": "professor",
+  "tiedCourseCategory": "mathematics"
+}
 ```
 
 Response
 ```json
-{ "zoneId": "mathematicsWing", "roomsAdded": ["physicsLaboratory", "mathematicsWingLibrary", "mathematicsWingCanteen"] }
+{
+  "spawnPointId": "spawn_123",
+  "roomId": "mathematicsExamHall",
+  "zombieCategoryAllowed": "professor",
+  "tiedCourseCategory": "mathematics"
+}
 ```
 
-**`GET /world/zones/{zoneId}/status`** *(Consumed by Gateway, Game Service)*
+**`GET /world/spawnPoints/{spawnPointId}`** *(Consumed by development team)*
 
-Reports whether a specific zone is currently unlocked and when it was unlocked.
+Retrieves details of a specific spawn point.
 
 Response
 ```json
-{ "unlocked": true, "unlockedAt": "2026-09-08T10:45:00Z" }
+{
+  "spawnPointId": "mathematicsExamHallSpawnOne",
+  "roomId": "mathematicsExamHall",
+  "zombieCategoryAllowed": "professor",
+  "tiedCourseCategory": "mathematics"
+}
 ```
 
-**`POST /world/roomTemplates`** *(Consumed by development team)*
+**`PUT /world/spawnPoints/{spawnPointId}`** *(Consumed by development team)*
 
-Defines a reusable room template, used when generating a wing zone.
-
-Payload
-```json
-{ "templateId": "standardWingTemplate", "rooms": [ { "type": "laboratory", "resourceType": "metal scraps" }, { "type": "library", "resourceType": "paper" }, { "type": "canteen", "resourceType": "food" } ] }
-```
-
-**`GET /world/roomTemplates`** *(Consumed by development team)*
-
-Lists the templates currently defined.
+Updates spawn point parameters (allowed category or tied course category).
 
 Response
 ```json
-{ "templates": ["standardWingTemplate", "extendedWingTemplate"] }
+{
+  "spawnPointId": "mathematicsExamHallSpawnOne",
+  "roomId": "mathematicsExamHall",
+  "zombieCategoryAllowed": "professor",
+  "tiedCourseCategory": "mathematics"
+}
+```
+
+**`DELETE /world/spawnPoints/{spawnPointId}`** *(Consumed by development team)*
+
+Removes a spawn point configuration.
+
+Response
+```json
+{
+  "deleted": true
+}
 ```
 
 ### **Message Queue Events**
 
-**SUBSCRIBE `AchievementUnlocked`** *(Published by Exam Service)*
+**SUBSCRIBE `AchievementUnlockedEvent`** *(Published by Exam Service)*
 ```json
 { "playerId": "player_123", "achievementId": "achievementSurvivedMathematics", "fullAchievementName": "Achievement, Survived Mathematics", "xpAwarded": 500, "timestamp": "2026-09-08T10:45:00Z" }
 ```
 
-**PUBLISH `ZoneUnlocked`** *(Consumed by Game Service, Base Service, Crafting Service)*
+**PUBLISH `ZoneUnlockedEvent`** *(Consumed by Game Service, Base Service, Crafting Service)*
 ```json
 { "zoneId": "mathematicsWing", "roomsAdded": ["physicsLaboratory", "mathematicsWingLibrary", "mathematicsWingCanteen"], "timestamp": "2026-09-08T10:45:00Z" }
 ```
+
 ---
 
 ## **5. Zombie Service**
@@ -1226,7 +1300,7 @@ The microservices are containerized and published on DockerHub:
 | Service | DockerHub Repository | Image Tag | Default Port | Description |
 |---|---|---|---|---|
 | **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:1.0.0` | `3000` | Academic progression, exams, and achievements |
-| **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:1.0.0` | `3001` | Physical campus layout, rooms, zones, and spawn points |
+| **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:1.1.0` | `3001` | Physical campus layout, rooms, zones, and spawn points |
 | **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:1.1.0` | `3002` | Player identity, progression, inventory, and trades |
 | **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:1.1.0` | `3003` | Game sessions, day/night cycle, and timed player actions |
 
@@ -1302,6 +1376,9 @@ curl -s http://localhost:3001/zones
 
 # Verify World Service Rooms
 curl -s http://localhost:3001/rooms
+
+# Verify World Service Spawn Points
+curl -s http://localhost:3001/spawnPoints
 ```
 
 #### 4. Stopping the Stack
