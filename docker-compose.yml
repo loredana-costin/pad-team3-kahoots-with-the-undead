@@ -253,7 +253,7 @@ services:
       - kahoots-network
 
   zombie-service:
-    image: costinloredana/zombie-service:1.0.1
+    image: costinloredana/zombie-service:1.1.0
     container_name: zombie-service
     restart: always
     environment:
