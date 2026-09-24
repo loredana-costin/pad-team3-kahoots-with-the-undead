@@ -44,6 +44,242 @@
   ],
   "item": [
     {
+      "name": "0. Setup",
+      "description": "Creates the five recipes of the communication contract, one per unlock condition type. The rest of the collection asserts against them. A recipe that already exists answers 409, so the collection runs against a freshly started service and against a seeded database alike.",
+      "item": [
+        {
+          "name": "Ensure Barricade Kit exists",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Recipe is available (created or already present)\", function () {",
+                  "    pm.expect([201, 409]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/recipes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "recipes"
+              ]
+            },
+            "description": "Creates `recipe_wood_metal`, or confirms it is already there.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"recipeId\": \"recipe_wood_metal\",\n  \"name\": \"Barricade Kit\",\n  \"ingredients\": [\n    {\n      \"resourceType\": \"wood\",\n      \"amount\": 3\n    },\n    {\n      \"resourceType\": \"metal\",\n      \"amount\": 1\n    }\n  ],\n  \"output\": \"barricade_kit\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Ensure Improvised Weapon exists",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Recipe is available (created or already present)\", function () {",
+                  "    pm.expect([201, 409]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/recipes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "recipes"
+              ]
+            },
+            "description": "Creates `recipe_paper_metal`, or confirms it is already there.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"recipeId\": \"recipe_paper_metal\",\n  \"name\": \"Improvised Weapon\",\n  \"ingredients\": [\n    {\n      \"resourceType\": \"paper\",\n      \"amount\": 2\n    },\n    {\n      \"resourceType\": \"metal\",\n      \"amount\": 2\n    }\n  ],\n  \"output\": \"improvised_weapon\",\n  \"unlockCondition\": {\n    \"type\": \"zoneUnlocked\",\n    \"zoneId\": \"mathematicsWing\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Ensure Energy Booster exists",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Recipe is available (created or already present)\", function () {",
+                  "    pm.expect([201, 409]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/recipes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "recipes"
+              ]
+            },
+            "description": "Creates `recipe_food_chemicals`, or confirms it is already there.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"recipeId\": \"recipe_food_chemicals\",\n  \"name\": \"Energy Booster\",\n  \"ingredients\": [\n    {\n      \"resourceType\": \"food\",\n      \"amount\": 4\n    },\n    {\n      \"resourceType\": \"chemicals\",\n      \"amount\": 1\n    }\n  ],\n  \"output\": \"energy_booster\",\n  \"unlockCondition\": {\n    \"type\": \"resourceDiscovered\",\n    \"resourceType\": \"chemicals\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Ensure Zombie Detector exists",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Recipe is available (created or already present)\", function () {",
+                  "    pm.expect([201, 409]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/recipes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "recipes"
+              ]
+            },
+            "description": "Creates `recipe_metal_electronics`, or confirms it is already there.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"recipeId\": \"recipe_metal_electronics\",\n  \"name\": \"Zombie Detector\",\n  \"ingredients\": [\n    {\n      \"resourceType\": \"metal\",\n      \"amount\": 3\n    },\n    {\n      \"resourceType\": \"electronics\",\n      \"amount\": 2\n    }\n  ],\n  \"output\": \"zombie_detector\",\n  \"unlockCondition\": {\n    \"type\": \"playerLevel\",\n    \"minLevel\": 5\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Ensure Exam Cheat Sheet exists",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Recipe is available (created or already present)\", function () {",
+                  "    pm.expect([201, 409]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/recipes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "recipes"
+              ]
+            },
+            "description": "Creates `recipe_paper_wood`, or confirms it is already there.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"recipeId\": \"recipe_paper_wood\",\n  \"name\": \"Exam Cheat Sheet\",\n  \"ingredients\": [\n    {\n      \"resourceType\": \"paper\",\n      \"amount\": 3\n    },\n    {\n      \"resourceType\": \"wood\",\n      \"amount\": 1\n    }\n  ],\n  \"output\": \"exam_cheat_sheet\",\n  \"unlockCondition\": {\n    \"type\": \"examPassed\",\n    \"examId\": \"discreteMathematicsExam\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "0. Health",
       "description": "",
       "item": [
