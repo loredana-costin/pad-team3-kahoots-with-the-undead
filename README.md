@@ -1449,9 +1449,11 @@ The microservices are containerized and published on DockerHub:
 | **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:1.0.0` | `3000` | Academic progression, exams, and achievements |
 | **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:1.1.0` | `3001` | Physical campus layout, rooms, zones, and spawn points |
 | **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:1.1.0` | `3002` | Player identity, progression, inventory, and trades |
-| **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:1.1.0` | `3003` | Game sessions, day/night cycle, and timed player actions |
+| **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:1.1.1` | `3003` | Game sessions, day/night cycle, and timed player actions |
 | **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:1.0.1` | `4001` | Zombie type definitions, spawned instances, and special actions |
 | **Resource Service** | [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service) | `costinloredana/resource-service:1.0.1` | `4002` | Resource types, player balances, nodes, and idempotent transactions |
+| **Base Service** | [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service) | `cristi150404/base-service:1.0.0` | `5003` | Player bases, barricades, facilities, and decorations |
+| **Crafting Service** | [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service) | `cristi150404/crafting-service:1.0.0` | `5004` | Recipes, unlock conditions, and crafting sagas |
 
 ---
 
@@ -1480,7 +1482,7 @@ To run these services locally via Docker Compose, ensure the host machine meets 
    - `5438` — Base PostgreSQL Database (`base-db`)
    - `5439` — Crafting PostgreSQL Database (`crafting-db`)
 3. **Resource Allocations**:
-   - At least 3 GB of RAM available for Docker (twelve containers, including one MongoDB instance)
+   - At least 3 GB of RAM available for Docker (sixteen containers, including one MongoDB instance)
    - 3 GB free disk space for Docker images and the PostgreSQL/MongoDB data volumes
 4. **Environment Configuration**:
    - Self-contained in `docker-compose.yml`; no manual `.env` file setup is required to start up the stack.
@@ -1518,11 +1520,11 @@ If a container exits right away, the database probably wasn't ready yet. Wait a 
 ### Step-by-Step Execution Guide
 
 #### 1. Start the Microservices & Databases
-From the repository root, start all twelve containers in detached mode:
+From the repository root, start all sixteen containers in detached mode:
 ```bash
 docker compose up -d
 ```
-Docker Compose will automatically pull the images from DockerHub, initialize the database containers (`exam-db` on 5433, `world-db` on 5434, `player-db` on 5435, `game-db` on 5436, `resource-db` on 5437, `zombie-db` on 27017), perform healthchecks, and launch `exam-service`, `world-service`, `player-service`, `game-service`, `zombie-service` and `resource-service`.
+Docker Compose will automatically pull the images from DockerHub, initialize the database containers (`exam-db` on 5433, `world-db` on 5434, `player-db` on 5435, `game-db` on 5436, `resource-db` on 5437, `zombie-db` on 27017, `base-db` on 5438, `crafting-db` on 5439), perform healthchecks, and launch `exam-service`, `world-service`, `player-service`, `game-service`, `zombie-service`, `resource-service`, `base-service` and `crafting-service`.
 
 To check container health and status:
 ```bash
