@@ -1,0 +1,418 @@
+{
+  "info": {
+    "_postman_id": "a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d",
+    "name": "Exam Service",
+    "description": "Postman Collection for testing Exam Service CRUD endpoints, queries, and validation rules.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Create Exam - Success (201)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 201 Created\", function () {",
+              "    pm.response.to.have.status(201);",
+              "});",
+              "pm.test(\"Response has generated examId\", function () {",
+              "    const jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property(\"id\");",
+              "    pm.collectionVariables.set(\"id\", jsonData.id);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"courseCategory\": \"mathematics\",\n  \"courseName\": \"Software Architecture\",\n  \"passingThreshold\": 60,\n  \"questions\": [\n    {\n      \"id\": \"q1\",\n      \"text\": \"Which of the following is a valid proposition?\",\n      \"options\": [\n        \"2 plus 2\",\n        \"It is raining today\",\n        \"Close the door\",\n        \"Blue\"\n      ],\n      \"correctOptionId\": 1\n    },\n    {\n      \"id\": \"q2\",\n      \"text\": \"What is the cardinality of the power set of a set with 3 elements?\",\n      \"options\": [\n        \"3\",\n        \"6\",\n        \"8\",\n        \"9\"\n      ],\n      \"correctOptionId\": 2\n    }\n  ]\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/exams",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "exams"
+          ]
+        },
+        "description": "Creates a new exam. Automatically saves the returned examId to collection variables."
+      },
+      "response": []
+    },
+    {
+      "name": "2. Create Exam - Validation Failure (400)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 400 Bad Request\", function () {",
+              "    pm.response.to.have.status(400);",
+              "});",
+              "pm.test(\"Response returns validation errors\", function () {",
+              "    const jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property(\"errors\");",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"courseCategory\": \"mathematics\",\n  \"passingThreshold\": 150\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/exams",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "exams"
+          ]
+        },
+        "description": "Tests validation: missing required fields (courseName, questions) and passingThreshold > 100."
+      },
+      "response": []
+    },
+    {
+      "name": "3. Get All Exams (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "pm.test(\"Response is an array\", function () {",
+              "    const jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.be.an(\"array\");",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/exams",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "exams"
+          ]
+        },
+        "description": "Retrieves the list of all created exams."
+      },
+      "response": []
+    },
+    {
+      "name": "4. Filter Exams by Course Category (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "pm.test(\"Filtered results match category\", function () {",
+              "    const jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.be.an(\"array\");",
+              "    jsonData.forEach(exam => {",
+              "        pm.expect(exam.courseCategory).to.eql(\"mathematics\");",
+              "    });",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/exams?courseCategory=mathematics",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "exams"
+          ],
+          "query": [
+            {
+              "key": "courseCategory",
+              "value": "mathematics"
+            }
+          ]
+        },
+        "description": "Filters exams by courseCategory query parameter."
+      },
+      "response": []
+    },
+    {
+      "name": "5. Get Exam By ID - Success (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "pm.test(\"Returned exam matches examId\", function () {",
+              "    const jsonData = pm.response.json();",
+              "    pm.expect(String(jsonData.id)).to.eql(String(pm.collectionVariables.get(\"id\")));",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/exams/{{id}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "exams",
+            "{{id}}"
+          ]
+        },
+        "description": "Fetches a specific exam using the saved examId."
+      },
+      "response": []
+    },
+    {
+      "name": "6. Get Exam By ID - Not Found (404)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 404 Not Found\", function () {",
+              "    pm.response.to.have.status(404);",
+              "});",
+              "pm.test(\"Returns not found error message\", function () {",
+              "    const jsonData = pm.response.json();",
+              "    pm.expect(jsonData.message).to.eql(\"Exam not found\");",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/exams/99999",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "exams",
+            "99999"
+          ]
+        },
+        "description": "Checks 404 behavior for a non-existent exam ID."
+      },
+      "response": []
+    },
+    {
+      "name": "7. Update Exam - Success (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "pm.test(\"Updated fields are reflected\", function () {",
+              "    const jsonData = pm.response.json();",
+              "    pm.expect(jsonData.passingThreshold).to.eql(75);",
+              "    pm.expect(jsonData.courseName).to.eql(\"Advanced Software Architecture\");",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"passingThreshold\": 75,\n  \"courseName\": \"Advanced Software Architecture\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/exams/{{id}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "exams",
+            "{{id}}"
+          ]
+        },
+        "description": "Updates fields of an existing exam."
+      },
+      "response": []
+    },
+    {
+      "name": "8. Update Exam - Not Found (404)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 404 Not Found\", function () {",
+              "    pm.response.to.have.status(404);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"passingThreshold\": 80\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/exams/99999",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "exams",
+            "99999"
+          ]
+        },
+        "description": "Attempts to update a non-existent exam ID, verifying 404 response."
+      },
+      "response": []
+    },
+    {
+      "name": "9. Delete Exam - Success (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "pm.test(\"Returns deleted true\", function () {",
+              "    const jsonData = pm.response.json();",
+              "    pm.expect(jsonData.deleted).to.be.true;",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/exams/{{id}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "exams",
+            "{{id}}"
+          ]
+        },
+        "description": "Deletes the exam created in Step 1."
+      },
+      "response": []
+    },
+    {
+      "name": "10. Delete Exam - Not Found (404)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 404 Not Found\", function () {",
+              "    pm.response.to.have.status(404);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/exams/{{id}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "exams",
+            "{{id}}"
+          ]
+        },
+        "description": "Tries to delete the already deleted exam, confirming 404."
+      },
+      "response": []
+    }
+  ]
+}
+

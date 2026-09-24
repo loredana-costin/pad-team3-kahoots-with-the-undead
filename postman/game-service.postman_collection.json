@@ -1,0 +1,1241 @@
+{
+  "info": {
+    "_postman_id": "b41e7d05-9c62-4f38-a7d1-6e2b5c930f44",
+    "name": "Game Service",
+    "description": "Postman Collection for testing Game Service: sessions and lobbies, the day/night cycle, and timed player actions.\n\nRun the collection in order - requests share state through collection variables. Every run creates its own sessions, so it can be run repeatedly without resetting the database.\n\nStart the service first (see game-service/README.md). Default baseUrl is http://localhost:5299.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3003",
+      "type": "string"
+    },
+    {
+      "key": "sessionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "lobbyId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "actionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "secondActionId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "01. Health Check (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Service reports healthy\", () => pm.expect(pm.response.json().status).to.eql(\"healthy\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "health"
+          ]
+        }
+      }
+    },
+    {
+      "name": "02. Create Session (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Opens as a lobby on day 1 with no players\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.session_id).to.match(/^session_/);",
+              "    pm.expect(body.status).to.eql(\"lobby\");",
+              "    pm.expect(body.cycle).to.eql(\"day\");",
+              "    pm.expect(body.cycleNumber).to.eql(1);",
+              "    pm.expect(body.players).to.be.an(\"array\").that.is.empty;",
+              "    pm.collectionVariables.set(\"sessionId\", body.session_id);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"FAF Block 1\",\n  \"zoneId\": \"zone_12\",\n  \"maxPlayers\": 4\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "03. Create Session Invalid Payload (400)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 400 Bad Request\", () => pm.response.to.have.status(400));",
+              "pm.test(\"Name and maxPlayers are both rejected\", () => {",
+              "    const errors = pm.response.json().errors;",
+              "    pm.expect(errors).to.have.property(\"Name\");",
+              "    pm.expect(errors).to.have.property(\"MaxPlayers\");",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"x\",\n  \"zoneId\": \"zone_12\",\n  \"maxPlayers\": 99\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "04. List Sessions (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Contains the session just created\", () => {",
+              "    const ids = pm.response.json().map(s => s.session_id);",
+              "    pm.expect(ids).to.include(pm.collectionVariables.get(\"sessionId\"));",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "05. Get Session (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Returns the session requested\", () => pm.expect(pm.response.json().session_id).to.eql(pm.collectionVariables.get(\"sessionId\")));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "06. Join Player p_44 (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Roster holds one player\", () => pm.expect(pm.response.json().players).to.have.lengthOf(1));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"p_44\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/players",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "players"
+          ]
+        }
+      }
+    },
+    {
+      "name": "07. Join Player p_77 (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Roster holds both players\", () => pm.expect(pm.response.json().players).to.have.lengthOf(2));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"p_77\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/players",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "players"
+          ]
+        }
+      }
+    },
+    {
+      "name": "08. Join Same Player Twice (409)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 409 Conflict\", () => pm.response.to.have.status(409));",
+              "pm.test(\"Rejected with player_already_joined\", () => pm.expect(pm.response.json().reason).to.eql(\"player_already_joined\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"p_44\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/players",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "players"
+          ]
+        }
+      }
+    },
+    {
+      "name": "09. Start Action Before Session Starts (409)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 409 Conflict\", () => pm.response.to.have.status(409));",
+              "pm.test(\"Rejected with session_not_active\", () => pm.expect(pm.response.json().reason).to.eql(\"session_not_active\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"p_44\",\n  \"actionType\": \"scavenge\",\n  \"targetNodeId\": \"node_7\",\n  \"durationSeconds\": 300\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/actions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "actions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "10. Start Session (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Session becomes active with a start time\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.status).to.eql(\"active\");",
+              "    pm.expect(body.startedAt).to.not.be.null;",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": ""
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/start",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "start"
+          ]
+        }
+      }
+    },
+    {
+      "name": "11. Join After Session Started (409)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 409 Conflict\", () => pm.response.to.have.status(409));",
+              "pm.test(\"Rejected with session_not_in_lobby\", () => pm.expect(pm.response.json().reason).to.eql(\"session_not_in_lobby\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"p_99\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/players",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "players"
+          ]
+        }
+      }
+    },
+    {
+      "name": "12. Start Scavenge Action (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Returns the contract shape\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.actionId).to.match(/^act_/);",
+              "    pm.expect(body).to.have.property(\"idempotencyKey\");",
+              "    pm.expect(body.status).to.eql(\"in_progress\");",
+              "    pm.collectionVariables.set(\"actionId\", body.actionId);",
+              "});",
+              "pm.test(\"Idempotency key carries type, player and node\", () => {",
+              "    pm.expect(pm.response.json().idempotencyKey).to.match(/^scavenge_p_44_node_7_/);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"p_44\",\n  \"actionType\": \"scavenge\",\n  \"targetNodeId\": \"node_7\",\n  \"durationSeconds\": 300\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/actions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "actions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "13. Second Action Same Player (409)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 409 Conflict\", () => pm.response.to.have.status(409));",
+              "pm.test(\"Rejected with action_already_in_progress\", () => pm.expect(pm.response.json().reason).to.eql(\"action_already_in_progress\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"p_44\",\n  \"actionType\": \"barricade\",\n  \"targetNodeId\": \"room_2\",\n  \"durationSeconds\": 60\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/actions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "actions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "14. Action For Player Not In Session (404)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 404 Not Found\", () => pm.response.to.have.status(404));",
+              "pm.test(\"Rejected with player_not_in_session\", () => pm.expect(pm.response.json().reason).to.eql(\"player_not_in_session\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"p_999\",\n  \"actionType\": \"clear_room\",\n  \"targetNodeId\": \"room_3\",\n  \"durationSeconds\": 120\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/actions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "actions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "15. Start Chop Benches For p_77 (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Multi-word action type stays snake_case in the key\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.idempotencyKey).to.match(/^chop_benches_p_77_node_1_/);",
+              "    pm.collectionVariables.set(\"secondActionId\", body.actionId);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"p_77\",\n  \"actionType\": \"chop_benches\",\n  \"targetNodeId\": \"node_1\",\n  \"durationSeconds\": 600\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/actions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "actions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "16. Unknown Action Type (400)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 400 Bad Request\", () => pm.response.to.have.status(400));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"p_77\",\n  \"actionType\": \"dance\",\n  \"targetNodeId\": \"node_1\",\n  \"durationSeconds\": 60\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/actions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "actions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "17. Duration Beyond 600 Seconds (400)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 400 Bad Request\", () => pm.response.to.have.status(400));",
+              "pm.test(\"Duration is out of range\", () => pm.expect(JSON.stringify(pm.response.json())).to.include(\"durationSeconds_out_of_range\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"p_77\",\n  \"actionType\": \"scavenge\",\n  \"targetNodeId\": \"node_1\",\n  \"durationSeconds\": 9999\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/actions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "actions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "18. Get Action Progress (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Action is running with a progress percent\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.status).to.eql(\"in_progress\");",
+              "    pm.expect(body.actionType).to.eql(\"scavenge\");",
+              "    pm.expect(body.percent).to.be.at.least(0).and.at.most(100);",
+              "});",
+              "pm.test(\"completesAt is durationSeconds after startedAt\", () => {",
+              "    const body = pm.response.json();",
+              "    const seconds = (new Date(body.completesAt) - new Date(body.startedAt)) / 1000;",
+              "    pm.expect(Math.round(seconds)).to.eql(body.durationSeconds);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/actions/{{actionId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "actions",
+            "{{actionId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "19. List Session Actions (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Both actions are listed\", () => {",
+              "    const types = pm.response.json().map(a => a.actionType);",
+              "    pm.expect(types).to.include(\"scavenge\");",
+              "    pm.expect(types).to.include(\"chop_benches\");",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/actions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "actions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "20. Complete Action (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Action is completed at 100 percent\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.status).to.eql(\"completed\");",
+              "    pm.expect(body.percent).to.eql(100);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": ""
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/actions/{{actionId}}/complete",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "actions",
+            "{{actionId}}",
+            "complete"
+          ]
+        }
+      }
+    },
+    {
+      "name": "21. Complete Same Action Again (409)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 409 Conflict\", () => pm.response.to.have.status(409));",
+              "pm.test(\"Rejected with action_not_in_progress\", () => pm.expect(pm.response.json().reason).to.eql(\"action_not_in_progress\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": ""
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/actions/{{actionId}}/complete",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "actions",
+            "{{actionId}}",
+            "complete"
+          ]
+        }
+      }
+    },
+    {
+      "name": "22. Cancel The Other Action (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Action is cancelled\", () => pm.expect(pm.response.json().status).to.eql(\"cancelled\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": ""
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/actions/{{secondActionId}}/cancel",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "actions",
+            "{{secondActionId}}",
+            "cancel"
+          ]
+        }
+      }
+    },
+    {
+      "name": "23. Advance Cycle To Night (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Day becomes night, cycle number unchanged\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.cycle).to.eql(\"night\");",
+              "    pm.expect(body.cycleNumber).to.eql(1);",
+              "    pm.expect(body.zone).to.eql(\"zone_12\");",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": ""
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/cycle",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "cycle"
+          ]
+        }
+      }
+    },
+    {
+      "name": "24. Advance Cycle To Next Day (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Night becomes day and the cycle number advances\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.cycle).to.eql(\"day\");",
+              "    pm.expect(body.cycleNumber).to.eql(2);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": ""
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/cycle",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "cycle"
+          ]
+        }
+      }
+    },
+    {
+      "name": "25. Create A Second Lobby (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Second lobby opened\", () => pm.collectionVariables.set(\"lobbyId\", pm.response.json().session_id));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"FAF Block 2\",\n  \"zoneId\": \"zone_13\",\n  \"maxPlayers\": 2\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "26. Join The Second Lobby (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Player is on the roster\", () => pm.expect(pm.response.json().players).to.have.lengthOf(1));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"p_55\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{lobbyId}}/players",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{lobbyId}}",
+            "players"
+          ]
+        }
+      }
+    },
+    {
+      "name": "27. Leave The Lobby (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Roster is empty again\", () => pm.expect(pm.response.json().players).to.be.an(\"array\").that.is.empty);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{lobbyId}}/players/p_55",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{lobbyId}}",
+            "players",
+            "p_55"
+          ]
+        }
+      }
+    },
+    {
+      "name": "28. Leave Again When Not A Member (404)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 404 Not Found\", () => pm.response.to.have.status(404));",
+              "pm.test(\"Rejected with player_not_in_session\", () => pm.expect(pm.response.json().reason).to.eql(\"player_not_in_session\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{lobbyId}}/players/p_55",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{lobbyId}}",
+            "players",
+            "p_55"
+          ]
+        }
+      }
+    },
+    {
+      "name": "29. Cycle On A Lobby That Has Not Started (409)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 409 Conflict\", () => pm.response.to.have.status(409));",
+              "pm.test(\"Rejected with session_not_active\", () => pm.expect(pm.response.json().reason).to.eql(\"session_not_active\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": ""
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{lobbyId}}/cycle",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{lobbyId}}",
+            "cycle"
+          ]
+        }
+      }
+    },
+    {
+      "name": "30. Unknown Session (404)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 404 Not Found\", () => pm.response.to.have.status(404));",
+              "pm.test(\"Rejected with session_not_found\", () => pm.expect(pm.response.json().reason).to.eql(\"session_not_found\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/session_doesnotexist",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "session_doesnotexist"
+          ]
+        }
+      }
+    },
+    {
+      "name": "31. Unknown Action (404)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 404 Not Found\", () => pm.response.to.have.status(404));",
+              "pm.test(\"Rejected with action_not_found\", () => pm.expect(pm.response.json().reason).to.eql(\"action_not_found\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/actions/act_doesnotexist",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "actions",
+            "act_doesnotexist"
+          ]
+        }
+      }
+    }
+  ]
+}

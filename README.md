@@ -5,11 +5,11 @@ This document outlines the communication contracts for the microservices within 
 ---
 ## Overview
 
-The platform simulates a campus survival scenario where players gather resources, build up their base, fight off zombies, and pass exams to progress. Each microservice encapsulates a specific domain — player identity, academics, zombies, resources, base management, and crafting. The microservices were  to ensure modularity, independence, and maintainability.
+The platform simulates a campus survival scenario where players gather resources, build up their base, fight off zombies, and pass exams to progress. Each microservice encapsulates a specific domain — player identity, academics, zombies, resources, base management, and crafting. The microservices were designed to ensure modularity, independence, and maintainability.
 
 Microservices are implemented using two technologies:
 
-* **Node.js/TypeScript:**  Exam Service, World Service, Zombie Service, Resource Service
+* **Node.js/TypeScript:** Exam Service, World Service, Zombie Service, Resource Service
 * **C#/.NET (ASP.NET Core):** Player Service, Game Service, Base Service, Crafting Service
 
 ---
@@ -27,15 +27,17 @@ Microservices are implemented using two technologies:
 
 Every service owns a **database** — no service reads or writes another service's tables directly. All cross-service data access happens through the network, using two patterns:
 
-- **Synchronous REST** for data an actor needs immediately to proceed (e.g. Game Service needs zombie stats before it can spawn an encounter). 
+- **Synchronous REST** for data an actor needs immediately to proceed (e.g. Game Service needs zombie stats before it can spawn an encounter).
 - **Asynchronous events** (RabbitMQ) for state changes that other services should eventually react to, but that shouldn't stop the initial request (e.g. World Service unlocking a wing doesn't need to block exam grading).
 
 Two rules apply across every state-changing endpoint that moves resources, items, or currency-like values:
 
-- **Idempotency keys.** Any endpoint that deducts something (`POST /api/gather`, `POST /api/spend`, `POST /craft`, trade endpoints) requires an `idempotencyKey`. The receiving service persists a transaction record keyed on it; a repeated call with the same key returns the original result instead of re-applying the effect. This is what makes reconnects and duplicate completion events safe.
-- **Sagas for multi-service writes.** Some actions span two databases with no shared transaction (e.g. crafting deducts resources in Resource Service's database *and* adds an item in Player Service's database). These are implemented as a saga: if the second step fails after the first succeeded, the initiating service (Crafting Service) issues a compensating call to undo the first step, rather than leaving the two databases inconsistent.
+- **Idempotency keys.** Any endpoint that deducts something (`POST /api/gather`, `POST /api/spend`, `POST /api/refund`, `POST /api/craft`, trade endpoints) requires an `idempotencyKey`. The receiving service persists a transaction record keyed on it; a repeated call with the same key returns the original result instead of re-applying the effect. This is what makes reconnects and duplicate completion events safe.
+- **Sagas for multi-service writes.** Some actions span two databases with no shared transaction (e.g. crafting deducts resources in Resource Service's database *and* adds an item in Player Service's database). These are implemented as a saga: if the second step fails after the first succeeded, the initiating service (Crafting Service, Base Service) issues a compensating call to undo the first step, rather than leaving the two databases inconsistent.
 
 No service is ever a passive shared datastore for another — every read of another domain's data goes through that domain's own API, never a shared schema or cross-service SQL join.
+
+The full communication contract — every endpoint, its payload, and its response — is documented per service below in each service's "Exposed/Consumed API Endpoints" and "Message Queue Events" sections.
 
 ---
 # Technologies & Communication Patterns
@@ -43,24 +45,24 @@ No service is ever a passive shared datastore for another — every read of anot
 
 | Team | Services | Language & Framework | Database | Communication Patterns | Motivation & Trade-offs |
 |---|---|---|---|---|---|
-| Ceaetchii Andrei | Player Service, Game Service | C# / ASP.NET Core | Player: PostgreSQL; Game: Redis | REST/HTTP + WebSockets + RabbitMQ Events | C# provides strong typing and asynchronous programming. PostgreSQL ensures data integrity and transactions for the Player Service, while Redis is suitable for temporary Game Service state. REST is used for request/response communication, WebSockets for real-time updates, and RabbitMQ for asynchronous cross-service events.|
-| Botnari Maria-Elena | Exam Service, World Service | TypeScript (Express) | PostgreSQL | REST + RabbitMQ events | Both services store structured, relational data (exams and attempts for one, rooms and connections for the other), so one language and one database keeps things simple and easy to maintain across both. |
-| Costin Loredana | Zombie Service, Resource Service | Node.js/TypeScript (Express) | Zombie: MongoDB; Resource: PostgreSQL | Zombie: REST; Resource: REST, idempotency-key-gated | Node's non-blocking I/O fits both I/O-bound services, which wait on DB calls. MongoDB's flexible schema enables rapid Zombie Service iteration without migrations as ability types expand. The correctness-critical Resource Service uses TypeScript and DB transactions to enforce atomic, idempotent balance updates, so duplicate completion events never double-award resources.|
-| Bulat Cristian | Base Service, Crafting Service | C#/.NET (ASP.NET Core) | PostgreSQL |  REST for Base and Crafting Services; RabbitMQ publisher and consumer for both | Both services perform "spend and apply" operations that must not partially succeed. C#'s explicit exception handling and EF Core transactions make atomic, saga-style operations across service calls easier to reason about than a dynamically-typed alternative. Trade-off: more boilerplate than Node for simple CRUD, accepted for the correctness guarantee. |
+| Ceaetchii Andrei | Player Service, Game Service | C# / ASP.NET Core | PostgreSQL (both services) | REST/HTTP + WebSockets + RabbitMQ Events | C# provides strong typing and asynchronous programming. PostgreSQL ensures data integrity and transactions for player identity, inventory and trades. Game Service uses it as well so both services share one architecture: the same generic repository, migration runner and base entity. Its state is short-lived but still relational (sessions, rosters, timed actions), and one DBMS keeps deployment and the shared compose file simpler. REST is used for request/response communication, WebSockets for real-time updates, and RabbitMQ for asynchronous cross-service events. Trade-off: Redis would fit ephemeral session state better and was the original choice, but running a single database across both services is simpler to operate at this scale. |
+| Botnari Maria-Elena | Exam Service, World Service | Node.js/TypeScript (Express) | PostgreSQL | REST + RabbitMQ events | Both services store structured, relational data (exams and attempts for one, rooms and connections for the other), so one language and one database keeps things simple and easy to maintain across both. Trade-off: without EF Core's built-in migration tooling, schema changes to the room graph require more manual discipline to keep consistent. |
+| Costin Loredana | Zombie Service, Resource Service | Node.js/TypeScript (Express) | Zombie: MongoDB; Resource: PostgreSQL | Zombie: REST; Resource: REST, idempotency-key-gated | Node's non-blocking I/O fits both I/O-bound services, which wait on DB calls. MongoDB's flexible schema enables rapid Zombie Service iteration without migrations as ability types expand. The correctness-critical Resource Service uses TypeScript and DB transactions to enforce atomic, idempotent balance updates, so duplicate completion events never double-award resources. Trade-off: Node is weaker at CPU-heavy work, but neither service does any, so this cost doesn't apply here. |
+| Bulat Cristian | Base Service, Crafting Service | C#/.NET (ASP.NET Core) | PostgreSQL | REST for Base and Crafting Services; RabbitMQ publisher and consumer for both | Both services perform "spend and apply" operations that must not partially succeed. C#'s explicit exception handling and EF Core transactions make atomic, saga-style operations across service calls easier to reason about than a dynamically-typed alternative. Trade-off: more boilerplate than Node for simple CRUD, accepted for the correctness guarantee. |
 
 ---
 # Architectural Diagram of Microservices Operation
 
-![architecture-diagram](architectural-diagram.jpg)
+![architecture-diagram](architectural-diagram.png)
 
-The diagram illustrates the microservices architecture for the **In Kahoots with the Undead** system. Game Service acts as the central service handling the others, making synchronous calls to Player, Exam, World, Zombie, Resource, and Base Service to run a gameplay cycle. Resource Service and Zombie Service never call outward to other microservices. Exam Service and World Service are loosely coupled via an asynchronous `AchievementUnlocked` event, so grading a player's exam doesn't block on procedural map generation. Crafting Service coordinates a saga across Resource Service and Player Service to atomically consume ingredients and deliver crafted items.
+The diagram illustrates the microservices architecture for the **In Kahoots with the Undead** system. Game Service acts as the central service handling the others, making synchronous calls to Player, Exam, World, Zombie, Resource, and Base Service to run a gameplay cycle. Resource Service and Zombie Service never call outward to other microservices. Exam Service and World Service are loosely coupled via asynchronous events — `AchievementUnlocked` (consumed by World Service, Player Service, and Crafting Service) and `ZoneUnlocked` (consumed by Game Service, Base Service, and Crafting Service) — so grading a player's exam doesn't block on procedural map generation. Base Service and Crafting Service each additionally read from and coordinate sagas across several other services to validate and apply their own effects — see the dependency diagram below for the full picture. Crafting Service specifically coordinates a saga across Resource Service and Player Service to atomically consume ingredients and deliver crafted items, and reads from Player, Exam, and World Service to evaluate recipe unlock conditions.
 
 ---
 ## **1. Player Service**
 
 Handles global player identity, progression, and inventory.
 
-### **Responsibilities**
+### **Owns**
 - Player accounts: registration, authentication, profile data.
 - Friends and online presence.
 - XP totals, levels, and progression.
@@ -98,7 +100,7 @@ Response
 { "jwt": "<jwt_token>", "player_id": "p_44" }
 ```
 
-**`GET /api/players/{player_id}`** *(Consumed by Gateway, Game Service)*
+**`GET /api/players/{player_id}`** *(Consumed by Gateway, Game Service, Crafting Service)*
 
 Retrieves a player's public profile.
 
@@ -132,9 +134,9 @@ Response
 { "items": [ { "itemId": "coffee", "quantity": 3 }, { "itemId": "cosmetic_cap", "quantity": 1 } ] }
 ```
 
-**`POST /api/players/{player_id}/inventory/items`** *(Consumed by Crafting Service)*
+**`POST /api/players/{player_id}/inventory/items`** *(Consumed by Crafting Service, Base Service)*
 
-Delivers a crafted item to the player's inventory.
+Delivers a crafted item or Kiki reward to the player's inventory.
 
 Payload
 ```json
@@ -199,7 +201,7 @@ Error Response (409 Conflict)
 
 The central real-time gameplay service. Manages sessions, the day/night cycle, timers, and timed player actions.
 
-### **Responsibilities**
+### **Owns**
 - Game sessions/lobbies and session timers.
 - The day/night cycle state.
 - Timed actions in progress: chopping, scavenging, clearing rooms, barricading, upgrading.
@@ -250,44 +252,42 @@ Response
 
 ## **3. Exam Service**
 
-Responsible for the academic progression of players.
+Owns the definitions of all courses, questions, and the logic to grade them.
 
-### **Responsibilities**
-- Every exam offered in the game, across all fifteen university courses, including questions, answer options and passing threshold.
-- Every attempt a player makes, including submitted answers, grade and status.
-- The six achievements tied to completing course categories, including their unlock conditions and effects.
-- A player's progress per course and per category.
+### **Owns**
+- Exam definitions (questions, options, correct answers, threshold).
+- Exam attempts (in progress, abandoned, passed, failed).
+- Achievements and unlock conditions.
+- Progress (which exams are passed).
+
+### **DockerHub Image**
+- **Repository:** [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service)
+- **Image Tag:** `mariaelenabotnari/exam-service:1.1.0`
+- **Default Port:** `3000`
 
 ### **Exposed API Endpoints**
 
-**`POST /exams`** *(Consumed by development team for content seeding)*
+**`POST /exams`** *(Consumed by development team)*
 
-Creates a new exam definition, including its questions and correct answers.
+Creates a new exam definition.
 
 Payload
 ```json
-{
-  "courseCategory": "mathematics",
-  "examId": "discreteMathematicsExam",
-  "courseName": "Discrete Mathematics",
-  "questions": [
-    { "text": "Which of the following is a valid proposition?", "options": ["2 plus 2", "It is raining today", "Close the door", "Blue"], "correctOptionId": 1 }
-  ]
-}
+{ "courseCategory": "mathematics", "courseName": "Discrete Mathematics", "passingThreshold": 60, "questions": [ { "id": "q1", "text": "Which of the following is a valid proposition?", "options": ["2 plus 2", "It is raining today", "Close the door", "Blue"], "correctOptionId": 1 } ] }
 ```
 
 Response
 ```json
-{ "examId": "discreteMathematicsExam", "created": true }
+{ "examId": "discreteMathematicsExam", "courseCategory": "mathematics", "courseName": "Discrete Mathematics", "passingThreshold": 60, "questions": [ { "id": "q1", "text": "Which of the following is a valid proposition?", "options": ["2 plus 2", "It is raining today", "Close the door", "Blue"] } ] }
 ```
 
-**`GET /exams/course/{courseCategory}`** *(Consumed by development team, Gateway)*
+**`GET /exams?courseCategory={courseCategory}`** *(Consumed by development team, Gateway)*
 
-Lists the exams that exist for a given course category.
+Lists the exams, optionally filtered by a course category.
 
 Response
 ```json
-{ "courseCategory": "mathematics", "exams": [ { "examId": "discreteMathematicsExam", "courseName": "Discrete Mathematics" }, { "examId": "calculus2Exam", "courseName": "Calculus 2" } ] }
+[ { "examId": "discreteMathematicsExam", "courseCategory": "mathematics", "courseName": "Discrete Mathematics", "passingThreshold": 60, "questions": [...] } ]
 ```
 
 **`GET /exams/{examId}`** *(Consumed by Game Service, Gateway)*
@@ -296,7 +296,7 @@ Retrieves an exam's questions and options for a player, without exposing the cor
 
 Response
 ```json
-{ "examId": "discreteMathematicsExam", "courseCategory": "mathematics", "courseName": "Discrete Mathematics", "questions": [ { "id": "q1", "text": "Which of the following is a valid proposition?", "options": ["2 plus 2", "It is raining today", "Close the door", "Blue"] } ] }
+{ "examId": "discreteMathematicsExam", "courseCategory": "mathematics", "courseName": "Discrete Mathematics", "passingThreshold": 60, "questions": [ { "id": "q1", "text": "Which of the following is a valid proposition?", "options": ["2 plus 2", "It is raining today", "Close the door", "Blue"] } ] }
 ```
 
 **`PUT /exams/{examId}`** *(Consumed by development team)*
@@ -333,7 +333,7 @@ Payload
 
 Response
 ```json
-{ "attemptId": "attempt_456", "examId": "discreteMathematicsExam", "questions": [ { "id": "q1", "text": "Which of the following is a valid proposition?", "options": ["2 plus 2", "It is raining today", "Close the door", "Blue"] } ] }
+{ "attemptId": "attempt_456", "questions": [ { "id": "q1", "text": "Which of the following is a valid proposition?", "options": ["2 plus 2", "It is raining today", "Close the door", "Blue"] } ] }
 ```
 
 **`POST /exams/{attemptId}/submit`** *(Consumed by Game Service)*
@@ -342,12 +342,12 @@ Records submitted answers, grades the attempt, determines pass or fail, and eval
 
 Payload
 ```json
-{ "answers": [ { "questionId": "q1", "answer": 1 } ] }
+{ "playerId": "player_123", "examId": "discreteMathematicsExam", "answers": { "q1": 1 } }
 ```
 
 Response
 ```json
-{ "passed": true, "grade": 70, "correctCount": 7, "totalQuestions": 10, "achievementsUnlocked": ["achievementSurvivedMathematics"] }
+{ "passed": true, "score": 70 }
 ```
 
 **`POST /exams/{attemptId}/abandon`** *(Consumed by Game Service)*
@@ -356,48 +356,30 @@ Marks an attempt as abandoned, called when a player disconnects or leaves the en
 
 Payload
 ```json
-{ "reason": "disconnected" }
+{}
 ```
 
 Response
 ```json
-{ "abandoned": true }
+{ "message": "Exam abandoned successfully" }
 ```
 
-**`GET /exams/{attemptId}`** *(Consumed by Game Service, Gateway)*
+**`GET /exams/{examId}/retryEligibility?playerId={playerId}`** *(Consumed by Game Service)*
 
-Retrieves the current status and result of a specific attempt.
+Reports whether the player can retry the specified exam.
 
 Response
 ```json
-{ "attemptId": "attempt_456", "playerId": "player_123", "examId": "discreteMathematicsExam", "status": "passed", "grade": 70 }
+{ "canRetry": false, "availableAt": "2026-09-08T10:35:00.000Z" }
 ```
 
-**`GET /exams/{attemptId}/retryEligibility`** *(Consumed by Game Service)*
+**`GET /players/{playerId}/progress`** *(Consumed by Gateway, Player Service, Crafting Service)*
 
-Reports whether the player can retry the exam tied to this attempt.
+Reports the player's status for every exam.
 
 Response
 ```json
-{ "canRetry": false, "availableAt": "2026-09-08T10:35:00Z" }
-```
-
-**`GET /players/{playerId}/progress`** *(Consumed by Gateway, Player Service)*
-
-Reports the player's status for every course and every category.
-
-Response
-```json
-{ "playerId": "player_123", "categories": [ { "courseCategory": "mathematics", "status": "in_progress", "exams": [ { "examId": "discreteMathematicsExam", "status": "passed" }, { "examId": "calculus2Exam", "status": "not_started" } ] } ] }
-```
-
-**`GET /players/{playerId}/attempts`** *(Consumed by Gateway)*
-
-Reports the full history of a player's exam attempts.
-
-Response
-```json
-{ "attempts": [ { "attemptId": "attempt_456", "examId": "discreteMathematicsExam", "courseCategory": "mathematics", "status": "passed", "grade": 70, "timestamp": "2026-09-08T10:30:00Z" } ] }
+{ "discreteMathematicsExam": "passed", "calculus2Exam": "not_started" }
 ```
 
 **`GET /players/{playerId}/achievements`** *(Consumed by Gateway, Player Service)*
@@ -406,41 +388,27 @@ Reports which achievements a player has unlocked and when.
 
 Response
 ```json
-{ "achievements": [ { "achievementId": "achievementSurvivedMathematics", "fullAchievementName": "Achievement, Survived Mathematics", "unlockedAt": "2026-09-08T10:30:00Z" } ] }
-```
-
-**`POST /achievements`** *(Consumed by development team)*
-
-Defines or updates an achievement's unlock condition and effect.
-
-Payload
-```json
-{ "achievementId": "achievementSurvivedMathematics", "fullAchievementName": "Achievement, Survived Mathematics", "description": "Awarded for passing all six Mathematics exams", "condition": "allExamsPassed:mathematics", "effect": "unlockZone:mathematicsWing" }
-```
-
-Response
-```json
-{ "achievementId": "achievementSurvivedMathematics", "created": true }
+[ { "achievementId": "achievementSurvivedMathematics", "fullAchievementName": "Achievement, Survived Mathematics", "unlockedAt": "2026-09-08T10:30:00.000Z" } ]
 ```
 
 ### **Message Queue Events**
 
-**PUBLISH `ExamPassed`** *(Consumed by Player Service)*
+**PUBLISH `ExamPassedEvent`** *(Consumed by Player Service)*
 ```json
 { "playerId": "player_123", "courseCategory": "mathematics", "examId": "discreteMathematicsExam", "attemptId": "attempt_456", "grade": 70, "xpAwarded": 100, "timestamp": "2026-09-08T10:30:00Z" }
 ```
 
-**PUBLISH `ExamFailed`** *(Consumed by Game Service)*
+**PUBLISH `ExamFailedEvent`** *(Consumed by Game Service)*
 ```json
 { "playerId": "player_123", "courseCategory": "mathematics", "examId": "discreteMathematicsExam", "attemptId": "attempt_457", "timestamp": "2026-09-08T10:40:00Z" }
 ```
 
-**PUBLISH `CourseCompleted`** *(Consumed by Player Service)*
+**PUBLISH `CourseCompletedEvent`** *(Consumed by Player Service)*
 ```json
 { "playerId": "player_123", "courseCategory": "mathematics", "timestamp": "2026-09-08T10:45:00Z" }
 ```
 
-**PUBLISH `AchievementUnlocked`** *(Consumed by World Service, Player Service)*
+**PUBLISH `AchievementUnlockedEvent`** *(Consumed by World Service, Player Service, Crafting Service)*
 ```json
 { "playerId": "player_123", "achievementId": "achievementSurvivedMathematics", "fullAchievementName": "Achievement, Survived Mathematics", "xpAwarded": 500, "timestamp": "2026-09-08T10:45:00Z" }
 ```
@@ -451,21 +419,40 @@ Response
 
 Owns the persistent physical state of the university.
 
-### **Responsibilities**
+### **Owns**
 - Every zone, every room within each zone, the connections between rooms.
 - The type of resource each room produces.
 - Every zombie spawn point, including which zombie category is allowed at each.
 - Which zones are currently unlocked.
 
+### **DockerHub Image**
+- **Repository:** [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service)
+- **Image Tag:** `mariaelenabotnari/world-service:1.2.0`
+- **Default Port:** `3001`
+
 ### **Exposed API Endpoints**
 
-**`GET /world/map`** *(Consumed by Game Service, Gateway)*
+**`POST /world/zones`** *(Consumed by development team)*
+
+Creates a new zone.
+
+Payload
+```json
+{ "zoneId": "mathematicsWing", "name": "Mathematics Wing", "unlocked": false }
+```
+
+Response
+```json
+{ "zoneId": "mathematicsWing", "name": "Mathematics Wing", "unlocked": false, "unlockedAt": null }
+```
+
+**`GET /world/zones`** *(Consumed by Game Service, Gateway, Crafting Service)*
 
 Returns the full list of zones and their unlocked status.
 
 Response
 ```json
-{ "zones": [ { "zoneId": "zoneZero", "name": "Technical University of Moldova Main Campus", "unlocked": true }, { "zoneId": "mathematicsWing", "name": "Mathematics Wing", "unlocked": false } ] }
+[ { "zoneId": "zoneZero", "name": "Technical University of Moldova Main Campus", "unlocked": true }, { "zoneId": "mathematicsWing", "name": "Mathematics Wing", "unlocked": false } ]
 ```
 
 **`GET /world/zones/{zoneId}`** *(Consumed by Game Service, Gateway)*
@@ -477,6 +464,42 @@ Response
 { "zoneId": "mathematicsWing", "name": "Mathematics Wing", "unlocked": false, "rooms": ["physicsLaboratory", "mathematicsWingLibrary", "mathematicsWingCanteen"] }
 ```
 
+**`GET /world/zones/{zoneId}/status`** *(Consumed by Gateway, Game Service)*
+
+Reports whether a specific zone is currently unlocked and when it was unlocked.
+
+Response
+```json
+{ "unlocked": true, "unlockedAt": "2026-09-08T10:45:00.000Z" }
+```
+
+**`PUT /world/zones/{zoneId}`** *(Consumed by development team)*
+
+Updates a zone's properties.
+
+Response
+```json
+{ "zoneId": "mathematicsWing", "name": "Mathematics Wing Updated", "unlocked": true }
+```
+
+**`DELETE /world/zones/{zoneId}`** *(Consumed by development team)*
+
+Deletes a zone.
+
+Response
+```json
+{ "deleted": true }
+```
+
+**`POST /world/rooms`** *(Consumed by development team)*
+
+Creates a new room.
+
+Response
+```json
+{ "roomId": "mathematicsExamHall", "fullRoomName": "Mathematics Exam Hall", "type": "classroom", "zoneId": "zoneZero", "connectsTo": ["mainCorridor"] }
+```
+
 **`GET /world/rooms`** *(Consumed by Game Service)*
 
 Returns the list of rooms, optionally filtered by zone and unlocked status.
@@ -485,10 +508,10 @@ Query Parameters: `zoneId`, `unlockedOnly`
 
 Response
 ```json
-{ "rooms": [ { "roomId": "mathematicsExamHall", "fullRoomName": "Mathematics Exam Hall", "type": "classroom", "zoneId": "zoneZero", "connectsTo": ["mainCorridor"] } ] }
+[ { "roomId": "mathematicsExamHall", "fullRoomName": "Mathematics Exam Hall", "type": "classroom", "zoneId": "zoneZero", "connectsTo": ["mainCorridor"] } ]
 ```
 
-**`GET /world/rooms/{roomId}`** *(Consumed by Game Service)*
+**`GET /world/rooms/{roomId}`** *(Consumed by Game Service, Base Service)*
 
 Returns the full detail of a single room.
 
@@ -497,13 +520,31 @@ Response
 { "roomId": "mathematicsExamHall", "fullRoomName": "Mathematics Exam Hall", "type": "classroom", "zoneId": "zoneZero", "connectsTo": ["mainCorridor"] }
 ```
 
+**`PUT /world/rooms/{roomId}`** *(Consumed by development team)*
+
+Updates a room.
+
+Response
+```json
+{ "roomId": "mathematicsExamHall", "fullRoomName": "Mathematics Exam Hall Updated", "type": "classroom", "zoneId": "zoneZero", "connectsTo": ["mainCorridor"] }
+```
+
+**`DELETE /world/rooms/{roomId}`** *(Consumed by development team)*
+
+Deletes a room.
+
+Response
+```json
+{ "deleted": true }
+```
+
 **`GET /world/rooms/{roomId}/connections`** *(Consumed by Game Service)*
 
 Returns the list of rooms directly reachable from a given room.
 
 Response
 ```json
-{ "roomId": "mathematicsExamHall", "connections": ["mainCorridor"] }
+["mainCorridor"]
 ```
 
 **`GET /world/rooms/{roomId}/resourceNode`** *(Consumed by Game Service, Resource Service)*
@@ -512,7 +553,7 @@ Returns the resource type a given room produces.
 
 Response
 ```json
-{ "roomId": "physicsLaboratory", "resourceType": "metal scraps" }
+{ "resourceType": "metal scraps" }
 ```
 
 **`GET /world/rooms/{roomId}/spawnPoints`** *(Consumed by Game Service)*
@@ -521,118 +562,262 @@ Returns the spawn points available in a room and the zombie category allowed at 
 
 Response
 ```json
-{ "roomId": "mathematicsExamHall", "spawnPoints": [ { "spawnPointId": "mathematicsExamHallSpawnOne", "coordinates": { "x": 4, "y": 2 }, "zombieCategoryAllowed": "professor", "tiedCourseCategory": "mathematics" } ] }
+[
+  {
+    "spawnPointId": "mathematicsExamHallSpawnOne",
+    "roomId": "mathematicsExamHall",
+    "zombieCategoryAllowed": "professor",
+    "tiedCourseCategory": "mathematics"
+  }
+]
 ```
 
-**`POST /world/zones/unlock`** *(Internal handler, triggered by the `AchievementUnlocked` event; also usable by development team for testing)*
+**`GET /world/spawnPoints`** *(Consumed by development team)*
 
-Unlocks a zone according to the mapping between an achievement and its matching zone. Checks the zone's unlocked flag first so the same zone is never unlocked twice.
+Lists all defined zombie spawn points across campus.
+
+Response
+```json
+[
+  {
+    "spawnPointId": "mathematicsExamHallSpawnOne",
+    "roomId": "mathematicsExamHall",
+    "zombieCategoryAllowed": "professor",
+    "tiedCourseCategory": "mathematics"
+  }
+]
+```
+
+**`POST /world/spawnPoints`** *(Consumed by development team)*
+
+Creates a new zombie spawn point tied to a specific room.
 
 Payload
 ```json
-{ "achievementId": "achievementSurvivedMathematics", "playerId": "player_123" }
+{
+  "roomId": "mathematicsExamHall",
+  "zombieCategoryAllowed": "professor",
+  "tiedCourseCategory": "mathematics"
+}
 ```
 
 Response
 ```json
-{ "zoneId": "mathematicsWing", "roomsAdded": ["physicsLaboratory", "mathematicsWingLibrary", "mathematicsWingCanteen"] }
+{
+  "spawnPointId": "spawn_123",
+  "roomId": "mathematicsExamHall",
+  "zombieCategoryAllowed": "professor",
+  "tiedCourseCategory": "mathematics"
+}
 ```
 
-**`GET /world/zones/{zoneId}/status`** *(Consumed by Gateway, Game Service)*
+**`GET /world/spawnPoints/{spawnPointId}`** *(Consumed by development team)*
 
-Reports whether a specific zone is currently unlocked and when it was unlocked.
+Retrieves details of a specific spawn point.
 
 Response
 ```json
-{ "unlocked": true, "unlockedAt": "2026-09-08T10:45:00Z" }
+{
+  "spawnPointId": "mathematicsExamHallSpawnOne",
+  "roomId": "mathematicsExamHall",
+  "zombieCategoryAllowed": "professor",
+  "tiedCourseCategory": "mathematics"
+}
 ```
 
-**`POST /world/roomTemplates`** *(Consumed by development team)*
+**`PUT /world/spawnPoints/{spawnPointId}`** *(Consumed by development team)*
 
-Defines a reusable room template, used when generating a wing zone.
-
-Payload
-```json
-{ "templateId": "standardWingTemplate", "rooms": [ { "type": "laboratory", "resourceType": "metal scraps" }, { "type": "library", "resourceType": "paper" }, { "type": "canteen", "resourceType": "food" } ] }
-```
-
-**`GET /world/roomTemplates`** *(Consumed by development team)*
-
-Lists the templates currently defined.
+Updates spawn point parameters (allowed category or tied course category).
 
 Response
 ```json
-{ "templates": ["standardWingTemplate", "extendedWingTemplate"] }
+{
+  "spawnPointId": "mathematicsExamHallSpawnOne",
+  "roomId": "mathematicsExamHall",
+  "zombieCategoryAllowed": "professor",
+  "tiedCourseCategory": "mathematics"
+}
+```
+
+**`DELETE /world/spawnPoints/{spawnPointId}`** *(Consumed by development team)*
+
+Removes a spawn point configuration.
+
+Response
+```json
+{
+  "deleted": true
+}
 ```
 
 ### **Message Queue Events**
 
-**SUBSCRIBE `AchievementUnlocked`** *(Published by Exam Service)*
+**SUBSCRIBE `AchievementUnlockedEvent`** *(Published by Exam Service)*
 ```json
 { "playerId": "player_123", "achievementId": "achievementSurvivedMathematics", "fullAchievementName": "Achievement, Survived Mathematics", "xpAwarded": 500, "timestamp": "2026-09-08T10:45:00Z" }
 ```
 
-**PUBLISH `ZoneUnlocked`** *(Consumed by Game Service)*
+**PUBLISH `ZoneUnlockedEvent`** *(Consumed by Game Service, Base Service, Crafting Service)*
 ```json
 { "zoneId": "mathematicsWing", "roomsAdded": ["physicsLaboratory", "mathematicsWingLibrary", "mathematicsWingCanteen"], "timestamp": "2026-09-08T10:45:00Z" }
 ```
+
 ---
 
 ## **5. Zombie Service**
 
 Owns the persistent definitions and short-lived instance state of zombies.
 
-### **Responsibilities**
-- Zombie type definitions: stats, sprites, behavior configuration, special abilities.
-- Two major categories — Professor Zombies (initiate exams) and Tourist Zombies (roam, steal resources/XP). (other categories will be discussed)
-- Short-lived zombie instance state during a game cycle (health, position reference, status).
+### **Owns**
+- Zombie type definitions: stats, behavior configuration, special abilities.
+- Three categories — Professor Zombies (initiate exams), Tourist Zombies (roam, steal resources/XP) and Infected Zombies (students who can be cured instead of fought, at a resource cost). Other categories may be added later.
+- Short-lived zombie instance state during a game cycle (health, spawn point reference, cycle and zone). Instances expire automatically 4 hours after they are spawned.
+
+### **DockerHub Image**
+- **Repository:** [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service)
+- **Image Tag:** `costinloredana/zombie-service:1.1.0`
+- **Default Port:** `4001`
+
+### **Consumed API Endpoints**
+
+None. Zombie Service never calls other services; Game Service coordinates anything that follows from a zombie action (e.g. calling Resource Service for a steal or a cure).
 
 ### **Exposed API Endpoints**
 
-**`GET /api/zombie-types?category=professor|tourist`** *(Consumed by Game Service)*
+Every error response has the shape `{ "error": "<code>", "message": "<reason>" }`.
 
-Returns zombie type definitions, optionally filtered by category.
+**`GET /health`** *(Consumed by Docker healthcheck)*
 
 Response
 ```json
-[ { "typeId": "prof_calc", "category": "professor", "baseHealth": 40, "attackStrength": 5, "moveSpeed": 1.0, "perceptionRadius": 6, "specialAbility": "initiate_exam" } ]
+{ "status": "ok", "service": "zombie-service" }
 ```
+
+**`GET /api/zombie-types?category=professor|tourist|infected`** *(Consumed by Game Service)*
+
+Returns zombie type definitions, optionally filtered by category. `curable` and `cureRequirement` are only present on curable (infected) types.
+
+Response
+```json
+[
+  { "typeId": "prof_calc", "category": "professor", "name": "Calculus Professor", "baseHealth": 40, "attackStrength": 5, "moveSpeed": 1.0, "perceptionRadius": 6, "specialAbility": "initiate_exam" },
+  { "typeId": "infected_student", "category": "infected", "name": "Infected Student", "baseHealth": 22, "attackStrength": 1, "moveSpeed": 1.2, "perceptionRadius": 7, "specialAbility": "seek_cure", "curable": true, "cureRequirement": { "resourceType": "chemicals", "amount": 2 } }
+]
+```
+
+400 Bad Request — unknown `category` value:
+```json
+{ "error": "invalid_zombie_type", "message": "category must be 'professor', 'tourist', or 'infected'" }
+```
+
+**`GET /api/zombie-types/{typeId}`** *(Consumed by Game Service)*
+
+Returns a single zombie type (same shape as above), or `404 not_found`.
 
 **`POST /api/zombie-types`** *(Consumed by development team, Admin only)*
 
-Defines a new zombie variant.
+Defines a new zombie variant. `typeId` is generated as `<category>_<8 hex chars>`. `curable` and `cureRequirement` are optional, but `cureRequirement` is required when `curable` is `true`.
 
 Payload
 ```json
-{ "category": "tourist", "name": "Backpacker Horde", "baseHealth": 20, "attackStrength": 2, "moveSpeed": 1.8, "perceptionRadius": 10, "specialAbility": "steal_resource" }
+{ "category": "tourist", "name": "Exchange Student", "baseHealth": 15, "attackStrength": 1, "moveSpeed": 2.0, "perceptionRadius": 8, "specialAbility": "steal_xp" }
 ```
+
+Response — 201 Created:
+
+```json
+{
+  "typeId": "tourist_1a2b3c4d",
+  "category": "tourist",
+  "name": "Exchange Student",
+  "baseHealth": 15,
+  "attackStrength": 1,
+  "moveSpeed": 2.0,
+  "perceptionRadius": 8,
+  "specialAbility": "steal_xp"
+}
+```
+
+400 Bad Request — a required field is missing, `category` is invalid, or `curable: true` comes without a valid `cureRequirement`:
+```json
+{ "error": "invalid_zombie_type", "message": "Missing fields: baseHealth, moveSpeed" }
+```
+409 Conflict — a zombie type with the same `name` already exists:
+```json
+{ "error": "zombie_type_exists", "message": "A zombie type with this name already exists." }
+```
+
+**`PUT /api/zombie-types/{typeId}`** *(Consumed by development team, Admin only)*
+
+Partially updates a zombie type; only the fields sent are changed, validated with the same rules as create.
+
+Payload
+```json
+{ "baseHealth": 25 }
+```
+
+Returns `200 OK` with the updated type, `400 invalid_zombie_type`, or `404 not_found`.
+
+**`DELETE /api/zombie-types/{typeId}`** *(Consumed by development team, Admin only)*
+
+Returns `204 No Content`, or `404 not_found`.
 
 **`POST /api/zombies/spawn`** *(Consumed by Game Service)*
 
-Instantiates zombies at cycle start.
+Instantiates zombies at cycle start. For each instance a category is picked using `typeWeights` (keys `professor`, `tourist` or `infected`; non-negative numbers, at least one above 0), then a random zombie type from that category. Instances start with the type's `baseHealth`.
 
 Payload
 ```json
 { "cycleId": "cyc_884", "worldZoneId": "zone_12", "spawnCount": 5, "typeWeights": { "professor": 0.3, "tourist": 0.7 } }
 ```
 
-Response
+Response — 201 Created:
 ```json
-{ "zombies": [ { "instanceId": "z_991", "typeId": "prof_calc", "health": 40, "spawnPoint": "node_7" } ] }
+{
+  "zombies": [
+    { "instanceId": "z_a3cecfcc", "typeId": "prof_calc", "category": "professor", "health": 40, "spawnPoint": "zone_12_spawn_1", "cycleId": "cyc_884", "worldZoneId": "zone_12", "createdAt": "2026-09-23T15:15:45.963Z" }
+  ]
+}
+```
+
+400 Bad Request — a field is missing or invalid, or a weighted category has no zombie types yet:
+```json
+{ "error": "invalid_spawn_request", "message": "spawnCount must be a positive integer." }
 ```
 
 **`POST /api/zombies/{instance_id}/special-action`** *(Consumed by Game Service)*
 
-Triggers a professor exam-initiation flag or a tourist steal flag, returned to Game Service.
+Triggers a zombie's special action against a player. The response always carries `actionType` (the type's `specialAbility`) and `targetPlayerId`, plus one category-specific field:
+
+| Category | Extra field | Meaning for Game Service |
+|---|---|---|
+| `professor` | `suggestedExamCategory` | Start an exam encounter in that course category via Exam Service |
+| `tourist` | `suggestedAmount` | Resources/XP to steal from the player via Resource Service |
+| `infected` | `cureRequirement` | What the player must spend (via Resource Service) to cure the zombie |
 
 Payload
 ```json
 { "targetPlayerId": "p_44" }
 ```
 
-Response
+Response — 200 OK (one example per category):
 ```json
-{ "actionType": "steal_resource", "targetPlayerId": "p_44", "suggestedAmount": { "food": 5 } }
+{ "actionType": "initiate_exam", "targetPlayerId": "p_44", "suggestedExamCategory": "Programming" }
+```
+```json
+{ "actionType": "steal_resource", "targetPlayerId": "p_44", "suggestedAmount": { "food": 4 } }
+```
+```json
+{ "actionType": "seek_cure", "targetPlayerId": "p_44", "cureRequirement": { "resourceType": "chemicals", "amount": 2 } }
+```
+
+400 Bad Request — `targetPlayerId` missing:
+```json
+{ "error": "invalid_special_action_request", "message": "targetPlayerId is required." }
+```
+404 Not Found — the instance was never spawned, has expired, or its zombie type was deleted:
+```json
+{ "error": "not_found", "message": "Zombie instance not found. It may not have been spawned yet." }
 ```
 
 ---
@@ -641,17 +826,60 @@ Response
 
 Owns the university's resource economy independently from the physical map.
 
-### **Responsibilities**
-- Resource type definitions (wood, metal scraps, paper, food) and their rules.
+### **Owns**
+- Resource type definitions. The seeded ids are `wood`, `metal`, `paper`, `food`, `chemicals` and `electronics`; new ids are the lowercase name with spaces replaced by `_` (e.g. `"Chemical Waste"` → `chemical_waste`).
 - Player resource inventories/balances.
 - Resource node state (how much is available at a given gatherable location).
-- The full transaction/idempotency log for every resource change.
+- The full transaction/idempotency ledger for every resource change.
+
+### **DockerHub Image**
+- **Repository:** [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service)
+- **Image Tag:** `costinloredana/resource-service:1.1.0`
+- **Default Port:** `4002`
 
 ### **Consumed API Endpoints**
 
-- `GET /world/rooms/{roomId}/resourceNode` *(World Service)* — determines what resource type a node produces when initializing or validating a node.
+None. Resource Service never calls other services. Node state is stored in its own database; Game Service reads which node a room has from World Service (`GET /world/rooms/{roomId}/resourceNode`) and passes that `nodeId` to `POST /api/gather`.
 
 ### **Exposed API Endpoints**
+
+Errors use the shape `{ "error": "<code>", "message": "<reason>" }` (`invalid_body` / `invalid_resource_type` for 400, `not_found` for 404, `resource_type_exists` / `inventory_exists` for 409). The only exception is the 402 from `/api/spend`, shown below.
+
+**`GET /health`** *(Consumed by Docker healthcheck)*
+
+Response
+```json
+{ "status": "ok", "service": "resource-service" }
+```
+
+**`GET /api/resource-types`**, **`GET /api/resource-types/{id}`** *(Consumed by development team and any service that needs resource metadata)*
+
+Returns all resource types (sorted by name) or a single one (`404 not_found` if missing).
+
+Response
+```json
+[ { "resourceTypeId": "food", "name": "Food", "description": "Gathered from canteens, consumed by Kiki and players.", "stackable": true } ]
+```
+
+**`POST /api/resource-types`**, **`PUT /api/resource-types/{id}`**, **`DELETE /api/resource-types/{id}`** *(Consumed by development team, Admin only)*
+
+Creates, partially updates, or deletes a resource type. On create, `name` (string) and `stackable` (boolean) are required and `description` is optional.
+
+Payload
+```json
+{ "name": "Metal", "description": "Used in barricades and crafting.", "stackable": true }
+```
+
+Response — 201 Created:
+```json
+{ "resourceTypeId": "metal", "name": "Metal", "description": "Used in barricades and crafting.", "stackable": true }
+```
+
+Create returns `400 invalid_resource_type` for a missing field and `409 resource_type_exists` for a duplicate. Update returns `200`, delete returns `204`, and both return `404 not_found` for an unknown id.
+
+**`POST /api/inventory/{player_id}`** *(Consumed by Game Service)*
+
+Creates an empty inventory. No body. Returns `201` with `{ "playerId": "p_44", "resources": {} }`, or `409 inventory_exists`. Optional, because the transaction endpoints below also create the inventory on first use.
 
 **`GET /api/inventory/{player_id}`** *(Consumed by Gateway, Base Service, Crafting Service)*
 
@@ -662,9 +890,20 @@ Response
 { "playerId": "p_44", "resources": { "wood": 10, "metal": 4, "paper": 6, "food": 42 } }
 ```
 
+404 Not Found — the player has no inventory yet.
+
+**`PUT /api/inventory/{player_id}`**, **`DELETE /api/inventory/{player_id}`** *(Consumed by development team, Admin only)*
+
+`PUT` overwrites all balances (creating the inventory if needed) and isn't idempotency-gated, so gameplay must use `gather`/`spend`/`refund` instead. `DELETE` returns `204`, or `404 not_found`.
+
+Payload (PUT)
+```json
+{ "resources": { "food": 10, "wood": 3 } }
+```
+
 **`POST /api/gather`** *(Consumed by Game Service — idempotent)*
 
-Applies a resource change when a timed gathering action completes.
+Applies a resource change when a timed gathering action completes. `nodeId` is optional; when it names a known node, that node's `quantityAvailable` goes down by `amount` (never below 0).
 
 Payload
 ```json
@@ -681,9 +920,14 @@ Duplicate Response (200 OK)
 { "status": "already_applied", "newBalance": { "food": 42 } }
 ```
 
+400 Bad Request — a required field is missing or `amount` isn't positive:
+```json
+{ "error": "invalid_body", "message": "amount must be a positive number." }
+```
+
 **`POST /api/spend`** *(Consumed by Base Service, Crafting Service — idempotent)*
 
-Deducts resources for barricading, upgrades, crafting, or feeding Kiki.
+Deducts resources for barricading, upgrades, crafting, or feeding Kiki. Either every cost is deducted or none is: the player's row is locked and every balance is checked first.
 
 Payload
 ```json
@@ -695,10 +939,17 @@ Success Response (200 OK)
 { "status": "applied", "newBalance": { "wood": 5, "metal": 2 } }
 ```
 
-Error Response (402 Payment Required)
+Duplicate Response (200 OK)
+```json
+{ "status": "already_applied", "newBalance": { "wood": 5, "metal": 2 } }
+```
+
+Error Response (402 Payment Required) — nothing is deducted and the key isn't stored, so the same key can be retried later:
 ```json
 { "status": "rejected_insufficient", "missing": { "wood": 2 } }
 ```
+
+400 Bad Request — missing `idempotencyKey`/`playerId`/`reason`, or `costs` isn't a non-empty array of `{ resourceType, amount }` with positive amounts.
 
 **`GET /api/nodes/{node_id}`** *(Consumed by Game Service)*
 
@@ -707,6 +958,43 @@ Returns remaining gatherable quantity at a node.
 Response
 ```json
 { "nodeId": "node_7", "resourceType": "food", "quantityAvailable": 30, "respawnRate": "5/hour" }
+```
+
+404 Not Found — unknown node.
+
+**`POST /api/refund`** *(Consumed by Base Service, Crafting Service — idempotent)*
+
+Returns previously spent resources when a multi-service operation cannot be completed.
+
+This endpoint is used as the compensation step of a saga. The refund is idempotent so that retrying the compensation cannot return the same resources more than once. The payload has the same shape and validation as `/api/spend`.
+
+Payload
+
+```json
+{
+  "idempotencyKey": "refund_craft_p44_barricadekit_001", "playerId": "p_44", "reason": "craft_rollback",
+  "costs": [
+    { "resourceType": "wood", "amount": 3 },
+    { "resourceType": "metal", "amount": 1 }
+  ]
+}
+```
+
+Success Response (200 OK)
+
+```json
+{
+  "status": "refunded",
+  "newBalance": { "wood": 13, "metal": 5 }
+}
+```
+Duplicate Response (200 OK)
+
+```json
+{
+  "status": "already_refunded",
+  "newBalance": { "wood": 13, "metal": 5 }
+}
 ```
 
 ---
@@ -721,6 +1009,11 @@ Responsible for the player's survival base, initially represented by the FAF Cab
 - Unlocked storage capacity and homeroom decorations.
 - Kiki's interaction state and reward outcomes.
 - The transaction ledger keyed on the caller's idempotency key.
+
+### **DockerHub Image**
+- **Repository:** [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service)
+- **Image Tag:** `cristi150404/base-service:1.0.0`
+- **Default Port:** `5003`
 
 ### **Consumed API Endpoints**
 
@@ -864,6 +1157,11 @@ Allows players to combine resources into useful survival equipment.
 - Recipe definitions and unlock conditions: Wood + Metal → Barricade Kit, Paper + Metal → Improvised Weapon, Food + Chemicals → Energy Booster, Metal + Electronics → Zombie Detector, Paper + Wood → Exam Cheat Sheet.
 - Which recipes each player has unlocked.
 - The craft transaction/saga state for each craft attempt.
+
+### **DockerHub Image**
+- **Repository:** [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service)
+- **Image Tag:** `cristi150404/crafting-service:1.0.0`
+- **Default Port:** `5004`
 
 ### **Consumed API Endpoints**
 
@@ -1025,57 +1323,26 @@ type/short-description-issueID
 
 ## Pull Request Requirements
 
-Every Pull Request must include:
-
-### Required Information
-- **Clear description** of what changed and why
-- **Issue reference** (e.g., "Closes #42", "Fixes #18")
-- **List of specific changes** made
-- **Testing instructions** or results
-- **Screenshots** for UI changes
-- **Breaking changes** (if any)
+Every PR must include a clear description, a linked issue, and testing steps. UI changes need screenshots.
 
 ### PR Template
 
-We use the following template (located at `.github/PULL_REQUEST_TEMPLATE.md`):
+Located at `.github/PULL_REQUEST_TEMPLATE.md`:
 
 ```markdown
 ## What does this PR do?
-Brief description of the change and its purpose.
-
-## Related Issue
-Closes #XX
+Brief description and related issue (Closes #XX)
 
 ## Changes Made
-- [ ] Added zombie spawn logic
-- [ ] Fixed resource double-award bug
-- [ ] Updated exam grading tests
-- [ ] Improved error handling
+- Change 1
+- Change 2
 
 ## Type of Change
-- [ ] Bug fix (non-breaking change that fixes an issue)
-- [ ] New feature (non-breaking change that adds functionality)
-- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
-- [ ] Documentation update
+- [ ] Bug fix
+- [ ] New feature
+- [ ] Breaking change
+- [ ] Documentation
 
-## How to Test
-1. Pull this branch: `git checkout feature/branch-name`
-2. Install dependencies: `npm install` (Node services) or `dotnet restore` (C# services)
-3. Run the service: `npm start` or `dotnet run`
-4. Navigate to [specific endpoint/feature]
-5. Verify [specific functionality]
-
-## Screenshots (if applicable)
-[Attach images for UI changes]
-
-## Checklist
-- [ ] My code follows the team's coding standards
-- [ ] I have performed a self-review of my code
-- [ ] I have commented my code, particularly in hard-to-understand areas
-- [ ] I have made corresponding changes to the documentation
-- [ ] My changes generate no new warnings
-- [ ] I have added tests that prove my fix is effective or that my feature works
-- [ ] New and existing unit tests pass locally with my changes
 ```
 
 ## Testing Standards
@@ -1169,3 +1436,186 @@ We follow **Semantic Versioning (SemVer)**: `MAJOR.MINOR.PATCH`
 - **Reviewers**: Provide timely, constructive feedback
 - **Project Lead**: Manage releases and resolve conflicts
 - **QA**: Test major features before production deployment
+---
+
+## Deployment & Database Seeding
+
+### Services on DockerHub
+
+The microservices are containerized and published on DockerHub:
+
+| Service | DockerHub Repository | Image Tag | Default Port | Description |
+|---|---|---|---|---|
+| **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:1.1.0` | `3000` | Academic progression, exams, and achievements |
+| **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:1.2.0` | `3001` | Physical campus layout, rooms, zones, and spawn points |
+| **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:1.1.0` | `3002` | Player identity, progression, inventory, and trades |
+| **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:1.1.1` | `3003` | Game sessions, day/night cycle, and timed player actions |
+| **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:1.1.0` | `4001` | Zombie type definitions, spawned instances, and special actions |
+| **Resource Service** | [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service) | `costinloredana/resource-service:1.1.0` | `4002` | Resource types, player balances, nodes, and idempotent transactions |
+| **Base Service** | [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service) | `cristi150404/base-service:1.0.0` | `5003` | Player bases, barricades, facilities, and decorations |
+| **Crafting Service** | [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service) | `cristi150404/crafting-service:1.0.0` | `5004` | Recipes, unlock conditions, and crafting sagas |
+
+---
+
+### System Requirements & Prerequisites
+
+To run these services locally via Docker Compose, ensure the host machine meets the following requirements:
+
+1. **Docker Engine & Docker Compose**:
+   - Docker Engine `20.10.0+` or Docker Desktop `4.0.0+`
+   - Docker Compose `v2.0.0+`
+2. **Available Host Ports**:
+   - `3000` — Exam Service HTTP API
+   - `3001` — World Service HTTP API
+   - `5433` — Exam PostgreSQL Database (`exam-db`)
+   - `5434` — World PostgreSQL Database (`world-db`)
+   - `3002` — Player Service HTTP API
+   - `3003` — Game Service HTTP API
+   - `5435` — Player PostgreSQL Database (`player-db`)
+   - `5436` — Game PostgreSQL Database (`game-db`)
+   - `4001` — Zombie Service HTTP API
+   - `4002` — Resource Service HTTP API
+   - `5437` — Resource PostgreSQL Database (`resource-db`)
+   - `27017` — Zombie MongoDB Database (`zombie-db`)
+   - `5003` — Base Service HTTP API
+   - `5004` — Crafting Service HTTP API
+   - `5438` — Base PostgreSQL Database (`base-db`)
+   - `5439` — Crafting PostgreSQL Database (`crafting-db`)
+3. **Resource Allocations**:
+   - At least 3 GB of RAM available for Docker (sixteen containers, including one MongoDB instance)
+   - 3 GB free disk space for Docker images and the PostgreSQL/MongoDB data volumes
+4. **Environment Configuration**:
+   - Self-contained in `docker-compose.yml`; no manual `.env` file setup is required to start up the stack.
+
+#### Zombie Service & Resource Service images
+
+Both images are multi-stage Node.js 20 builds that run as the non-root `node` user and ship a `HEALTHCHECK` against `GET /health`. Each one only needs its own database; neither calls another microservice, so they can be started on their own.
+
+| | Zombie Service | Resource Service |
+|---|---|---|
+| **Image** | `costinloredana/zombie-service:1.1.0` (`node:20-alpine`) | `costinloredana/resource-service:1.1.0` (`node:20-slim` + OpenSSL for Prisma) |
+| **Database** | MongoDB 8 (`mongo:8`) | PostgreSQL 17 (`postgres:17-alpine`) |
+| **Required env** | `MONGO_URI`, e.g. `mongodb://zombie-db:27017/zombie_db` | `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, or a single `DATABASE_URL` that takes precedence over them |
+| **Optional env** | `PORT` (default `4001`) | `PORT` (default `4002`) |
+| **Schema setup** | None, Mongoose creates the collections and the 4-hour TTL index on instances | Automatic, tables are created with `CREATE TABLE IF NOT EXISTS` on startup (no `prisma migrate` step) |
+| **Seed** | `npm run db:seed`: 3 zombie types | `npm run db:seed`: 5 resource types and 4 nodes |
+
+The service exits on startup if its database is unreachable, so start it only after the database is healthy (the team compose file does this with `depends_on: condition: service_healthy`). To run one on its own, outside the team compose file:
+
+```bash
+
+# Zombie Service
+docker run -d --name zombie-db --network kahoots-net mongo:8
+docker run -d --name zombie-service --network kahoots-net -p 4001:4001   -e MONGO_URI=mongodb://zombie-db:27017/zombie_db   costinloredana/zombie-service:1.1.0
+
+# Resource Service
+docker run -d --name resource-db --network kahoots-net   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=resource_db postgres:17-alpine
+docker run -d --name resource-service --network kahoots-net -p 4002:4002   -e POSTGRES_HOST=resource-db -e POSTGRES_PORT=5432 -e POSTGRES_USER=postgres   -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=resource_db   costinloredana/resource-service:1.1.0
+```
+
+If a container exits right away, the database probably wasn't ready yet. Wait a few seconds and run `docker start zombie-service` or `docker start resource-service`.
+
+---
+
+### Step-by-Step Execution Guide
+
+#### 1. Start the Microservices & Databases
+From the repository root, start all sixteen containers in detached mode:
+```bash
+docker compose up -d
+```
+Docker Compose will automatically pull the images from DockerHub, initialize the database containers (`exam-db` on 5433, `world-db` on 5434, `player-db` on 5435, `game-db` on 5436, `resource-db` on 5437, `zombie-db` on 27017, `base-db` on 5438, `crafting-db` on 5439), perform healthchecks, and launch `exam-service`, `world-service`, `player-service`, `game-service`, `zombie-service`, `resource-service`, `base-service` and `crafting-service`.
+
+To check container health and status:
+```bash
+docker compose ps
+```
+
+#### 2. Run Database Seeding
+Exam, World, Zombie and Resource Service include idempotent database seed scripts. Run them inside the containers using `docker compose exec`:
+
+##### Seed the Exam Service Database
+```bash
+docker compose exec exam-service npm run db:seed
+```
+- **Execution & Idempotency:** Connects to `exam_db` and checks if the `exams` table contains any records. If records already exist, seeding is safely skipped without altering existing data.
+- **Data Seeded:** If empty, seeds **15 course exams** across 5 categories (Mathematics, Programming, Systems & Hardware, Databases, Law) with 10 questions each, plus **6 achievements** for course category completion and graduation.
+
+##### Seed the World Service Database
+```bash
+docker compose exec world-service npm run db:seed
+```
+- **Execution & Idempotency:** Connects to `world_db` and checks if the `zones` table contains any records. If records already exist, seeding is safely skipped without duplicating records.
+- **Data Seeded:** If empty, seeds:
+  - **7 Zones:** `zoneZero` (`unlocked: true`) and 6 wing/hall zones (`unlocked: false`).
+  - **30 Rooms:** campus rooms with connection topology (student base room, main corridor, exam halls, classrooms, laboratories, libraries, canteens, diploma hall).
+  - **54 Spawn Points:** generated programmatically in a loop (10 Professor spawn points in exam halls with tied course categories, and 44 Tourist spawn points in classrooms, labs, libraries, and canteens; safe rooms contain 0 spawns).
+
+##### Seed the Base and Crafting Service Databases
+Both databases are seeded by one script from the repository root, after the containers are healthy:
+```bash
+./db-scripts/seed-base-crafting.sh
+```
+- **Execution & Idempotency:** Waits for `base-service` (`:5003/health`) and `crafting-service` (`:5004/health`) so the services have created their tables, then pipes `db-scripts/base-service/seed.sql` and `db-scripts/crafting-service/seed.sql` into the two databases. Each script checks whether its main table already holds rows and skips itself if so, leaving existing data untouched.
+- **Data Seeded:** If empty, seeds:
+  - **Base Service:** 3 player bases with claimed rooms, barricade levels, facilities and decorations, plus 2 completed transactions in the idempotency ledger.
+  - **Crafting Service:** the **5 contract recipes** with their ingredients, one per unlock condition type (none, `zoneUnlocked`, `resourceDiscovered`, `playerLevel`, `examPassed`), 2 known players with their unlocks, and 1 completed craft.
+
+##### Seed the Zombie Service Database
+```bash
+docker compose exec zombie-service npm run db:seed
+```
+- **Execution & Idempotency:** Connects to `zombie_db` and checks if the `zombieTypes` collection contains any documents. If it does, seeding is skipped.
+- **Data Seeded:** If empty, seeds **3 zombie types**: `prof_calc` (professor, `initiate_exam`), `tourist_backpacker` (tourist, `steal_resource`) and `infected_student` (infected, `seek_cure`, curable with 2 × `chemicals`).
+
+##### Seed the Resource Service Database
+```bash
+docker compose exec resource-service npm run db:seed
+```
+- **Execution & Idempotency:** Connects to `resource_db` and checks the `resource_types` and `resource_nodes` tables separately. Each one is only seeded if it's empty.
+- **Data Seeded:** Inserts any missing defaults: **6 resource types** (`wood`, `metal`, `food`, `paper`, `chemicals`, `electronics`) and **6 resource nodes** (`node_1` to `node_6`). Existing rows are never changed.
+
+#### 3. Verify Endpoints
+Once seeded, you can verify the persistent data via HTTP requests (Postman, browser, or curl):
+
+```bash
+# Verify Exam Service
+curl -s http://localhost:3000/exams
+
+# Verify World Service Zones
+curl -s http://localhost:3001/zones
+
+# Verify World Service Rooms
+curl -s http://localhost:3001/rooms
+
+# Verify Base Service
+curl -s http://localhost:5003/api/base
+
+# Verify Crafting Service
+curl -s http://localhost:5004/api/recipes/definitions
+
+# Verify World Service Spawn Points
+curl -s http://localhost:3001/spawnPoints
+```
+
+# Verify Zombie Service types, then spawn instances for a cycle
+```bash
+curl -s http://localhost:4001/api/zombie-types
+curl -s -X POST http://localhost:4001/api/zombies/spawn -H "Content-Type: application/json"   -d '{"cycleId":"cyc_1","worldZoneId":"zoneZero","spawnCount":3,"typeWeights":{"professor":0.5,"tourist":0.5}}'
+
+# Verify Resource Service types, nodes and an idempotent gather (run it twice: the second returns "already_applied")
+curl -s http://localhost:4002/api/resource-types
+curl -s http://localhost:4002/api/nodes/node_1
+curl -s -X POST http://localhost:4002/api/gather -H "Content-Type: application/json"   -d '{"idempotencyKey":"verify_1","playerId":"p_1","nodeId":"node_1","resourceType":"wood","amount":5}'
+```
+
+Postman collections for every service are in [`postman/`](postman/README.md).
+
+#### 4. Stopping the Stack
+```bash
+# Stop containers while preserving database volume data:
+docker compose down
+
+# Stop containers and wipe database volumes (to test a clean seed again):
+docker compose down -v
+```

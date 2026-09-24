@@ -1,0 +1,337 @@
+services:
+  # --- PostgreSQL Databases ---
+  exam-db:
+    image: postgres:16-alpine
+    container_name: exam-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: exam_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - exam_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d exam_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kahoots-network
+
+  world-db:
+    image: postgres:16-alpine
+    container_name: world-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: world_db
+    ports:
+      - "5434:5432"
+    volumes:
+      - world_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d world_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kahoots-network
+
+  player-db:
+    image: postgres:17-alpine
+    container_name: player-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: player_db
+    ports:
+      - "5435:5432"
+    volumes:
+      - player_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d player_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kahoots-network
+
+  game-db:
+    image: postgres:17-alpine
+    container_name: game-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: game_db
+    ports:
+      - "5436:5432"
+    volumes:
+      - game_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d game_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kahoots-network
+
+  resource-db:
+    image: postgres:17-alpine
+    container_name: resource-db
+    restart: always
+    environment:
+      POSTGRES_USER: ${RESOURCE_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${RESOURCE_DB_PASSWORD:-postgres}
+      POSTGRES_DB: resource_db
+    ports:
+      - "5437:5432"
+    volumes:
+      - resource_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d resource_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kahoots-network
+
+  # --- MongoDB Database ---
+  zombie-db:
+    image: mongo:8
+    container_name: zombie-db
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - zombie_mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kahoots-network
+
+  base-db:
+    image: postgres:16-alpine
+    container_name: base-db
+    restart: always
+    environment:
+      POSTGRES_USER: ${BASE_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${BASE_DB_PASSWORD:-postgres}
+      POSTGRES_DB: base_db
+    ports:
+      - "5438:5432"
+    volumes:
+      - base_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d base_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kahoots-network
+
+  crafting-db:
+    image: postgres:16-alpine
+    container_name: crafting-db
+    restart: always
+    environment:
+      POSTGRES_USER: ${CRAFTING_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${CRAFTING_DB_PASSWORD:-postgres}
+      POSTGRES_DB: crafting_db
+    ports:
+      - "5439:5432"
+    volumes:
+      - crafting_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d crafting_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kahoots-network
+
+  # --- Microservices (using uploaded DockerHub images) ---
+  exam-service:
+    image: mariaelenabotnari/exam-service:1.1.0
+    container_name: exam-service
+    restart: always
+    environment:
+      PORT: 3000
+      NODE_ENV: production
+      DB_HOST: exam-db
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: exam_db
+      DATABASE_URL: "postgresql://postgres:postgres@exam-db:5432/exam_db?schema=public"
+    ports:
+      - "3000:3000"
+    depends_on:
+      exam-db:
+        condition: service_healthy
+    networks:
+      - kahoots-network
+
+  world-service:
+    image: mariaelenabotnari/world-service:1.2.0
+    container_name: world-service
+    restart: always
+    environment:
+      PORT: 3001
+      NODE_ENV: production
+      DB_HOST: world-db
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: world_db
+      DATABASE_URL: "postgresql://postgres:postgres@world-db:5432/world_db?schema=public"
+    ports:
+      - "3001:3001"
+    depends_on:
+      world-db:
+        condition: service_healthy
+    networks:
+      - kahoots-network
+
+  player-service:
+    image: andrei045/player-service:1.1.0
+    container_name: player-service
+    restart: always
+    environment:
+      ConnectionStrings__Postgres: "Host=player-db;Port=5432;Database=player_db;Username=postgres;Password=postgres"
+      Jwt__Secret: "team-compose-development-secret-at-least-32-chars"
+      Jwt__Issuer: player-service
+      Jwt__Audience: kahoots-with-the-undead
+      ASPNETCORE_ENVIRONMENT: Development
+    ports:
+      - "3002:8080"
+    depends_on:
+      player-db:
+        condition: service_healthy
+    networks:
+      - kahoots-network
+
+  game-service:
+    image: andrei045/game-service:1.1.1
+    container_name: game-service
+    restart: always
+    environment:
+      ConnectionStrings__Postgres: "Host=game-db;Port=5432;Database=game_db;Username=postgres;Password=postgres"
+      ASPNETCORE_ENVIRONMENT: Development
+    ports:
+      - "3003:8080"
+    depends_on:
+      game-db:
+        condition: service_healthy
+    networks:
+      - kahoots-network
+
+  resource-service:
+    image: costinloredana/resource-service:1.1.0
+    container_name: resource-service
+    restart: always
+    environment:
+      PORT: 4002
+      POSTGRES_HOST: resource-db
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${RESOURCE_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${RESOURCE_DB_PASSWORD:-postgres}
+      POSTGRES_DB: resource_db
+    ports:
+      - "4002:4002"
+    depends_on:
+      resource-db:
+        condition: service_healthy
+    networks:
+      - kahoots-network
+
+  zombie-service:
+    image: costinloredana/zombie-service:1.1.0
+    container_name: zombie-service
+    restart: always
+    environment:
+      PORT: 4001
+      MONGO_URI: "mongodb://zombie-db:27017/zombie_db"
+    ports:
+      - "4001:4001"
+    depends_on:
+      zombie-db:
+        condition: service_healthy
+    networks:
+      - kahoots-network
+
+  base-service:
+    image: cristi150404/base-service:1.0.0
+    container_name: base-service
+    restart: always
+    environment:
+      POSTGRES_HOST: base-db
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${BASE_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${BASE_DB_PASSWORD:-postgres}
+      POSTGRES_DB: base_db
+      Integrations__UseMocks: "true"
+      Services__Resource: http://resource-service:4002
+      Services__Player: http://player-service:8080
+      Services__World: http://world-service:3001
+      ASPNETCORE_ENVIRONMENT: Development
+    ports:
+      - "5003:5003"
+    depends_on:
+      base-db:
+        condition: service_healthy
+    networks:
+      - kahoots-network
+
+  crafting-service:
+    image: cristi150404/crafting-service:1.0.0
+    container_name: crafting-service
+    restart: always
+    environment:
+      POSTGRES_HOST: crafting-db
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${CRAFTING_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${CRAFTING_DB_PASSWORD:-postgres}
+      POSTGRES_DB: crafting_db
+      Integrations__UseMocks: "true"
+      Services__Resource: http://resource-service:4002
+      Services__Player: http://player-service:8080
+      Services__Exam: http://exam-service:3000
+      Services__World: http://world-service:3001
+      ASPNETCORE_ENVIRONMENT: Development
+    ports:
+      - "5004:5004"
+    depends_on:
+      crafting-db:
+        condition: service_healthy
+    networks:
+      - kahoots-network
+
+volumes:
+  base_postgres_data:
+    driver: local
+  crafting_postgres_data:
+    driver: local
+  player_postgres_data:
+    driver: local
+  game_postgres_data:
+    driver: local
+  exam_postgres_data:
+    driver: local
+  world_postgres_data:
+    driver: local
+  resource_postgres_data:
+    driver: local
+  zombie_mongo_data:
+    driver: local
+
+networks:
+  kahoots-network:
+    driver: bridge
