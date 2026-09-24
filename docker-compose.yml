@@ -278,7 +278,7 @@ services:
       POSTGRES_PASSWORD: ${BASE_DB_PASSWORD:-postgres}
       POSTGRES_DB: base_db
       Integrations__UseMocks: "true"
-      Services__Resource: http://resource-service:5002
+      Services__Resource: http://resource-service:4002
       Services__Player: http://player-service:8080
       Services__World: http://world-service:3001
       ASPNETCORE_ENVIRONMENT: Development
@@ -301,7 +301,7 @@ services:
       POSTGRES_PASSWORD: ${CRAFTING_DB_PASSWORD:-postgres}
       POSTGRES_DB: crafting_db
       Integrations__UseMocks: "true"
-      Services__Resource: http://resource-service:5002
+      Services__Resource: http://resource-service:4002
       Services__Player: http://player-service:8080
       Services__Exam: http://exam-service:3000
       Services__World: http://world-service:3001
