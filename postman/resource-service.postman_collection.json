@@ -38,7 +38,7 @@
       "key": "nodeId",
       "value": "node_1",
       "type": "string",
-      "description": "One of the mocked nodes seeded in InMemoryNodeRepository (node_1..node_4)."
+      "description": "One of the resource nodes created by the Resource Service seed script (node_1..node_6)."
     },
     {
       "key": "gatherIdempotencyKey",

@@ -262,7 +262,7 @@ Owns the definitions of all courses, questions, and the logic to grade them.
 
 ### **DockerHub Image**
 - **Repository:** [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service)
-- **Image Tag:** `mariaelenabotnari/exam-service:1.0.0`
+- **Image Tag:** `mariaelenabotnari/exam-service:1.1.0`
 - **Default Port:** `3000`
 
 ### **Exposed API Endpoints**
@@ -427,7 +427,7 @@ Owns the persistent physical state of the university.
 
 ### **DockerHub Image**
 - **Repository:** [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service)
-- **Image Tag:** `mariaelenabotnari/world-service:1.1.0`
+- **Image Tag:** `mariaelenabotnari/world-service:1.2.0`
 - **Default Port:** `3001`
 
 ### **Exposed API Endpoints**
@@ -827,14 +827,14 @@ Response — 200 OK (one example per category):
 Owns the university's resource economy independently from the physical map.
 
 ### **Owns**
-- Resource type definitions (wood, metal scraps, paper, food, chemicals, electronics). Ids are the lowercase name with spaces replaced by `_` (e.g. `metal_scraps`).
+- Resource type definitions. The seeded ids are `wood`, `metal`, `paper`, `food`, `chemicals` and `electronics`; new ids are the lowercase name with spaces replaced by `_` (e.g. `"Chemical Waste"` → `chemical_waste`).
 - Player resource inventories/balances.
 - Resource node state (how much is available at a given gatherable location).
 - The full transaction/idempotency ledger for every resource change.
 
 ### **DockerHub Image**
 - **Repository:** [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service)
-- **Image Tag:** `costinloredana/resource-service:1.0.1`
+- **Image Tag:** `costinloredana/resource-service:1.1.0`
 - **Default Port:** `4002`
 
 ### **Consumed API Endpoints**
@@ -867,12 +867,12 @@ Creates, partially updates, or deletes a resource type. On create, `name` (strin
 
 Payload
 ```json
-{ "name": "Metal Scraps", "description": "Used in barricades and crafting.", "stackable": true }
+{ "name": "Metal", "description": "Used in barricades and crafting.", "stackable": true }
 ```
 
 Response — 201 Created:
 ```json
-{ "resourceTypeId": "metal_scraps", "name": "Metal Scraps", "description": "Used in barricades and crafting.", "stackable": true }
+{ "resourceTypeId": "metal", "name": "Metal", "description": "Used in barricades and crafting.", "stackable": true }
 ```
 
 Create returns `400 invalid_resource_type` for a missing field and `409 resource_type_exists` for a duplicate. Update returns `200`, delete returns `204`, and both return `404 not_found` for an unknown id.
@@ -887,7 +887,7 @@ Returns a player's current resource balances.
 
 Response
 ```json
-{ "playerId": "p_44", "resources": { "wood": 10, "metal_scraps": 4, "paper": 6, "food": 42 } }
+{ "playerId": "p_44", "resources": { "wood": 10, "metal": 4, "paper": 6, "food": 42 } }
 ```
 
 404 Not Found — the player has no inventory yet.
@@ -931,17 +931,17 @@ Deducts resources for barricading, upgrades, crafting, or feeding Kiki. Either e
 
 Payload
 ```json
-{ "idempotencyKey": "spend_p44_barricade_room9", "playerId": "p_44", "reason": "barricade", "costs": [ { "resourceType": "wood", "amount": 5 }, { "resourceType": "metal_scraps", "amount": 2 } ] }
+{ "idempotencyKey": "spend_p44_barricade_room9", "playerId": "p_44", "reason": "barricade", "costs": [ { "resourceType": "wood", "amount": 5 }, { "resourceType": "metal", "amount": 2 } ] }
 ```
 
 Success Response (200 OK)
 ```json
-{ "status": "applied", "newBalance": { "wood": 5, "metal_scraps": 2 } }
+{ "status": "applied", "newBalance": { "wood": 5, "metal": 2 } }
 ```
 
 Duplicate Response (200 OK)
 ```json
-{ "status": "already_applied", "newBalance": { "wood": 5, "metal_scraps": 2 } }
+{ "status": "already_applied", "newBalance": { "wood": 5, "metal": 2 } }
 ```
 
 Error Response (402 Payment Required) — nothing is deducted and the key isn't stored, so the same key can be retried later:
@@ -975,7 +975,7 @@ Payload
   "idempotencyKey": "refund_craft_p44_barricadekit_001", "playerId": "p_44", "reason": "craft_rollback",
   "costs": [
     { "resourceType": "wood", "amount": 3 },
-    { "resourceType": "metal_scraps", "amount": 1 }
+    { "resourceType": "metal", "amount": 1 }
   ]
 }
 ```
@@ -985,7 +985,7 @@ Success Response (200 OK)
 ```json
 {
   "status": "refunded",
-  "newBalance": { "wood": 13, "metal_scraps": 5 }
+  "newBalance": { "wood": 13, "metal": 5 }
 }
 ```
 Duplicate Response (200 OK)
@@ -993,7 +993,7 @@ Duplicate Response (200 OK)
 ```json
 {
   "status": "already_refunded",
-  "newBalance": { "wood": 13, "metal_scraps": 5 }
+  "newBalance": { "wood": 13, "metal": 5 }
 }
 ```
 
@@ -1446,8 +1446,8 @@ The microservices are containerized and published on DockerHub:
 
 | Service | DockerHub Repository | Image Tag | Default Port | Description |
 |---|---|---|---|---|
-| **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:1.0.0` | `3000` | Academic progression, exams, and achievements |
-| **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:1.1.0` | `3001` | Physical campus layout, rooms, zones, and spawn points |
+| **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:1.1.0` | `3000` | Academic progression, exams, and achievements |
+| **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:1.2.0` | `3001` | Physical campus layout, rooms, zones, and spawn points |
 | **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:1.1.0` | `3002` | Player identity, progression, inventory, and trades |
 | **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:1.1.1` | `3003` | Game sessions, day/night cycle, and timed player actions |
 | **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:1.1.0` | `4001` | Zombie type definitions, spawned instances, and special actions |
@@ -1510,7 +1510,7 @@ docker run -d --name zombie-service --network kahoots-net -p 4001:4001   -e MONG
 
 # Resource Service
 docker run -d --name resource-db --network kahoots-net   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=resource_db postgres:17-alpine
-docker run -d --name resource-service --network kahoots-net -p 4002:4002   -e POSTGRES_HOST=resource-db -e POSTGRES_PORT=5432 -e POSTGRES_USER=postgres   -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=resource_db   costinloredana/resource-service:1.0.1
+docker run -d --name resource-service --network kahoots-net -p 4002:4002   -e POSTGRES_HOST=resource-db -e POSTGRES_PORT=5432 -e POSTGRES_USER=postgres   -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=resource_db   costinloredana/resource-service:1.1.0
 ```
 
 If a container exits right away, the database probably wasn't ready yet. Wait a few seconds and run `docker start zombie-service` or `docker start resource-service`.
@@ -1573,7 +1573,7 @@ docker compose exec zombie-service npm run db:seed
 docker compose exec resource-service npm run db:seed
 ```
 - **Execution & Idempotency:** Connects to `resource_db` and checks the `resource_types` and `resource_nodes` tables separately. Each one is only seeded if it's empty.
-- **Data Seeded:** If empty, seeds **5 resource types** (`wood`, `metal_scraps`, `food`, `paper`, `chemicals`) and **4 resource nodes** (`node_1` to `node_4`).
+- **Data Seeded:** Inserts any missing defaults: **6 resource types** (`wood`, `metal`, `food`, `paper`, `chemicals`, `electronics`) and **6 resource nodes** (`node_1` to `node_6`). Existing rows are never changed.
 
 #### 3. Verify Endpoints
 Once seeded, you can verify the persistent data via HTTP requests (Postman, browser, or curl):
