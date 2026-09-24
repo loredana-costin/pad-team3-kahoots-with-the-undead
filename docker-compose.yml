@@ -159,7 +159,7 @@ services:
 
   # --- Microservices (using uploaded DockerHub images) ---
   exam-service:
-    image: mariaelenabotnari/exam-service:1.0.0
+    image: mariaelenabotnari/exam-service:1.1.0
     container_name: exam-service
     restart: always
     environment:
@@ -180,7 +180,7 @@ services:
       - kahoots-network
 
   world-service:
-    image: mariaelenabotnari/world-service:1.1.0
+    image: mariaelenabotnari/world-service:1.2.0
     container_name: world-service
     restart: always
     environment:
