@@ -1451,7 +1451,7 @@ The microservices are containerized and published on DockerHub:
 | **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:1.1.0` | `3002` | Player identity, progression, inventory, and trades |
 | **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:1.1.1` | `3003` | Game sessions, day/night cycle, and timed player actions |
 | **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:1.1.0` | `4001` | Zombie type definitions, spawned instances, and special actions |
-| **Resource Service** | [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service) | `costinloredana/resource-service:1.0.1` | `4002` | Resource types, player balances, nodes, and idempotent transactions |
+| **Resource Service** | [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service) | `costinloredana/resource-service:1.1.0` | `4002` | Resource types, player balances, nodes, and idempotent transactions |
 | **Base Service** | [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service) | `cristi150404/base-service:1.0.0` | `5003` | Player bases, barricades, facilities, and decorations |
 | **Crafting Service** | [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service) | `cristi150404/crafting-service:1.0.0` | `5004` | Recipes, unlock conditions, and crafting sagas |
 
@@ -1493,7 +1493,7 @@ Both images are multi-stage Node.js 20 builds that run as the non-root `node` us
 
 | | Zombie Service | Resource Service |
 |---|---|---|
-| **Image** | `costinloredana/zombie-service:1.1.0` (`node:20-alpine`) | `costinloredana/resource-service:1.0.1` (`node:20-slim` + OpenSSL for Prisma) |
+| **Image** | `costinloredana/zombie-service:1.1.0` (`node:20-alpine`) | `costinloredana/resource-service:1.1.0` (`node:20-slim` + OpenSSL for Prisma) |
 | **Database** | MongoDB 8 (`mongo:8`) | PostgreSQL 17 (`postgres:17-alpine`) |
 | **Required env** | `MONGO_URI`, e.g. `mongodb://zombie-db:27017/zombie_db` | `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, or a single `DATABASE_URL` that takes precedence over them |
 | **Optional env** | `PORT` (default `4001`) | `PORT` (default `4002`) |
