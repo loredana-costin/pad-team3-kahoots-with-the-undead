@@ -22,3 +22,7 @@
 [submodule "crafting-service"]
 	path = crafting-service
 	url = https://github.com/CristiBulat/crafting-service.git
+[submodule "gateway-service"]
+	path = gateway-service
+	url = https://github.com/loredana-costin/gateway-service.git
+	branch = development
