@@ -320,6 +320,8 @@ services:
     restart: always
     environment:
       PORT: 8000
+      EXAM_SERVICE_URL: http://exam-service:3000
+      WORLD_SERVICE_URL: http://world-service:3001
     ports:
       - "8000:8000"
     networks:
