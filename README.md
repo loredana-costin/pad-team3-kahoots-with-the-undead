@@ -263,7 +263,7 @@ Owns the definitions of all courses, questions, and the logic to grade them.
 ### **DockerHub Image**
 - **Repository:** [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service)
 - **Image Tag:** `mariaelenabotnari/exam-service:1.1.0`
-- **Default Port:** `3000`
+- **Default Port:** `Internal only (3000), accessible via Gateway (8000)`
 
 ### **Exposed API Endpoints**
 
@@ -1465,8 +1465,7 @@ To run these services locally via Docker Compose, ensure the host machine meets 
    - Docker Engine `20.10.0+` or Docker Desktop `4.0.0+`
    - Docker Compose `v2.0.0+`
 2. **Available Host Ports**:
-   - `8000` — Gateway Service HTTP API
-   - `3000` — Exam Service HTTP API
+   - `8000` — Gateway Service HTTP API (Routes to Exam Service)
    - `3001` — World Service HTTP API
    - `5433` — Exam PostgreSQL Database (`exam-db`)
    - `5434` — World PostgreSQL Database (`world-db`)
@@ -1581,7 +1580,7 @@ Once seeded, you can verify the persistent data via HTTP requests (Postman, brow
 
 ```bash
 # Verify Exam Service
-curl -s http://localhost:3000/exams
+curl -s http://localhost:8000/exams
 
 # Verify World Service Zones
 curl -s http://localhost:3001/zones

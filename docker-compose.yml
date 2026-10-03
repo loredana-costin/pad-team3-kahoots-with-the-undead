@@ -171,8 +171,8 @@ services:
       DB_PASSWORD: postgres
       DB_NAME: exam_db
       DATABASE_URL: "postgresql://postgres:postgres@exam-db:5432/exam_db?schema=public"
-    ports:
-      - "3000:3000"
+    expose:
+      - "3000"
     depends_on:
       exam-db:
         condition: service_healthy
