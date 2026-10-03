@@ -428,7 +428,7 @@ Owns the persistent physical state of the university.
 ### **DockerHub Image**
 - **Repository:** [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service)
 - **Image Tag:** `mariaelenabotnari/world-service:1.2.0`
-- **Default Port:** `3001`
+- **Default Port:** `Internal only (3001), accessible via Gateway (8000)`
 
 ### **Exposed API Endpoints**
 
@@ -1447,7 +1447,7 @@ The microservices are containerized and published on DockerHub:
 |---|---|---|---|---|
 | **Gateway Service** | [`mariaelenabotnari/gateway-service`](https://hub.docker.com/r/mariaelenabotnari/gateway-service) | `mariaelenabotnari/gateway-service:1.0.0` | `8000` | System entry point, async request routing layer |
 | **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:1.1.0` | `3000` | Academic progression, exams, and achievements |
-| **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:1.2.0` | `3001` | Physical campus layout, rooms, zones, and spawn points |
+| **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:1.2.0` | `Internal (3001)` | Physical campus layout, rooms, zones, and spawn points |
 | **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:1.1.0` | `3002` | Player identity, progression, inventory, and trades |
 | **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:1.1.1` | `3003` | Game sessions, day/night cycle, and timed player actions |
 | **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:1.1.0` | `4001` | Zombie type definitions, spawned instances, and special actions |
@@ -1465,8 +1465,7 @@ To run these services locally via Docker Compose, ensure the host machine meets 
    - Docker Engine `20.10.0+` or Docker Desktop `4.0.0+`
    - Docker Compose `v2.0.0+`
 2. **Available Host Ports**:
-   - `8000` — Gateway Service HTTP API (Routes to Exam Service)
-   - `3001` — World Service HTTP API
+   - `8000` — Gateway Service HTTP API (Routes to Exam and World Services)
    - `5433` — Exam PostgreSQL Database (`exam-db`)
    - `5434` — World PostgreSQL Database (`world-db`)
    - `3002` — Player Service HTTP API
@@ -1583,10 +1582,10 @@ Once seeded, you can verify the persistent data via HTTP requests (Postman, brow
 curl -s http://localhost:8000/exams
 
 # Verify World Service Zones
-curl -s http://localhost:3001/zones
+curl -s http://localhost:8000/world/zones
 
 # Verify World Service Rooms
-curl -s http://localhost:3001/rooms
+curl -s http://localhost:8000/world/rooms
 
 # Verify Base Service
 curl -s http://localhost:5003/api/base
@@ -1595,7 +1594,7 @@ curl -s http://localhost:5003/api/base
 curl -s http://localhost:5004/api/recipes/definitions
 
 # Verify World Service Spawn Points
-curl -s http://localhost:3001/spawnPoints
+curl -s http://localhost:8000/world/spawnPoints
 ```
 
 # Verify Zombie Service types, then spawn instances for a cycle
