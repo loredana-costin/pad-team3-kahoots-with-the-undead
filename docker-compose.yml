@@ -314,6 +314,18 @@ services:
     networks:
       - kahoots-network
 
+  gateway-service:
+    build:
+      context: ./gateway-service
+    container_name: gateway-service
+    restart: always
+    environment:
+      PORT: 8000
+    ports:
+      - "8000:8000"
+    networks:
+      - kahoots-network
+
 volumes:
   base_postgres_data:
     driver: local
