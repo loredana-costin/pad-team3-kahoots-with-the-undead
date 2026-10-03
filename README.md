@@ -19,7 +19,7 @@ Microservices are implemented using two technologies:
 |---|---|
 | Ceaetchii Andrei | Player Service, Game Service |
 | Botnari Maria-Elena | Exam Service, World Service |
-| Costin Loredana | Zombie Service, Resource Service |
+| Costin Loredana | Gateway Service, Zombie Service, Resource Service |
 | Bulat Cristian | Base Service, Crafting Service |
 
 ---
@@ -47,7 +47,7 @@ The full communication contract — every endpoint, its payload, and its respons
 |---|---|---|---|---|---|
 | Ceaetchii Andrei | Player Service, Game Service | C# / ASP.NET Core | PostgreSQL (both services) | REST/HTTP + WebSockets + RabbitMQ Events | C# provides strong typing and asynchronous programming. PostgreSQL ensures data integrity and transactions for player identity, inventory and trades. Game Service uses it as well so both services share one architecture: the same generic repository, migration runner and base entity. Its state is short-lived but still relational (sessions, rosters, timed actions), and one DBMS keeps deployment and the shared compose file simpler. REST is used for request/response communication, WebSockets for real-time updates, and RabbitMQ for asynchronous cross-service events. Trade-off: Redis would fit ephemeral session state better and was the original choice, but running a single database across both services is simpler to operate at this scale. |
 | Botnari Maria-Elena | Exam Service, World Service | Node.js/TypeScript (Express) | PostgreSQL | REST + RabbitMQ events | Both services store structured, relational data (exams and attempts for one, rooms and connections for the other), so one language and one database keeps things simple and easy to maintain across both. Trade-off: without EF Core's built-in migration tooling, schema changes to the room graph require more manual discipline to keep consistent. |
-| Costin Loredana | Zombie Service, Resource Service | Node.js/TypeScript (Express) | Zombie: MongoDB; Resource: PostgreSQL | Zombie: REST; Resource: REST, idempotency-key-gated | Node's non-blocking I/O fits both I/O-bound services, which wait on DB calls. MongoDB's flexible schema enables rapid Zombie Service iteration without migrations as ability types expand. The correctness-critical Resource Service uses TypeScript and DB transactions to enforce atomic, idempotent balance updates, so duplicate completion events never double-award resources. Trade-off: Node is weaker at CPU-heavy work, but neither service does any, so this cost doesn't apply here. |
+| Costin Loredana | Gateway Service, Zombie Service, Resource Service | Gateway: Python (FastAPI); Others: Node.js/TypeScript (Express) | Gateway: None; Zombie: MongoDB; Resource: PostgreSQL | Gateway: REST routing; Zombie: REST; Resource: REST, idempotency-key-gated | Gateway uses FastAPI to provide an async entry point and routing layer. Node's non-blocking I/O fits the other two I/O-bound services. MongoDB's flexible schema enables rapid Zombie Service iteration without migrations as ability types expand. The correctness-critical Resource Service uses TypeScript and DB transactions to enforce atomic, idempotent balance updates. Trade-off: Node is weaker at CPU-heavy work, but neither service does any, so this cost doesn't apply here. |
 | Bulat Cristian | Base Service, Crafting Service | C#/.NET (ASP.NET Core) | PostgreSQL | REST for Base and Crafting Services; RabbitMQ publisher and consumer for both | Both services perform "spend and apply" operations that must not partially succeed. C#'s explicit exception handling and EF Core transactions make atomic, saga-style operations across service calls easier to reason about than a dynamically-typed alternative. Trade-off: more boilerplate than Node for simple CRUD, accepted for the correctness guarantee. |
 
 ---
@@ -1445,6 +1445,7 @@ The microservices are containerized and published on DockerHub:
 
 | Service | DockerHub Repository | Image Tag | Default Port | Description |
 |---|---|---|---|---|
+| **Gateway Service** | [`mariaelenabotnari/gateway-service`](https://hub.docker.com/r/mariaelenabotnari/gateway-service) | `mariaelenabotnari/gateway-service:1.0.0` | `8000` | System entry point, async request routing layer |
 | **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:1.1.0` | `3000` | Academic progression, exams, and achievements |
 | **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:1.2.0` | `3001` | Physical campus layout, rooms, zones, and spawn points |
 | **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:1.1.0` | `3002` | Player identity, progression, inventory, and trades |
@@ -1464,6 +1465,7 @@ To run these services locally via Docker Compose, ensure the host machine meets 
    - Docker Engine `20.10.0+` or Docker Desktop `4.0.0+`
    - Docker Compose `v2.0.0+`
 2. **Available Host Ports**:
+   - `8000` — Gateway Service HTTP API
    - `3000` — Exam Service HTTP API
    - `3001` — World Service HTTP API
    - `5433` — Exam PostgreSQL Database (`exam-db`)
@@ -1519,11 +1521,11 @@ If a container exits right away, the database probably wasn't ready yet. Wait a 
 ### Step-by-Step Execution Guide
 
 #### 1. Start the Microservices & Databases
-From the repository root, start all sixteen containers in detached mode:
+From the repository root, start all seventeen containers in detached mode:
 ```bash
 docker compose up -d
 ```
-Docker Compose will automatically pull the images from DockerHub, initialize the database containers (`exam-db` on 5433, `world-db` on 5434, `player-db` on 5435, `game-db` on 5436, `resource-db` on 5437, `zombie-db` on 27017, `base-db` on 5438, `crafting-db` on 5439), perform healthchecks, and launch `exam-service`, `world-service`, `player-service`, `game-service`, `zombie-service`, `resource-service`, `base-service` and `crafting-service`.
+Docker Compose will automatically pull the images from DockerHub, initialize the database containers (`exam-db` on 5433, `world-db` on 5434, `player-db` on 5435, `game-db` on 5436, `resource-db` on 5437, `zombie-db` on 27017, `base-db` on 5438, `crafting-db` on 5439), perform healthchecks, and launch `gateway-service`, `exam-service`, `world-service`, `player-service`, `game-service`, `zombie-service`, `resource-service`, `base-service` and `crafting-service`.
 
 To check container health and status:
 ```bash
