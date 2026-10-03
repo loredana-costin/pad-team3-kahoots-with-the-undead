@@ -1319,7 +1319,6 @@ type/short-description-issueID
 2. Make commits with clear, descriptive messages
 3. Open Pull Request to `development`
 4. After approval, squash and merge
-5. Delete feature branch after merge
 
 ## Pull Request Requirements
 
@@ -1331,7 +1330,7 @@ Located at `.github/PULL_REQUEST_TEMPLATE.md`:
 
 ```markdown
 ## What does this PR do?
-Brief description and related issue (Closes #XX)
+Brief description and related issue
 
 ## Changes Made
 - Change 1
