@@ -262,7 +262,7 @@ Owns the definitions of all courses, questions, and the logic to grade them.
 
 ### **DockerHub Image**
 - **Repository:** [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service)
-- **Image Tag:** `mariaelenabotnari/exam-service:2.0.0`
+- **Image Tag:** `mariaelenabotnari/exam-service:2.0.1`
 - **Default Port:** `Internal only (3000), accessible via Gateway (8000)`
 
 ### **Exposed API Endpoints**
@@ -427,7 +427,7 @@ Owns the persistent physical state of the university.
 
 ### **DockerHub Image**
 - **Repository:** [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service)
-- **Image Tag:** `mariaelenabotnari/world-service:2.0.0`
+- **Image Tag:** `mariaelenabotnari/world-service:2.0.1`
 - **Default Port:** `Internal only (3001), accessible via Gateway (8000)`
 
 ### **Exposed API Endpoints**
