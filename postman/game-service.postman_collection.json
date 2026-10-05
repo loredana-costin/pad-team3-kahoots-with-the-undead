@@ -2,13 +2,13 @@
   "info": {
     "_postman_id": "b41e7d05-9c62-4f38-a7d1-6e2b5c930f44",
     "name": "Game Service",
-    "description": "Postman Collection for testing Game Service: sessions and lobbies, the day/night cycle, and timed player actions.\n\nRun the collection in order - requests share state through collection variables. Every run creates its own sessions, so it can be run repeatedly without resetting the database.\n\nStart the service first (see game-service/README.md). Default baseUrl is http://localhost:5299.",
+    "description": "Postman Collection for testing Game Service: sessions and lobbies, the day/night cycle, and timed player actions.\n\nRun the collection in order - requests share state through collection variables. Every run creates its own sessions, so it can be run repeatedly without resetting the database.\n\nStart the service first (see game-service/README.md). Default baseUrl is http://localhost:8000, the Gateway, which forwards /api/sessions, /api/actions and /api/rooms to Game Service.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     {
       "key": "baseUrl",
-      "value": "http://localhost:3003",
+      "value": "http://localhost:8000",
       "type": "string"
     },
     {
@@ -30,11 +30,21 @@
       "key": "secondActionId",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "eventZoneId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "eventSessionId",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
     {
-      "name": "01. Health Check (200)",
+      "name": "01. Gateway Health Check (200)",
       "event": [
         {
           "listen": "test",
@@ -42,7 +52,7 @@
             "type": "text/javascript",
             "exec": [
               "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
-              "pm.test(\"Service reports healthy\", () => pm.expect(pm.response.json().status).to.eql(\"healthy\"));"
+              "pm.test(\"Gateway reports ok\", () => pm.expect(pm.response.json().status).to.eql(\"ok\"));"
             ]
           }
         }
@@ -1233,6 +1243,250 @@
             "api",
             "actions",
             "act_doesnotexist"
+          ]
+        }
+      }
+    },
+    {
+      "name": "32. Create A Lobby In A Fresh Zone (200)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set(\"eventZoneId\", \"zone_evt_\" + Date.now());"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Lobby opened in the fresh zone\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.zoneId).to.eql(pm.collectionVariables.get(\"eventZoneId\"));",
+              "    pm.collectionVariables.set(\"eventSessionId\", body.session_id);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Event Zone Lobby\",\n  \"zoneId\": \"{{eventZoneId}}\",\n  \"maxPlayers\": 2\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "33. Start The Fresh Zone Session (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Session is active\", () => pm.expect(pm.response.json().status).to.eql(\"active\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{eventSessionId}}/start",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{eventSessionId}}",
+            "start"
+          ]
+        }
+      }
+    },
+    {
+      "name": "34. Deliver ZoneUnlockedEvent (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Event applied and the active session in that zone was notified\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.eventName).to.eql(\"ZoneUnlockedEvent\");",
+              "    pm.expect(body.status).to.eql(\"applied\");",
+              "    pm.expect(body.notificationsCreated).to.eql(1);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventName\": \"ZoneUnlockedEvent\",\n  \"payload\": {\n    \"zoneId\": \"{{eventZoneId}}\",\n    \"roomsAdded\": [\"room_evt_1\", \"room_evt_2\"],\n    \"timestamp\": \"2026-10-05T12:00:00Z\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/events",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "events"
+          ]
+        }
+      }
+    },
+    {
+      "name": "35. Pending Notifications Include zone_unlocked (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"A zone_unlocked notification is waiting for the session\", () => {",
+              "    const hit = pm.response.json().find(n => n.type === \"zone_unlocked\");",
+              "    pm.expect(hit, \"zone_unlocked notification\").to.exist;",
+              "    pm.expect(hit.payload.zone).to.eql(pm.collectionVariables.get(\"eventZoneId\"));",
+              "    pm.expect(hit.payload.roomsAdded).to.eql([\"room_evt_1\", \"room_evt_2\"]);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{eventSessionId}}/notifications",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{eventSessionId}}",
+            "notifications"
+          ]
+        }
+      }
+    },
+    {
+      "name": "36. Deliver Same Event Again Is Idempotent (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Replay is reported as already_processed and notifies nobody\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.status).to.eql(\"already_processed\");",
+              "    pm.expect(body.notificationsCreated).to.eql(0);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventName\": \"ZoneUnlockedEvent\",\n  \"payload\": {\n    \"zoneId\": \"{{eventZoneId}}\",\n    \"roomsAdded\": [\"room_evt_1\", \"room_evt_2\"],\n    \"timestamp\": \"2026-10-05T12:00:00Z\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/events",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "events"
+          ]
+        }
+      }
+    },
+    {
+      "name": "37. Deliver Unknown Event (400)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 400 Bad Request\", () => pm.response.to.have.status(400));",
+              "pm.test(\"Rejected with unknown_event\", () => pm.expect(pm.response.json().reason).to.eql(\"unknown_event\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventName\": \"SomethingNobodyPublishes\",\n  \"payload\": {}\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/events",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "events"
           ]
         }
       }

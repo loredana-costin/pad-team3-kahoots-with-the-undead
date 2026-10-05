@@ -219,14 +219,14 @@ services:
       - kahoots-network
 
   game-service:
-    image: andrei045/game-service:1.1.1
+    image: andrei045/game-service:2.0.0
     container_name: game-service
     restart: always
     environment:
       ConnectionStrings__Postgres: "Host=game-db;Port=5432;Database=game_db;Username=postgres;Password=postgres"
       ASPNETCORE_ENVIRONMENT: Development
-    ports:
-      - "3003:8080"
+    expose:
+      - "8080"
     depends_on:
       game-db:
         condition: service_healthy
@@ -323,6 +323,7 @@ services:
       EXAM_SERVICE_URL: http://exam-service:3000
       WORLD_SERVICE_URL: http://world-service:3001
       PLAYER_SERVICE_URL: http://player-service:8080
+      GAME_SERVICE_URL: http://game-service:8080
     ports:
       - "8000:8000"
     networks:
