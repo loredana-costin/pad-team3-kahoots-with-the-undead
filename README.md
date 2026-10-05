@@ -1449,7 +1449,7 @@ The microservices are containerized and published on DockerHub:
 | **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:2.0.0` | `Internal (3000)` | Academic progression, exams, and achievements |
 | **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:2.0.0` | `Internal (3001)` | Physical campus layout, rooms, zones, and spawn points |
 | **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:2.0.0` | `Internal (8080)` | Player identity, progression, inventory, and trades |
-| **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:1.1.1` | `3003` | Game sessions, day/night cycle, and timed player actions |
+| **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:2.0.0` | `Internal (8080)` | Game sessions, day/night cycle, and timed player actions |
 | **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:1.1.0` | `4001` | Zombie type definitions, spawned instances, and special actions |
 | **Resource Service** | [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service) | `costinloredana/resource-service:1.1.0` | `4002` | Resource types, player balances, nodes, and idempotent transactions |
 | **Base Service** | [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service) | `cristi150404/base-service:1.0.0` | `5003` | Player bases, barricades, facilities, and decorations |
@@ -1465,10 +1465,9 @@ To run these services locally via Docker Compose, ensure the host machine meets 
    - Docker Engine `20.10.0+` or Docker Desktop `4.0.0+`
    - Docker Compose `v2.0.0+`
 2. **Available Host Ports**:
-   - `8000` — Gateway Service HTTP API (Routes to Exam, World and Player Services)
+   - `8000` — Gateway Service HTTP API (Routes to Exam, World, Player and Game Services)
    - `5433` — Exam PostgreSQL Database (`exam-db`)
    - `5434` — World PostgreSQL Database (`world-db`)
-   - `3003` — Game Service HTTP API
    - `5435` — Player PostgreSQL Database (`player-db`)
    - `5436` — Game PostgreSQL Database (`game-db`)
    - `4001` — Zombie Service HTTP API
@@ -1588,6 +1587,9 @@ curl -s http://localhost:8000/world/rooms
 
 # Verify Player Service through the Gateway (registers a throwaway account; password must be 8+ characters)
 curl -s -X POST http://localhost:8000/api/auth/register -H "Content-Type: application/json" -d "{\"username\":\"verify_$RANDOM\",\"password\":\"hunter2pass\",\"email\":\"verify@faf.md\"}"
+
+# Verify Game Service through the Gateway
+curl -s http://localhost:8000/api/sessions
 
 # Verify Base Service
 curl -s http://localhost:5003/api/base
