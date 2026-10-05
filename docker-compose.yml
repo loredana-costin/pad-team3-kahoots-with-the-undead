@@ -159,7 +159,7 @@ services:
 
   # --- Microservices (using uploaded DockerHub images) ---
   exam-service:
-    image: mariaelenabotnari/exam-service:1.1.0
+    image: mariaelenabotnari/exam-service:2.0.0
     container_name: exam-service
     restart: always
     environment:
@@ -180,7 +180,7 @@ services:
       - kahoots-network
 
   world-service:
-    image: mariaelenabotnari/world-service:1.2.0
+    image: mariaelenabotnari/world-service:2.0.0
     container_name: world-service
     restart: always
     environment:
@@ -315,12 +315,13 @@ services:
       - kahoots-network
 
   gateway-service:
-    build:
-      context: ./gateway-service
+    image: mariaelenabotnari/gateway-service:2.0.0
     container_name: gateway-service
     restart: always
     environment:
       PORT: 8000
+      EXAM_SERVICE_URL: http://exam-service:3000
+      WORLD_SERVICE_URL: http://world-service:3001
     ports:
       - "8000:8000"
     networks:
