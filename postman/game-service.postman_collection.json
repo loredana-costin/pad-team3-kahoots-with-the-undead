@@ -40,6 +40,11 @@
       "key": "eventSessionId",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "zombieInstanceId",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
@@ -103,7 +108,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"name\": \"FAF Block 1\",\n  \"zoneId\": \"zone_12\",\n  \"maxPlayers\": 4\n}"
+          "raw": "{\n  \"name\": \"FAF Block 1\",\n  \"zoneId\": \"mathematicsWing\",\n  \"maxPlayers\": 4\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/api/sessions",
@@ -145,7 +150,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"name\": \"x\",\n  \"zoneId\": \"zone_12\",\n  \"maxPlayers\": 99\n}"
+          "raw": "{\n  \"name\": \"x\",\n  \"zoneId\": \"mathematicsWing\",\n  \"maxPlayers\": 99\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/api/sessions",
@@ -929,7 +934,7 @@
               "    const body = pm.response.json();",
               "    pm.expect(body.cycle).to.eql(\"night\");",
               "    pm.expect(body.cycleNumber).to.eql(1);",
-              "    pm.expect(body.zone).to.eql(\"zone_12\");",
+              "    pm.expect(body.zone).to.eql(\"mathematicsWing\");",
               "});"
             ]
           }
@@ -1487,6 +1492,316 @@
             "api",
             "sessions",
             "events"
+          ]
+        }
+      }
+    },
+    {
+      "name": "38. Rooms In The Session Zone (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Rooms of mathematicsWing come from World Service\", () => {",
+              "    const rooms = pm.response.json().rooms;",
+              "    pm.expect(rooms).to.be.an(\"array\").that.is.not.empty;",
+              "    rooms.forEach(r => pm.expect(r.zoneName).to.eql(\"mathematicsWing\"));",
+              "    pm.expect(rooms.map(r => r.roomName)).to.include(\"mathematicsExamHall\");",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/rooms",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "rooms"
+          ]
+        }
+      }
+    },
+    {
+      "name": "39. Spawn Points In The Exam Hall (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Two professor spawn points\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.roomId).to.eql(\"mathematicsExamHall\");",
+              "    pm.expect(body.spawnPoints).to.have.lengthOf(2);",
+              "    body.spawnPoints.forEach(p => pm.expect(p.zombieCategoryAllowed).to.eql(\"professor\"));",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/rooms/mathematicsExamHall/spawn-points",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "rooms",
+            "mathematicsExamHall",
+            "spawn-points"
+          ]
+        }
+      }
+    },
+    {
+      "name": "40. Spawn Zombies For The Cycle (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Five zombies with Zombie Service instance ids\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body).to.have.lengthOf(5);",
+              "    body.forEach(z => {",
+              "        pm.expect(z.instanceId).to.match(/^z_/);",
+              "        pm.expect(z.health).to.be.above(0);",
+              "    });",
+              "    pm.collectionVariables.set(\"zombieInstanceId\", body[0].instanceId);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/zombies/spawn",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "zombies",
+            "spawn"
+          ]
+        }
+      }
+    },
+    {
+      "name": "41. Spawn Again Returns The Same Wave (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"One wave per cycle\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body).to.have.lengthOf(5);",
+              "    pm.expect(body[0].instanceId).to.eql(pm.collectionVariables.get(\"zombieInstanceId\"));",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/zombies/spawn",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "zombies",
+            "spawn"
+          ]
+        }
+      }
+    },
+    {
+      "name": "42. List Session Zombies (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"The wave is stored with the session\", () => pm.expect(pm.response.json().length).to.be.at.least(5));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/zombies",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "zombies"
+          ]
+        }
+      }
+    },
+    {
+      "name": "43. Trigger Special Action On p_44 (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Zombie Service decided the action\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.targetPlayerId).to.eql(\"p_44\");",
+              "    pm.expect([\"initiate_exam\", \"steal_resource\", \"steal_xp\"]).to.include(body.actionType);",
+              "    if (body.actionType === \"initiate_exam\") pm.expect(body.exam.attemptId).to.be.a(\"string\");",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"targetPlayerId\": \"p_44\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/zombies/{{zombieInstanceId}}/special-action",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "zombies",
+            "{{zombieInstanceId}}",
+            "special-action"
+          ]
+        }
+      }
+    },
+    {
+      "name": "44. Special Action On Unknown Zombie (404)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 404 Not Found\", () => pm.response.to.have.status(404));",
+              "pm.test(\"Rejected with zombie_not_found\", () => pm.expect(pm.response.json().reason).to.eql(\"zombie_not_found\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"targetPlayerId\": \"p_44\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/zombies/z_doesnotexist/special-action",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "zombies",
+            "z_doesnotexist",
+            "special-action"
+          ]
+        }
+      }
+    },
+    {
+      "name": "45. Special Action For Player Not In Session (404)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 404 Not Found\", () => pm.response.to.have.status(404));",
+              "pm.test(\"Rejected with player_not_in_session\", () => pm.expect(pm.response.json().reason).to.eql(\"player_not_in_session\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"targetPlayerId\": \"p_nobody\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/zombies/{{zombieInstanceId}}/special-action",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "zombies",
+            "{{zombieInstanceId}}",
+            "special-action"
           ]
         }
       }
