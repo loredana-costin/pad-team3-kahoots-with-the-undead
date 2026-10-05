@@ -5,7 +5,7 @@ Collections for testing each service. One file per service, Postman schema v2.1.
 | Collection | Service | Default baseUrl |
 |---|---|---|
 | `player-service.postman_collection.json` | Player Service | `http://localhost:8000` |
-| `game-service.postman_collection.json` | Game Service | `http://localhost:3003` |
+| `game-service.postman_collection.json` | Game Service | `http://localhost:8000` |
 | `exam-service.postman_collection.json` | Exam Service | `http://localhost:3000` |
 | `world-service.postman_collection.json` | World Service | `http://localhost:3001` |
 | `zombie-service.postman_collection.json` | Zombie Service | `http://localhost:4001` |
