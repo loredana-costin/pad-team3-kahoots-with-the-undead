@@ -201,7 +201,7 @@ services:
       - kahoots-network
 
   player-service:
-    image: andrei045/player-service:1.1.0
+    image: andrei045/player-service:2.0.0
     container_name: player-service
     restart: always
     environment:
@@ -210,8 +210,8 @@ services:
       Jwt__Issuer: player-service
       Jwt__Audience: kahoots-with-the-undead
       ASPNETCORE_ENVIRONMENT: Development
-    ports:
-      - "3002:8080"
+    expose:
+      - "8080"
     depends_on:
       player-db:
         condition: service_healthy
@@ -315,13 +315,14 @@ services:
       - kahoots-network
 
   gateway-service:
-    image: mariaelenabotnari/gateway-service:2.0.0
+    image: mariaelenabotnari/gateway-service:2.1.0
     container_name: gateway-service
     restart: always
     environment:
       PORT: 8000
       EXAM_SERVICE_URL: http://exam-service:3000
       WORLD_SERVICE_URL: http://world-service:3001
+      PLAYER_SERVICE_URL: http://player-service:8080
     ports:
       - "8000:8000"
     networks:
