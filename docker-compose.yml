@@ -219,12 +219,16 @@ services:
       - kahoots-network
 
   game-service:
-    image: andrei045/game-service:2.0.0
+    image: andrei045/game-service:2.1.0
     container_name: game-service
     restart: always
     environment:
       ConnectionStrings__Postgres: "Host=game-db;Port=5432;Database=game_db;Username=postgres;Password=postgres"
       ASPNETCORE_ENVIRONMENT: Development
+      Services__World: http://gateway-service:8000
+      # Direct until Zombie Service has a Gateway route; then http://gateway-service:8000.
+      Services__Zombie: http://zombie-service:4001
+      Integrations__MockedServices: ""
     expose:
       - "8080"
     depends_on:
