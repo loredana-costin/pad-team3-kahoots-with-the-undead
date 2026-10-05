@@ -45,6 +45,31 @@
       "key": "zombieInstanceId",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "basePlayerId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "baseSessionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "barricadeActionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "upgradeActionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "unclaimedActionId",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
@@ -370,7 +395,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"playerId\": \"p_44\",\n  \"actionType\": \"scavenge\",\n  \"targetNodeId\": \"node_7\",\n  \"durationSeconds\": 300\n}"
+          "raw": "{\n  \"playerId\": \"p_44\",\n  \"actionType\": \"scavenge\",\n  \"targetNodeId\": \"node_3\",\n  \"durationSeconds\": 25\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/actions",
@@ -487,7 +512,7 @@
               "    pm.collectionVariables.set(\"actionId\", body.actionId);",
               "});",
               "pm.test(\"Idempotency key carries type, player and node\", () => {",
-              "    pm.expect(pm.response.json().idempotencyKey).to.match(/^scavenge_p_44_node_7_/);",
+              "    pm.expect(pm.response.json().idempotencyKey).to.match(/^scavenge_p_44_node_3_/);",
               "});"
             ]
           }
@@ -503,7 +528,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"playerId\": \"p_44\",\n  \"actionType\": \"scavenge\",\n  \"targetNodeId\": \"node_7\",\n  \"durationSeconds\": 300\n}"
+          "raw": "{\n  \"playerId\": \"p_44\",\n  \"actionType\": \"scavenge\",\n  \"targetNodeId\": \"node_3\",\n  \"durationSeconds\": 25\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/actions",
@@ -810,6 +835,9 @@
               "    const body = pm.response.json();",
               "    pm.expect(body.status).to.eql(\"completed\");",
               "    pm.expect(body.percent).to.eql(100);",
+              "    pm.expect(body.result.kind).to.eql(\"gather\");",
+              "    pm.expect(body.result.gather.status).to.eql(\"applied\");",
+              "    pm.expect(body.result.gather.newBalance.food).to.be.at.least(1);",
               "});"
             ]
           }
@@ -1802,6 +1830,403 @@
             "zombies",
             "{{zombieInstanceId}}",
             "special-action"
+          ]
+        }
+      }
+    },
+    {
+      "name": "46. Start Gather On Unknown Node (404)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 404 Not Found\", () => pm.response.to.have.status(404));",
+              "pm.test(\"Rejected with node_not_found\", () => pm.expect(pm.response.json().reason).to.eql(\"node_not_found\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"p_77\",\n  \"actionType\": \"scavenge\",\n  \"targetNodeId\": \"node_99\",\n  \"durationSeconds\": 300\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/actions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "actions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "47. Create A Lobby For A Fresh Base Owner (200)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set(\"basePlayerId\", \"p_base_\" + Date.now());"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Lobby opened\", () => pm.collectionVariables.set(\"baseSessionId\", pm.response.json().session_id));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Base Actions Lobby\",\n  \"zoneId\": \"mathematicsWing\",\n  \"maxPlayers\": 2\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "48. Join The Fresh Base Owner (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Roster holds the new player\", () => pm.expect(pm.response.json().players).to.have.lengthOf(1));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"{{basePlayerId}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{baseSessionId}}/players",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{baseSessionId}}",
+            "players"
+          ]
+        }
+      }
+    },
+    {
+      "name": "49. Start The Base Actions Session (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Session is active\", () => pm.expect(pm.response.json().status).to.eql(\"active\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{baseSessionId}}/start",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{baseSessionId}}",
+            "start"
+          ]
+        }
+      }
+    },
+    {
+      "name": "50. Start Barricade Of faf_cab (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Barricade action started\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.status).to.eql(\"in_progress\");",
+              "    pm.expect(body.idempotencyKey).to.match(/^barricade_p_base_\\d+_faf_cab_/);",
+              "    pm.collectionVariables.set(\"barricadeActionId\", body.actionId);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"{{basePlayerId}}\",\n  \"actionType\": \"barricade\",\n  \"targetNodeId\": \"faf_cab\",\n  \"durationSeconds\": 60\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{baseSessionId}}/actions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{baseSessionId}}",
+            "actions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "51. Complete Barricade, Base Created On The Way (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Base Service created the base and raised the barricade\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.status).to.eql(\"completed\");",
+              "    pm.expect(body.result.kind).to.eql(\"barricade\");",
+              "    pm.expect(body.result.barricade.roomId).to.eql(\"faf_cab\");",
+              "    pm.expect(body.result.barricade.barricadeLevel).to.eql(1);",
+              "    pm.expect(body.result.barricade.defenseRating).to.be.above(0);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/actions/{{barricadeActionId}}/complete",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "actions",
+            "{{barricadeActionId}}",
+            "complete"
+          ]
+        }
+      }
+    },
+    {
+      "name": "52. Start Storage Upgrade (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Upgrade action started\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.status).to.eql(\"in_progress\");",
+              "    pm.collectionVariables.set(\"upgradeActionId\", body.actionId);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"{{basePlayerId}}\",\n  \"actionType\": \"upgrade_base\",\n  \"targetNodeId\": \"faf_cab\",\n  \"durationSeconds\": 60\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{baseSessionId}}/actions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{baseSessionId}}",
+            "actions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "53. Complete Storage Upgrade (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Base Service upgraded the storage facility\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.result.kind).to.eql(\"facility\");",
+              "    pm.expect(body.result.facility.facilityType).to.eql(\"storage\");",
+              "    pm.expect(body.result.facility.level).to.eql(1);",
+              "    pm.expect(body.result.facility.storageCapacity).to.be.above(150);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/actions/{{upgradeActionId}}/complete",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "actions",
+            "{{upgradeActionId}}",
+            "complete"
+          ]
+        }
+      }
+    },
+    {
+      "name": "54. Start Barricade Of An Unclaimed Room (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Action starts; the room check happens on completion\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.status).to.eql(\"in_progress\");",
+              "    pm.collectionVariables.set(\"unclaimedActionId\", body.actionId);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"{{basePlayerId}}\",\n  \"actionType\": \"barricade\",\n  \"targetNodeId\": \"mathematicsExamHall\",\n  \"durationSeconds\": 60\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{baseSessionId}}/actions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{baseSessionId}}",
+            "actions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "55. Complete Barricade Of An Unclaimed Room (422)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 422 Unprocessable Entity\", () => pm.response.to.have.status(422));",
+              "pm.test(\"Base Service rejection passed through as room_not_claimed\", () => pm.expect(pm.response.json().reason).to.eql(\"room_not_claimed\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/actions/{{unclaimedActionId}}/complete",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "actions",
+            "{{unclaimedActionId}}",
+            "complete"
           ]
         }
       }
