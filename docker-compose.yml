@@ -334,6 +334,7 @@ services:
     restart: always
     environment:
       PORT: 8000
+      JWT_SECRET: team-compose-development-secret-at-least-32-chars
       EXAM_SERVICE_URL: http://exam-service:3000
       WORLD_SERVICE_URL: http://world-service:3001
       PLAYER_SERVICE_URL: http://player-service:8080
