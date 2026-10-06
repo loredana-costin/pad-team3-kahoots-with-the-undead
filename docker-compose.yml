@@ -219,7 +219,7 @@ services:
       - kahoots-network
 
   game-service:
-    image: andrei045/game-service:2.3.0
+    image: andrei045/game-service:2.4.0
     container_name: game-service
     restart: always
     environment:
@@ -234,6 +234,11 @@ services:
       # Direct until Base Service has a Gateway route; then http://gateway-service:8000.
       Services__Base: http://base-service:5003
       Services__Exam: http://gateway-service:8000
+      # The URL clients get from POST /api/sessions/{id}/websocket; the socket port is the
+      # only one published, REST stays behind the Gateway.
+      WebSocket__PublicBaseUrl: ws://localhost:3003
+    ports:
+      - "3003:8081"
     expose:
       - "8080"
     depends_on:

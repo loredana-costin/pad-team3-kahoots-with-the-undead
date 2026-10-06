@@ -3034,6 +3034,75 @@
           ]
         }
       }
+    },
+    {
+      "name": "75. Negotiate A WebSocket URL (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"A direct socket URL with a single-use ticket\", () => {",
+              "    const body = pm.response.json();",
+              "    const id = pm.collectionVariables.get(\"sessionId\");",
+              "    pm.expect(body.url.startsWith(\"ws://\")).to.be.true;",
+              "    pm.expect(body.url).to.include(\"/ws/sessions/\" + id + \"?ticket=\");",
+              "    pm.expect(body.url.split(\"ticket=\")[1]).to.match(/^[0-9a-f]{32}$/);",
+              "    pm.expect(body.expiresAt).to.be.a(\"string\");",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/websocket",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "websocket"
+          ]
+        }
+      }
+    },
+    {
+      "name": "76. Negotiate For Unknown Session (404)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 404 Not Found\", () => pm.response.to.have.status(404));",
+              "pm.test(\"Rejected with session_not_found\", () => pm.expect(pm.response.json().reason).to.eql(\"session_not_found\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/session_doesnotexist/websocket",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "session_doesnotexist",
+            "websocket"
+          ]
+        }
+      }
     }
   ]
 }
