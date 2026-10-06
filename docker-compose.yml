@@ -201,7 +201,7 @@ services:
       - kahoots-network
 
   player-service:
-    image: andrei045/player-service:2.0.0
+    image: andrei045/player-service:2.1.0
     container_name: player-service
     restart: always
     environment:
@@ -219,7 +219,7 @@ services:
       - kahoots-network
 
   game-service:
-    image: andrei045/game-service:2.4.0
+    image: andrei045/game-service:2.5.0
     container_name: game-service
     restart: always
     environment:
