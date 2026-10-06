@@ -234,13 +234,23 @@ Response
 
 **WebSocket Connection**
 
-`wss://api.game/ws/sessions/{session_id}?token=<JWT>` — real-time action progress and cycle events.
+Negotiate through the Gateway, then connect directly to Game Service's socket port.
+
+**`POST /api/sessions/{session_id}/websocket`** *(Consumed by Gateway)*
+
+Response
+```json
+{ "url": "ws://localhost:3003/ws/sessions/session_8bc13aea?ticket=3f9c0e1b7a2d4c6e8f0a1b2c3d4e5f60", "expiresAt": "2026-10-06T08:00:00Z" }
+```
+
+The ticket is single-use and valid for one minute. `ws://.../ws/sessions/{session_id}?ticket=...` is served on Game Service's socket port only, so its REST API stays reachable only through the Gateway. A reconnect replays every notification not yet delivered.
 
 **Server → Client Events**
-- `action_progress`: `{"type":"action_progress","actionId":"act_991","percent":40}`
-- `action_completed`: `{"type":"action_completed","actionId":"act_991","result":{"food":12}}`
-- `cycle_changed`: `{"type":"cycle_changed","cycle":"night","zone":"zone_12"}`
-- `zombie_encounter`: `{"type":"zombie_encounter","zombieInstanceId":"z_991","zombieType":"professor"}`
+- `action_progress`: `{"type":"action_progress","actionId":"act_991","playerId":"p_44","actionType":"scavenge","percent":40}` (sent when the percentage changes)
+- `action_completed`: `{"type":"action_completed","actionId":"act_991","playerId":"p_44","actionType":"scavenge","result":{"kind":"gather","gather":{"status":"applied","newBalance":{"food":12}},"barricade":null,"facility":null}}`
+- `cycle_changed`: `{"type":"cycle_changed","cycle":"night","cycleNumber":1,"zone":"mathematicsWing"}`
+- `zombie_encounter`: `{"type":"zombie_encounter","zombieInstanceId":"z_991","zombieType":"professor","typeId":"prof_calc","spawnPoint":"mathematicsWing_spawn_1"}`
+- `exam_failed`, `zone_unlocked`: the events below, relayed to the session
 
 ### **Message Queue Events**
 
@@ -1448,8 +1458,8 @@ The microservices are containerized and published on DockerHub:
 | **Gateway Service** | [`mariaelenabotnari/gateway-service`](https://hub.docker.com/r/mariaelenabotnari/gateway-service) | `mariaelenabotnari/gateway-service:2.1.0` | `8000` | System entry point, async request routing layer |
 | **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:2.0.0` | `Internal (3000)` | Academic progression, exams, and achievements |
 | **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:2.0.0` | `Internal (3001)` | Physical campus layout, rooms, zones, and spawn points |
-| **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:2.0.0` | `Internal (8080)` | Player identity, progression, inventory, and trades |
-| **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:2.0.0` | `Internal (8080)` | Game sessions, day/night cycle, and timed player actions |
+| **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:2.1.0` | `Internal (8080)` | Player identity, progression, inventory, and trades |
+| **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:2.5.0` | `Internal (8080), WebSocket 3003` | Game sessions, day/night cycle, and timed player actions |
 | **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:1.1.0` | `4001` | Zombie type definitions, spawned instances, and special actions |
 | **Resource Service** | [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service) | `costinloredana/resource-service:1.1.0` | `4002` | Resource types, player balances, nodes, and idempotent transactions |
 | **Base Service** | [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service) | `cristi150404/base-service:1.0.0` | `5003` | Player bases, barricades, facilities, and decorations |
@@ -1466,6 +1476,7 @@ To run these services locally via Docker Compose, ensure the host machine meets 
    - Docker Compose `v2.0.0+`
 2. **Available Host Ports**:
    - `8000` — Gateway Service HTTP API (Routes to Exam, World, Player and Game Services)
+   - `3003` — Game Service WebSocket (negotiate through the Gateway first; REST is not served here)
    - `5433` — Exam PostgreSQL Database (`exam-db`)
    - `5434` — World PostgreSQL Database (`world-db`)
    - `5435` — Player PostgreSQL Database (`player-db`)

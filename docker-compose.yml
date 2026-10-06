@@ -201,7 +201,7 @@ services:
       - kahoots-network
 
   player-service:
-    image: andrei045/player-service:2.0.0
+    image: andrei045/player-service:2.1.0
     container_name: player-service
     restart: always
     environment:
@@ -219,12 +219,26 @@ services:
       - kahoots-network
 
   game-service:
-    image: andrei045/game-service:2.0.0
+    image: andrei045/game-service:2.5.0
     container_name: game-service
     restart: always
     environment:
       ConnectionStrings__Postgres: "Host=game-db;Port=5432;Database=game_db;Username=postgres;Password=postgres"
       ASPNETCORE_ENVIRONMENT: Development
+      Services__World: http://gateway-service:8000
+      # Direct until Zombie Service has a Gateway route; then http://gateway-service:8000.
+      Services__Zombie: http://zombie-service:4001
+      Integrations__MockedServices: ""
+      # Direct until Resource Service has a Gateway route; then http://gateway-service:8000.
+      Services__Resource: http://resource-service:4002
+      # Direct until Base Service has a Gateway route; then http://gateway-service:8000.
+      Services__Base: http://base-service:5003
+      Services__Exam: http://gateway-service:8000
+      # The URL clients get from POST /api/sessions/{id}/websocket; the socket port is the
+      # only one published, REST stays behind the Gateway.
+      WebSocket__PublicBaseUrl: ws://localhost:3003
+    ports:
+      - "3003:8081"
     expose:
       - "8080"
     depends_on:
