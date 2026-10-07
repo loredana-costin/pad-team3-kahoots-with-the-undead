@@ -1033,7 +1033,7 @@ Responsible for the player's survival base, initially represented by the FAF Cab
 - `POST /api/refund` *(Resource Service)* — returns the resources if the effect cannot be applied.
 - `POST /api/players/{player_id}/inventory/items` *(Player Service)* — delivers a Kiki reward to the player's inventory.
 
-Base Service calls them through the Gateway with a service token (`kind: service`, forwarded as `X-Service-Name: base-service`); Resource Service is called directly until it has a Gateway route. Every state-changing endpoint spends first, then applies the effect in one database transaction. If that fails, Base Service refunds the resources rather than leaving the player having paid for nothing.
+Base Service calls them through the Gateway with a service token (`kind: service`, forwarded as `X-Service-Name: base-service`). Every state-changing endpoint spends first, then applies the effect in one database transaction. If that fails, Base Service refunds the resources rather than leaving the player having paid for nothing.
 
 ### **Exposed API Endpoints**
 
@@ -1183,7 +1183,7 @@ Allows players to combine resources into useful survival equipment.
 - `GET /players/{playerId}/progress` *(Exam Service)* — reads passed exams.
 - `GET /world/zones` *(World Service)* — reads unlocked zones.
 
-Crafting Service calls them through the Gateway with a service token (`kind: service`, forwarded as `X-Service-Name: crafting-service`); Resource Service is called directly until it has a Gateway route. A recipe can be gated on a player level, a passed exam, an unlocked zone, or a discovered resource, which is why this service reads from four others. If delivery fails after the ingredients were consumed, Crafting Service refunds them — this is the saga's rollback path.
+Crafting Service calls them through the Gateway with a service token (`kind: service`, forwarded as `X-Service-Name: crafting-service`). A recipe can be gated on a player level, a passed exam, an unlocked zone, or a discovered resource, which is why this service reads from four others. If delivery fails after the ingredients were consumed, Crafting Service refunds them — this is the saga's rollback path.
 
 ### **Exposed API Endpoints**
 

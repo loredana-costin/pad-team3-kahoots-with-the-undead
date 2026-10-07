@@ -292,8 +292,7 @@ services:
       POSTGRES_PASSWORD: ${BASE_DB_PASSWORD:-postgres}
       POSTGRES_DB: base_db
       Integrations__UseMocks: "false"
-      # Direct until Resource Service has a Gateway route; then http://gateway-service:8000.
-      Services__Resource: http://resource-service:4002
+      Services__Resource: http://gateway-service:8000
       Services__Player: http://gateway-service:8000
       Services__World: http://gateway-service:8000
       # Signs the service token the Gateway accepts; same value as the Gateway's JWT_SECRET.
@@ -318,8 +317,7 @@ services:
       POSTGRES_PASSWORD: ${CRAFTING_DB_PASSWORD:-postgres}
       POSTGRES_DB: crafting_db
       Integrations__UseMocks: "false"
-      # Direct until Resource Service has a Gateway route; then http://gateway-service:8000.
-      Services__Resource: http://resource-service:4002
+      Services__Resource: http://gateway-service:8000
       Services__Player: http://gateway-service:8000
       Services__Exam: http://gateway-service:8000
       Services__World: http://gateway-service:8000
@@ -347,6 +345,7 @@ services:
       GAME_SERVICE_URL: http://game-service:8080
       BASE_SERVICE_URL: http://base-service:5003
       CRAFTING_SERVICE_URL: http://crafting-service:5004
+      RESOURCE_SERVICE_URL: http://resource-service:4002
     ports:
       - "8000:8000"
     networks:

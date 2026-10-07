@@ -2,18 +2,13 @@
   "info": {
     "_postman_id": "c7e5939c-c30c-536f-9542-687980281153",
     "name": "Base Service",
-    "description": "Tests for Base Service (In Kahoots with the Undead, Team 3), run through the Gateway against the real Player, World and Resource Service of the team docker-compose.yml. Run the folders in order: Setup registers a fresh player and grants it resources through Resource Service (resourceUrl), then the base is created, upgraded and deleted. Rollback uses a player id Player Service does not know, so the reward delivery fails and the food is refunded.",
+    "description": "Tests for Base Service (In Kahoots with the Undead, Team 3), run through the Gateway against the real Player, World and Resource Service of the team docker-compose.yml. Run the folders in order: Setup registers a fresh player and grants it resources through Resource Service's refund route, then the base is created, upgraded and deleted. Rollback uses a player id Player Service does not know, so the reward delivery fails and the food is refunded.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     {
       "key": "baseUrl",
       "value": "http://localhost:8000",
-      "type": "string"
-    },
-    {
-      "key": "resourceUrl",
-      "value": "http://localhost:4002",
       "type": "string"
     },
     {
@@ -185,9 +180,9 @@
               }
             ],
             "url": {
-              "raw": "{{resourceUrl}}/api/refund",
+              "raw": "{{baseUrl}}/api/refund",
               "host": [
-                "{{resourceUrl}}"
+                "{{baseUrl}}"
               ],
               "path": [
                 "api",
@@ -231,9 +226,9 @@
               }
             ],
             "url": {
-              "raw": "{{resourceUrl}}/api/refund",
+              "raw": "{{baseUrl}}/api/refund",
               "host": [
-                "{{resourceUrl}}"
+                "{{baseUrl}}"
               ],
               "path": [
                 "api",
