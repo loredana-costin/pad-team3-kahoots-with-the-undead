@@ -2,32 +2,22 @@
   "info": {
     "_postman_id": "c7e5939c-c30c-536f-9542-687980281153",
     "name": "Base Service",
-    "description": "Tests for Base Service (In Kahoots with the Undead, Team 3). Run the folders in order: they create a base, spend resources on it and delete it at the end. Requires the service to run with Integrations__UseMocks=true (the default), which simulates Resource, World and Player Service.",
+    "description": "Tests for Base Service (In Kahoots with the Undead, Team 3), run through the Gateway against the real Player, World and Resource Service of the team docker-compose.yml. Run the folders in order: Setup registers a fresh player and grants it resources through Resource Service's refund route, then the base is created, upgraded and deleted. Rollback uses a player id Player Service does not know, so the reward delivery fails and the food is refunded.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
-  "event": [
-    {
-      "listen": "prerequest",
-      "script": {
-        "type": "text/javascript",
-        "exec": [
-          "// A fresh player and key prefix per run, so the collection can be run repeatedly against the same database.",
-          "if (!pm.collectionVariables.get('runId')) {",
-          "    pm.collectionVariables.set('runId', Date.now().toString(36));",
-          "}",
-          "pm.collectionVariables.set('playerId', 'pm_' + pm.collectionVariables.get('runId'));"
-        ]
-      }
-    }
-  ],
   "variable": [
     {
       "key": "baseUrl",
-      "value": "http://localhost:5003",
+      "value": "http://localhost:8000",
       "type": "string"
     },
     {
       "key": "runId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "username",
       "value": "",
       "type": "string"
     },
@@ -37,18 +27,32 @@
       "type": "string"
     },
     {
+      "key": "jwt",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "ghostPlayerId",
+      "value": "",
+      "type": "string"
+    },
+    {
       "key": "decorationId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "kikiReward",
       "value": "",
       "type": "string"
     }
   ],
   "item": [
     {
-      "name": "0. Health",
-      "description": "",
+      "name": "0. Setup",
       "item": [
         {
-          "name": "Health check",
+          "name": "Gateway health check",
           "event": [
             {
               "listen": "test",
@@ -58,9 +62,8 @@
                   "pm.test(\"Status code is 200\", function () {",
                   "    pm.response.to.have.status(200);",
                   "});",
-                  "pm.test(\"Service is ok\", function () {",
-                  "    const json = pm.response.json();",
-                  "    pm.expect(json.status).to.eql('ok');",
+                  "pm.test(\"Gateway is ok\", function () {",
+                  "    pm.expect(pm.response.json().status).to.eql('ok');",
                   "});"
                 ]
               }
@@ -78,7 +81,170 @@
                 "health"
               ]
             },
-            "description": ""
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Register a test player (200)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// A fresh player and key prefix per run, so the collection can be run repeatedly against the same databases.",
+                  "pm.collectionVariables.set('runId', Date.now().toString(36));",
+                  "pm.collectionVariables.set('username', 'pm_' + pm.collectionVariables.get('runId'));",
+                  "pm.collectionVariables.set('ghostPlayerId', 'pm_ghost_' + pm.collectionVariables.get('runId'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Player id and token are returned\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.collectionVariables.set('playerId', json.player_id);",
+                  "    pm.collectionVariables.set('jwt', json.jwt);",
+                  "    pm.expect(json.jwt).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"pm_{{runId}}_password\",\n  \"email\": \"{{username}}@test.local\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Grant test resources to the player",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/refund",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "refund"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idempotencyKey\": \"seed_{{runId}}_playerId\",\n  \"playerId\": \"{{playerId}}\",\n  \"reason\": \"postman_test_seed\",\n  \"costs\": [\n    {\n      \"resourceType\": \"wood\",\n      \"amount\": 30\n    },\n    {\n      \"resourceType\": \"metal\",\n      \"amount\": 10\n    },\n    {\n      \"resourceType\": \"paper\",\n      \"amount\": 10\n    },\n    {\n      \"resourceType\": \"food\",\n      \"amount\": 10\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Grant food to a player Player Service does not know",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/refund",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "refund"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idempotencyKey\": \"seed_{{runId}}_ghostPlayerId\",\n  \"playerId\": \"{{ghostPlayerId}}\",\n  \"reason\": \"postman_test_seed\",\n  \"costs\": [\n    {\n      \"resourceType\": \"food\",\n      \"amount\": 10\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           },
           "response": []
         }
@@ -516,102 +682,6 @@
           "response": []
         },
         {
-          "name": "Mock broker - deliver ZoneUnlocked",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/dev/events/zone-unlocked",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "dev",
-                "events",
-                "zone-unlocked"
-              ]
-            },
-            "description": "Stands in for the RabbitMQ ZoneUnlocked event published by World Service. Unlocks only the library, so the locked-wing check above stays valid on later runs.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"zoneId\": \"mathematicsWing\",\n  \"roomsAdded\": [\n    \"mathematicsWingLibrary\"\n  ],\n  \"timestamp\": \"2026-09-08T10:45:00Z\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Claim room after ZoneUnlocked",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/base/{{playerId}}/rooms",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "base",
-                "{{playerId}}",
-                "rooms"
-              ]
-            },
-            "description": "",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"idempotencyKey\": \"claim_{{runId}}_library\",\n  \"roomId\": \"mathematicsWingLibrary\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": []
-        },
-        {
           "name": "Claim unknown room (404)",
           "event": [
             {
@@ -682,7 +752,7 @@
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/base/{{playerId}}/rooms/mathematicsWingLibrary",
+              "raw": "{{baseUrl}}/api/base/{{playerId}}/rooms/mainCorridor",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -691,7 +761,7 @@
                 "base",
                 "{{playerId}}",
                 "rooms",
-                "mathematicsWingLibrary"
+                "mainCorridor"
               ]
             },
             "description": ""
@@ -1535,7 +1605,7 @@
           "response": []
         },
         {
-          "name": "Saga rollback - create base for failing player",
+          "name": "Saga rollback - create base for a player Player Service does not know",
           "event": [
             {
               "listen": "test",
@@ -1570,7 +1640,7 @@
             "description": "The mock Player Service rejects deliveries for player ids starting with a prefix in Integrations__Mocks__FailingInventoryPlayers (p_fail by default).",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"playerId\": \"p_fail_{{runId}}\"\n}",
+              "raw": "{\n  \"playerId\": \"{{ghostPlayerId}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1608,14 +1678,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/base/p_fail_{{runId}}/kiki/interact",
+              "raw": "{{baseUrl}}/api/base/{{ghostPlayerId}}/kiki/interact",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
                 "base",
-                "p_fail_{{runId}}",
+                "{{ghostPlayerId}}",
                 "kiki",
                 "interact"
               ]
@@ -1656,14 +1726,14 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/base/p_fail_{{runId}}",
+              "raw": "{{baseUrl}}/api/base/{{ghostPlayerId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
                 "base",
-                "p_fail_{{runId}}"
+                "{{ghostPlayerId}}"
               ]
             },
             "description": ""
@@ -1689,58 +1759,14 @@
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/base/p_fail_{{runId}}",
+              "raw": "{{baseUrl}}/api/base/{{ghostPlayerId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
                 "base",
-                "p_fail_{{runId}}"
-              ]
-            },
-            "description": ""
-          },
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "7. Mock broker",
-      "description": "",
-      "item": [
-        {
-          "name": "Published events",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "pm.test(\"BaseDefenseChanged was published\", function () {",
-                  "    const json = pm.response.json();",
-                  "    pm.expect(json.some(e => e.name === 'BaseDefenseChanged' && e.payload.playerId === pm.collectionVariables.get('playerId'))).to.be.true;",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/dev/events/published",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "dev",
-                "events",
-                "published"
+                "{{ghostPlayerId}}"
               ]
             },
             "description": ""
@@ -1821,5 +1847,15 @@
         }
       ]
     }
-  ]
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{jwt}}",
+        "type": "string"
+      }
+    ]
+  }
 }

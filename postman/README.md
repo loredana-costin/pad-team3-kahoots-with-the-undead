@@ -10,8 +10,8 @@ Collections for testing each service. One file per service, Postman schema v2.1.
 | `world-service.postman_collection.json` | World Service | `http://localhost:3001` |
 | `zombie-service.postman_collection.json` | Zombie Service | `http://localhost:4001` |
 | `resource-service.postman_collection.json` | Resource Service | `http://localhost:4002` |
-| `base-service.postman_collection.json` | Base Service | `http://localhost:5003` |
-| `crafting-service.postman_collection.json` | Crafting Service | `http://localhost:5004` |
+| `base-service.postman_collection.json` | Base Service | `http://localhost:8000` |
+| `crafting-service.postman_collection.json` | Crafting Service | `http://localhost:8000` |
 
 ## Running in Postman
 

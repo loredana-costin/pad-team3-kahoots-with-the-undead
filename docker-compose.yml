@@ -282,7 +282,7 @@ services:
       - kahoots-network
 
   base-service:
-    image: cristi150404/base-service:1.0.0
+    image: cristi150404/base-service:2.0.0
     container_name: base-service
     restart: always
     environment:
@@ -291,13 +291,15 @@ services:
       POSTGRES_USER: ${BASE_DB_USER:-postgres}
       POSTGRES_PASSWORD: ${BASE_DB_PASSWORD:-postgres}
       POSTGRES_DB: base_db
-      Integrations__UseMocks: "true"
-      Services__Resource: http://resource-service:4002
-      Services__Player: http://player-service:8080
-      Services__World: http://world-service:3001
+      Integrations__UseMocks: "false"
+      Services__Resource: http://gateway-service:8000
+      Services__Player: http://gateway-service:8000
+      Services__World: http://gateway-service:8000
+      # Signs the service token the Gateway accepts; same value as the Gateway's JWT_SECRET.
+      Jwt__Secret: team-compose-development-secret-at-least-32-chars
       ASPNETCORE_ENVIRONMENT: Development
-    ports:
-      - "5003:5003"
+    expose:
+      - "5003"
     depends_on:
       base-db:
         condition: service_healthy
@@ -305,7 +307,7 @@ services:
       - kahoots-network
 
   crafting-service:
-    image: cristi150404/crafting-service:1.0.0
+    image: cristi150404/crafting-service:2.0.0
     container_name: crafting-service
     restart: always
     environment:
@@ -314,14 +316,16 @@ services:
       POSTGRES_USER: ${CRAFTING_DB_USER:-postgres}
       POSTGRES_PASSWORD: ${CRAFTING_DB_PASSWORD:-postgres}
       POSTGRES_DB: crafting_db
-      Integrations__UseMocks: "true"
-      Services__Resource: http://resource-service:4002
-      Services__Player: http://player-service:8080
-      Services__Exam: http://exam-service:3000
-      Services__World: http://world-service:3001
+      Integrations__UseMocks: "false"
+      Services__Resource: http://gateway-service:8000
+      Services__Player: http://gateway-service:8000
+      Services__Exam: http://gateway-service:8000
+      Services__World: http://gateway-service:8000
+      # Signs the service token the Gateway accepts; same value as the Gateway's JWT_SECRET.
+      Jwt__Secret: team-compose-development-secret-at-least-32-chars
       ASPNETCORE_ENVIRONMENT: Development
-    ports:
-      - "5004:5004"
+    expose:
+      - "5004"
     depends_on:
       crafting-db:
         condition: service_healthy
@@ -339,6 +343,9 @@ services:
       WORLD_SERVICE_URL: http://world-service:3001
       PLAYER_SERVICE_URL: http://player-service:8080
       GAME_SERVICE_URL: http://game-service:8080
+      BASE_SERVICE_URL: http://base-service:5003
+      CRAFTING_SERVICE_URL: http://crafting-service:5004
+      RESOURCE_SERVICE_URL: http://resource-service:4002
     ports:
       - "8000:8000"
     networks:
