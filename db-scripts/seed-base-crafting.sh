@@ -4,11 +4,15 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# The services are reachable only through the Gateway, so readiness is read from their databases:
+# the seed can run once the service has created the table its script checks.
 wait_for() {
-    local name=$1 port=$2
-    echo -n "Waiting for $name on :$port "
+    local name=$1 db=$2 table=$3
+    echo -n "Waiting for $name to create its tables "
     for _ in $(seq 1 60); do
-        if curl -fs "http://localhost:$port/health" >/dev/null; then echo " up"; return 0; fi
+        if docker compose exec -T "$db" sh -c "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -tAc \"SELECT to_regclass('public.$table')\"" 2>/dev/null | grep -qx "$table"; then
+            echo " up"; return 0
+        fi
         echo -n "."; sleep 2
     done
     echo; echo "error: $name is not running; start it with: docker compose up -d $name" >&2; exit 1
@@ -21,7 +25,7 @@ seed() {
 }
 
 # The services create their tables on startup, so they must be up before the data goes in.
-wait_for base-service 5003
+wait_for base-service base-db bases
 seed base-db db-scripts/base-service/seed.sql
-wait_for crafting-service 5004
+wait_for crafting-service crafting-db recipes
 seed crafting-db db-scripts/crafting-service/seed.sql
