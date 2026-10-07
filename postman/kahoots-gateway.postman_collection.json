@@ -1,0 +1,4262 @@
+{
+  "info": {
+    "_postman_id": "4f1e0c2a-7b6d-4e8a-9c3f-2d5b8a1e6f90",
+    "name": "Kahoots Gateway",
+    "description": "Every API of every microservice, called through the API Gateway with `Authorization: Bearer {{jwt}}`.\n\n1. Run `bash db-scripts/seed-all.sh` (after `docker compose up -d`).\n2. Import `postman/kahoots-local.postman_environment.json` and select **Kahoots Local (seeded)**.\n3. Send any request: the ids in the environment point at seeded, real data.\n\nThe token, the user and all ids come from the environment. If the token is missing or expired, it is refreshed automatically by logging in as `{{username}}`. Create requests store the new id in a `created*` variable, and the matching update/delete requests use it, so seeded data is never deleted.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{jwt}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const jwt = pm.environment.get('jwt');",
+          "let expired = !jwt;",
+          "if (jwt) {",
+          "    try {",
+          "        const payload = JSON.parse(atob(jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));",
+          "        expired = payload.exp * 1000 < Date.now() + 60000;",
+          "    } catch (e) { expired = true; }",
+          "}",
+          "if (expired && pm.environment.get('username')) {",
+          "    pm.sendRequest({",
+          "        url: pm.environment.get('gatewayUrl') + '/api/auth/login',",
+          "        method: 'POST',",
+          "        header: { 'Content-Type': 'application/json' },",
+          "        body: { mode: 'raw', raw: JSON.stringify({ username: pm.environment.get('username'), password: pm.environment.get('password') }) }",
+          "    }, (err, res) => {",
+          "        if (!err && res.code === 200) {",
+          "            pm.environment.set('jwt', res.json().jwt);",
+          "            pm.environment.set('playerId', res.json().player_id);",
+          "        }",
+          "    });",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Player Service",
+      "description": "Accounts, progression, inventory, achievements and trades. Routed by the Gateway: /api/auth, /api/players, /api/trades.",
+      "item": [
+        {
+          "name": "Login (refreshes jwt)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));",
+                  "if (pm.response.code < 300) {",
+                  "    const json = pm.response.json();",
+                  "    const jwtValue = json.jwt;",
+                  "    if (jwtValue !== undefined && jwtValue !== null) pm.environment.set('jwt', String(jwtValue));",
+                  "    const playerIdValue = json.player_id;",
+                  "    if (playerIdValue !== undefined && playerIdValue !== null) pm.environment.set('playerId', String(playerIdValue));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayUrl}}/api/auth/login",
+              "host": [
+                "{{gatewayUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "Logs in as the environment's user and stores the token in the environment. Every other request sends it as `Authorization: Bearer {{jwt}}`."
+          },
+          "response": []
+        },
+        {
+          "name": "Register a new player",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set('newUsername', 'player_' + Date.now().toString(36));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));",
+                  "if (pm.response.code < 300) {",
+                  "    const json = pm.response.json();",
+                  "    const createdPlayerIdValue = json.player_id;",
+                  "    if (createdPlayerIdValue !== undefined && createdPlayerIdValue !== null) pm.environment.set('createdPlayerId', String(createdPlayerIdValue));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayUrl}}/api/auth/register",
+              "host": [
+                "{{gatewayUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "register"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{newUsername}}\",\n  \"password\": \"hunter2pass\",\n  \"email\": \"{{newUsername}}@faf.md\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "Creates a brand new account each time; the environment's user is not changed."
+          },
+          "response": []
+        },
+        {
+          "name": "Get player profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gatewayUrl}}/api/players/{{playerId}}",
+              "host": [
+                "{{gatewayUrl}}"
+              ],
+              "path": [
+                "api",
+                "players",
+                "{{playerId}}"
+              ]
+            },
+            "description": "Known issue: returns 401 through the Gateway, because Player Service still validates the JWT itself while the Gateway (correctly) strips the Authorization header. Player Service should trust X-Player-Id instead."
+          },
+          "response": []
+        },
+        {
+          "name": "Get player inventory",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gatewayUrl}}/api/players/{{playerId}}/inventory",
+              "host": [
+                "{{gatewayUrl}}"
+              ],
+              "path": [
+                "api",
+                "players",
+                "{{playerId}}",
+                "inventory"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Add inventory item",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayUrl}}/api/players/{{playerId}}/inventory/items",
+              "host": [
+                "{{gatewayUrl}}"
+              ],
+              "path": [
+                "api",
+                "players",
+                "{{playerId}}",
+                "inventory",
+                "items"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"itemId\": \"coffee\",\n  \"quantity\": 1,\n  \"source\": \"postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update progression (XP)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayUrl}}/api/players/{{playerId}}/progression",
+              "host": [
+                "{{gatewayUrl}}"
+              ],
+              "path": [
+                "api",
+                "players",
+                "{{playerId}}",
+                "progression"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"xpDelta\": 50,\n  \"reason\": \"cycle_survived\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Grant achievement",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayUrl}}/api/players/{{playerId}}/achievements",
+              "host": [
+                "{{gatewayUrl}}"
+              ],
+              "path": [
+                "api",
+                "players",
+                "{{playerId}}",
+                "achievements"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"achievementId\": \"achievementSurvivedMathematics\",\n  \"grantedBy\": \"exam:mathematics_complete\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create trade (coffee for sandwich)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is one of [200, 409]', () => pm.expect(pm.response.code).to.be.oneOf([200, 409]));",
+                  "if (pm.response.code < 300) {",
+                  "    const json = pm.response.json();",
+                  "    const tradeIdValue = json.tradeId;",
+                  "    if (tradeIdValue !== undefined && tradeIdValue !== null) pm.environment.set('tradeId', String(tradeIdValue));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayUrl}}/api/trades",
+              "host": [
+                "{{gatewayUrl}}"
+              ],
+              "path": [
+                "api",
+                "trades"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idempotencyKey\": \"trade_{{$timestamp}}\",\n  \"fromPlayerId\": \"{{playerId}}\",\n  \"toPlayerId\": \"{{playerBId}}\",\n  \"offer\": [\n    {\n      \"itemId\": \"coffee\",\n      \"qty\": 1\n    }\n  ],\n  \"request\": [\n    {\n      \"itemId\": \"sandwich\",\n      \"qty\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "409 `insufficient_items` once the trader has no sandwiches left."
+          },
+          "response": []
+        },
+        {
+          "name": "Replay the seeded trade (idempotent)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayUrl}}/api/trades",
+              "host": [
+                "{{gatewayUrl}}"
+              ],
+              "path": [
+                "api",
+                "trades"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idempotencyKey\": \"seed_trade_veteran_trader\",\n  \"fromPlayerId\": \"{{playerId}}\",\n  \"toPlayerId\": \"{{playerBId}}\",\n  \"offer\": [\n    {\n      \"itemId\": \"coffee\",\n      \"qty\": 1\n    }\n  ],\n  \"request\": [\n    {\n      \"itemId\": \"sandwich\",\n      \"qty\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Same key as the seed, so it returns the seeded trade {{tradeId}} without moving items again."
+          },
+          "response": []
+        },
+        {
+          "name": "Deliver ExamPassedEvent",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayUrl}}/api/players/events",
+              "host": [
+                "{{gatewayUrl}}"
+              ],
+              "path": [
+                "api",
+                "players",
+                "events"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventName\": \"ExamPassedEvent\",\n  \"payload\": {\n    \"playerId\": \"{{playerId}}\",\n    \"courseCategory\": \"mathematics\",\n    \"examId\": \"{{examId}}\",\n    \"attemptId\": \"postman_{{$timestamp}}\",\n    \"grade\": 90,\n    \"xpAwarded\": 100,\n    \"timestamp\": \"2026-10-07T12:00:00Z\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Development hook that delivers a message-queue event over HTTP."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Game Service",
+      "description": "Sessions, timed actions, the day/night cycle, zombie encounters and WebSocket negotiation. Routed by the Gateway: /api/sessions, /api/actions.",
+      "item": [
+        {
+          "name": "Sessions",
+          "item": [
+            {
+              "name": "List sessions",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/sessions",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "sessions"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get running session",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/sessions/{{sessionId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "sessions",
+                    "{{sessionId}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get lobby",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/sessions/{{lobbyId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "sessions",
+                    "{{lobbyId}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Create session",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));",
+                      "if (pm.response.code < 300) {",
+                      "    const json = pm.response.json();",
+                      "    const createdSessionIdValue = json.session_id;",
+                      "    if (createdSessionIdValue !== undefined && createdSessionIdValue !== null) pm.environment.set('createdSessionId', String(createdSessionIdValue));",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/sessions",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "sessions"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Postman Lobby\",\n  \"zoneId\": \"mainCorridorZone\",\n  \"maxPlayers\": 4\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Join created session (newbie)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/sessions/{{createdSessionId}}/players",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "sessions",
+                    "{{createdSessionId}}",
+                    "players"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"playerId\": \"{{newbieId}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Join created session (survivor)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/sessions/{{createdSessionId}}/players",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "sessions",
+                    "{{createdSessionId}}",
+                    "players"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"playerId\": \"{{survivorId}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Leave created session (newbie)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/sessions/{{createdSessionId}}/players/{{newbieId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "sessions",
+                    "{{createdSessionId}}",
+                    "players",
+                    "{{newbieId}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Start created session",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/sessions/{{createdSessionId}}/start",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "sessions",
+                    "{{createdSessionId}}",
+                    "start"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Advance day/night cycle",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/sessions/{{sessionId}}/cycle",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "sessions",
+                    "{{sessionId}}",
+                    "cycle"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Session rooms",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 502]', () => pm.expect(pm.response.code).to.be.oneOf([200, 502]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/sessions/{{sessionId}}/rooms",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "sessions",
+                    "{{sessionId}}",
+                    "rooms"
+                  ]
+                },
+                "description": "Known issue: 502 `world_service_error` until Game Service sends a service token on its calls through the Gateway."
+              },
+              "response": []
+            },
+            {
+              "name": "Session notifications",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/sessions/{{sessionId}}/notifications",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "sessions",
+                    "{{sessionId}}",
+                    "notifications"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Negotiate WebSocket URL",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/sessions/{{sessionId}}/websocket",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "sessions",
+                    "{{sessionId}}",
+                    "websocket"
+                  ]
+                },
+                "description": "Returns a ws:// URL with a single-use ticket; connect to it directly (not through the Gateway) within a minute."
+              },
+              "response": []
+            },
+            {
+              "name": "Deliver ZoneUnlockedEvent",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/sessions/events",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "sessions",
+                    "events"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"eventName\": \"ZoneUnlockedEvent\",\n  \"payload\": {\n    \"zoneId\": \"mainCorridorZone\",\n    \"roomsAdded\": [\n      \"library\"\n    ],\n    \"timestamp\": \"2026-10-07T12:00:00Z\"\n  }\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Actions",
+          "item": [
+            {
+              "name": "List session actions",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/sessions/{{sessionId}}/actions",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "sessions",
+                    "{{sessionId}}",
+                    "actions"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get seeded action",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/actions/{{actionId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "actions",
+                    "{{actionId}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Complete seeded action",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 409]', () => pm.expect(pm.response.code).to.be.oneOf([200, 409]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/actions/{{actionId}}/complete",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "actions",
+                    "{{actionId}}",
+                    "complete"
+                  ]
+                },
+                "description": "409 once the action has already been completed."
+              },
+              "response": []
+            },
+            {
+              "name": "Start action (survivor scavenges)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 409]', () => pm.expect(pm.response.code).to.be.oneOf([200, 409]));",
+                      "if (pm.response.code < 300) {",
+                      "    const json = pm.response.json();",
+                      "    const createdActionIdValue = json.actionId;",
+                      "    if (createdActionIdValue !== undefined && createdActionIdValue !== null) pm.environment.set('createdActionId', String(createdActionIdValue));",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/sessions/{{sessionId}}/actions",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "sessions",
+                    "{{sessionId}}",
+                    "actions"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"playerId\": \"{{survivorId}}\",\n  \"actionType\": \"scavenge\",\n  \"targetNodeId\": \"node_3\",\n  \"durationSeconds\": 30\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "409 while the survivor still has an action in progress."
+              },
+              "response": []
+            },
+            {
+              "name": "Cancel started action",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 409]', () => pm.expect(pm.response.code).to.be.oneOf([200, 409]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/actions/{{createdActionId}}/cancel",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "actions",
+                    "{{createdActionId}}",
+                    "cancel"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Zombies and exams",
+          "item": [
+            {
+              "name": "Spawn zombie wave",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));",
+                      "if (pm.response.code < 300) {",
+                      "    const json = pm.response.json();",
+                      "    const zombieInstanceIdValue = json[0] && json[0].instanceId;",
+                      "    if (zombieInstanceIdValue !== undefined && zombieInstanceIdValue !== null) pm.environment.set('zombieInstanceId', String(zombieInstanceIdValue));",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/sessions/{{sessionId}}/zombies/spawn",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "sessions",
+                    "{{sessionId}}",
+                    "zombies",
+                    "spawn"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"typeWeights\": {\n    \"professor\": 1\n  }\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Spawning again in the same cycle returns the same wave."
+              },
+              "response": []
+            },
+            {
+              "name": "Zombie special action on player",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 409, 502]', () => pm.expect(pm.response.code).to.be.oneOf([200, 409, 502]));",
+                      "if (pm.response.code < 300) {",
+                      "    const json = pm.response.json();",
+                      "    const gameExamAttemptIdValue = json.exam && json.exam.attemptId;",
+                      "    if (gameExamAttemptIdValue !== undefined && gameExamAttemptIdValue !== null) pm.environment.set('gameExamAttemptId', String(gameExamAttemptIdValue));",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/sessions/{{sessionId}}/zombies/{{zombieInstanceId}}/special-action",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "sessions",
+                    "{{sessionId}}",
+                    "zombies",
+                    "{{zombieInstanceId}}",
+                    "special-action"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"targetPlayerId\": \"{{survivorId}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "A professor starts an exam for the player. Known issue: 502 `exam_service_error` until Game Service sends a service token on its calls through the Gateway."
+              },
+              "response": []
+            },
+            {
+              "name": "Submit encounter exam",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 404, 409]', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 409]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/sessions/{{sessionId}}/exams/{{gameExamAttemptId}}/submit",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "sessions",
+                    "{{sessionId}}",
+                    "exams",
+                    "{{gameExamAttemptId}}",
+                    "submit"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"answers\": []\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Abandon encounter exam",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 404, 409]', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 409]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/sessions/{{sessionId}}/exams/{{gameExamAttemptId}}/abandon",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "sessions",
+                    "{{sessionId}}",
+                    "exams",
+                    "{{gameExamAttemptId}}",
+                    "abandon"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"reason\": \"disconnected\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Exam Service",
+      "description": "Exam definitions, attempts, progress and achievements. Routed by the Gateway: /exams, /players.",
+      "item": [
+        {
+          "name": "Exams",
+          "item": [
+            {
+              "name": "List exams",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/exams",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "exams"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "List exams by category",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/exams?courseCategory=mathematics",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "exams"
+                  ],
+                  "query": [
+                    {
+                      "key": "courseCategory",
+                      "value": "mathematics"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get exam",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/exams/{{examId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "exams",
+                    "{{examId}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Create exam",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));",
+                      "if (pm.response.code < 300) {",
+                      "    const json = pm.response.json();",
+                      "    const createdExamIdValue = json.id;",
+                      "    if (createdExamIdValue !== undefined && createdExamIdValue !== null) pm.environment.set('createdExamId', String(createdExamIdValue));",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/exams",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "exams"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"courseCategory\": \"mathematics\",\n  \"courseName\": \"Software Architecture\",\n  \"passingThreshold\": 60,\n  \"questions\": [\n    {\n      \"id\": \"q1\",\n      \"text\": \"Which of the following is a valid proposition?\",\n      \"options\": [\n        \"2 plus 2\",\n        \"It is raining today\",\n        \"Close the door\",\n        \"Blue\"\n      ],\n      \"correctOptionId\": 1\n    },\n    {\n      \"id\": \"q2\",\n      \"text\": \"What is the cardinality of the power set of a set with 3 elements?\",\n      \"options\": [\n        \"3\",\n        \"6\",\n        \"8\",\n        \"9\"\n      ],\n      \"correctOptionId\": 2\n    }\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Update created exam",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/exams/{{createdExamId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "exams",
+                    "{{createdExamId}}"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"passingThreshold\": 75,\n  \"courseName\": \"Advanced Software Architecture\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete created exam",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/exams/{{createdExamId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "exams",
+                    "{{createdExamId}}"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Attempts",
+          "item": [
+            {
+              "name": "Start attempt (survivor)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 409]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 409]));",
+                      "if (pm.response.code < 300) {",
+                      "    const json = pm.response.json();",
+                      "    const attemptIdValue = json.attemptId;",
+                      "    if (attemptIdValue !== undefined && attemptIdValue !== null) pm.environment.set('attemptId', String(attemptIdValue));",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/exams/start",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "exams",
+                    "start"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"playerId\": \"{{survivorId}}\",\n  \"examId\": \"{{examId}}\",\n  \"zombieEncounterId\": \"postman_{{$timestamp}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "409 while the survivor has an attempt in progress or is on a retry cooldown."
+              },
+              "response": []
+            },
+            {
+              "name": "Submit attempt",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 409]', () => pm.expect(pm.response.code).to.be.oneOf([200, 409]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/exams/{{attemptId}}/submit",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "exams",
+                    "{{attemptId}}",
+                    "submit"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"playerId\": \"{{survivorId}}\",\n  \"examId\": \"{{examId}}\",\n  \"answers\": {\n    \"DiscreteMathematicsQ1\": 3,\n    \"DiscreteMathematicsQ2\": 1\n  }\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Abandon attempt",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 409]', () => pm.expect(pm.response.code).to.be.oneOf([200, 409]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/exams/{{attemptId}}/abandon",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "exams",
+                    "{{attemptId}}",
+                    "abandon"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Retry eligibility",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/exams/{{examId}}/retryEligibility?playerId={{survivorId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "exams",
+                    "{{examId}}",
+                    "retryEligibility"
+                  ],
+                  "query": [
+                    {
+                      "key": "playerId",
+                      "value": "{{survivorId}}"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Players",
+          "item": [
+            {
+              "name": "Player exam progress",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/players/{{playerId}}/progress",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "players",
+                    "{{playerId}}",
+                    "progress"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Player achievements",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/players/{{playerId}}/achievements",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "players",
+                    "{{playerId}}",
+                    "achievements"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "World Service",
+      "description": "Zones, rooms, connections and zombie spawn points. Routed by the Gateway: /world.",
+      "item": [
+        {
+          "name": "Zones",
+          "item": [
+            {
+              "name": "List zones",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/world/zones",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "world",
+                    "zones"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get zone",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/world/zones/{{zoneName}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "world",
+                    "zones",
+                    "{{zoneName}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Zone status",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/world/zones/{{zoneName}}/status",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "world",
+                    "zones",
+                    "{{zoneName}}",
+                    "status"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Create zone",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));",
+                      "if (pm.response.code < 300) {",
+                      "    const json = pm.response.json();",
+                      "    const createdZoneNameValue = json.zoneName;",
+                      "    if (createdZoneNameValue !== undefined && createdZoneNameValue !== null) pm.environment.set('createdZoneName', String(createdZoneNameValue));",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/world/zones",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "world",
+                    "zones"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Postman Zone\",\n  \"unlocked\": false\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Update created zone",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/world/zones/{{createdZoneName}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "world",
+                    "zones",
+                    "{{createdZoneName}}"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"unlocked\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete created zone",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/world/zones/{{createdZoneName}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "world",
+                    "zones",
+                    "{{createdZoneName}}"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Rooms",
+          "item": [
+            {
+              "name": "List rooms",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/world/rooms",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "world",
+                    "rooms"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "List rooms in a zone",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/world/rooms?zoneName=mainCorridorZone",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "world",
+                    "rooms"
+                  ],
+                  "query": [
+                    {
+                      "key": "zoneName",
+                      "value": "mainCorridorZone"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get room",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/world/rooms/{{roomName}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "world",
+                    "rooms",
+                    "{{roomName}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Room connections",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/world/rooms/{{roomName}}/connections",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "world",
+                    "rooms",
+                    "{{roomName}}",
+                    "connections"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Room resource node",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/world/rooms/{{roomName}}/resourceNode",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "world",
+                    "rooms",
+                    "{{roomName}}",
+                    "resourceNode"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Room spawn points",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/world/rooms/{{roomName}}/spawnPoints",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "world",
+                    "rooms",
+                    "{{roomName}}",
+                    "spawnPoints"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Create room",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));",
+                      "if (pm.response.code < 300) {",
+                      "    const json = pm.response.json();",
+                      "    const createdRoomNameValue = json.roomName;",
+                      "    if (createdRoomNameValue !== undefined && createdRoomNameValue !== null) pm.environment.set('createdRoomName', String(createdRoomNameValue));",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/world/rooms",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "world",
+                    "rooms"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"roomName\": \"postmanLaboratory\",\n  \"fullRoomName\": \"Postman Laboratory\",\n  \"type\": \"laboratory\",\n  \"resourceType\": \"metal scraps\",\n  \"zoneName\": \"mainCorridorZone\",\n  \"connectsTo\": [\n    \"mainCorridor\"\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "World Service generates the room's id (roomName) itself; it is saved as createdRoomName."
+              },
+              "response": []
+            },
+            {
+              "name": "Update created room",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/world/rooms/{{createdRoomName}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "world",
+                    "rooms",
+                    "{{createdRoomName}}"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"fullRoomName\": \"Renovated Postman Laboratory\",\n  \"resourceType\": \"electronics\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete created room",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/world/rooms/{{createdRoomName}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "world",
+                    "rooms",
+                    "{{createdRoomName}}"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Spawn points",
+          "item": [
+            {
+              "name": "List spawn points",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/world/spawnPoints",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "world",
+                    "spawnPoints"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get spawn point",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/world/spawnPoints/{{spawnPointId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "world",
+                    "spawnPoints",
+                    "{{spawnPointId}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Create spawn point",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));",
+                      "if (pm.response.code < 300) {",
+                      "    const json = pm.response.json();",
+                      "    const createdSpawnPointIdValue = json.id !== undefined ? json.id : json.spawnPointId;",
+                      "    if (createdSpawnPointIdValue !== undefined && createdSpawnPointIdValue !== null) pm.environment.set('createdSpawnPointId', String(createdSpawnPointIdValue));",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/world/spawnPoints",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "world",
+                    "spawnPoints"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"roomName\": \"{{roomName}}\",\n  \"zombieCategoryAllowed\": \"tourist\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Update created spawn point",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/world/spawnPoints/{{createdSpawnPointId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "world",
+                    "spawnPoints",
+                    "{{createdSpawnPointId}}"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"zombieCategoryAllowed\": \"professor\",\n  \"tiedCourseCategory\": \"mathematics\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete created spawn point",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/world/spawnPoints/{{createdSpawnPointId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "world",
+                    "spawnPoints",
+                    "{{createdSpawnPointId}}"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Resource Service",
+      "description": "Resource types, player inventories, gathering/spending and resource nodes. Routed by the Gateway: /api/resource-types, /api/inventory, /api/gather, /api/spend, /api/refund, /api/nodes.",
+      "item": [
+        {
+          "name": "Resource types",
+          "item": [
+            {
+              "name": "List resource types",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/resource-types",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "resource-types"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get resource type",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/resource-types/{{resourceTypeId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "resource-types",
+                    "{{resourceTypeId}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Create resource type",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));",
+                      "if (pm.response.code < 300) {",
+                      "    const json = pm.response.json();",
+                      "    const createdResourceTypeIdValue = json.resourceTypeId;",
+                      "    if (createdResourceTypeIdValue !== undefined && createdResourceTypeIdValue !== null) pm.environment.set('createdResourceTypeId', String(createdResourceTypeIdValue));",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/resource-types",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "resource-types"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Postman Resource {{$randomInt}}\",\n  \"stackable\": true,\n  \"description\": \"Created from Postman.\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Update created resource type",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/resource-types/{{createdResourceTypeId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "resource-types",
+                    "{{createdResourceTypeId}}"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"description\": \"Updated from Postman.\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete created resource type",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/resource-types/{{createdResourceTypeId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "resource-types",
+                    "{{createdResourceTypeId}}"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Inventories",
+          "item": [
+            {
+              "name": "Get player inventory",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/inventory/{{playerId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "{{playerId}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Create inventory",
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.environment.set('createdInventoryPlayerId', 'p_postman_' + Date.now().toString(36));"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/inventory/{{createdInventoryPlayerId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "{{createdInventoryPlayerId}}"
+                  ]
+                },
+                "description": "Uses a throwaway player id, so the seeded inventories are never touched."
+              },
+              "response": []
+            },
+            {
+              "name": "Set created inventory balances",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/inventory/{{createdInventoryPlayerId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "{{createdInventoryPlayerId}}"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"resources\": {\n    \"wood\": 10,\n    \"food\": 42\n  }\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete created inventory",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/inventory/{{createdInventoryPlayerId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "{{createdInventoryPlayerId}}"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Economy",
+          "item": [
+            {
+              "name": "Gather",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/gather",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "gather"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"idempotencyKey\": \"gather_{{$timestamp}}\",\n  \"playerId\": \"{{playerId}}\",\n  \"nodeId\": \"{{nodeId}}\",\n  \"resourceType\": \"wood\",\n  \"amount\": 2\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Spend",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/spend",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "spend"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"idempotencyKey\": \"spend_{{$timestamp}}\",\n  \"playerId\": \"{{playerId}}\",\n  \"reason\": \"barricade\",\n  \"costs\": [\n    {\n      \"resourceType\": \"wood\",\n      \"amount\": 1\n    }\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Refund",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/refund",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "refund"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"idempotencyKey\": \"refund_{{$timestamp}}\",\n  \"playerId\": \"{{playerId}}\",\n  \"reason\": \"craft_rollback\",\n  \"costs\": [\n    {\n      \"resourceType\": \"wood\",\n      \"amount\": 1\n    }\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get resource node",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/nodes/{{nodeId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "nodes",
+                    "{{nodeId}}"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Zombie Service",
+      "description": "Zombie type definitions and zombie instances. Routed by the Gateway: /api/zombie-types, /api/zombies.",
+      "item": [
+        {
+          "name": "Zombie types",
+          "item": [
+            {
+              "name": "List zombie types",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/zombie-types",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "zombie-types"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "List zombie types by category",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/zombie-types?category=professor",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "zombie-types"
+                  ],
+                  "query": [
+                    {
+                      "key": "category",
+                      "value": "professor"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get zombie type",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/zombie-types/{{zombieTypeId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "zombie-types",
+                    "{{zombieTypeId}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Create zombie type",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));",
+                      "if (pm.response.code < 300) {",
+                      "    const json = pm.response.json();",
+                      "    const createdZombieTypeIdValue = json.typeId;",
+                      "    if (createdZombieTypeIdValue !== undefined && createdZombieTypeIdValue !== null) pm.environment.set('createdZombieTypeId', String(createdZombieTypeIdValue));",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/zombie-types",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "zombie-types"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"category\": \"tourist\",\n  \"name\": \"Exchange Student {{$randomInt}}\",\n  \"baseHealth\": 15,\n  \"attackStrength\": 1,\n  \"moveSpeed\": 2.0,\n  \"perceptionRadius\": 8,\n  \"specialAbility\": \"steal_xp\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Update created zombie type",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/zombie-types/{{createdZombieTypeId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "zombie-types",
+                    "{{createdZombieTypeId}}"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"baseHealth\": 99\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete created zombie type",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/zombie-types/{{createdZombieTypeId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "zombie-types",
+                    "{{createdZombieTypeId}}"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Zombie instances",
+          "item": [
+            {
+              "name": "Spawn zombies",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));",
+                      "if (pm.response.code < 300) {",
+                      "    const json = pm.response.json();",
+                      "    const zombieInstanceIdValue = json.zombies && json.zombies[0].instanceId;",
+                      "    if (zombieInstanceIdValue !== undefined && zombieInstanceIdValue !== null) pm.environment.set('zombieInstanceId', String(zombieInstanceIdValue));",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/zombies/spawn",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "zombies",
+                    "spawn"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"cycleId\": \"cyc_postman\",\n  \"worldZoneId\": \"mainCorridorZone\",\n  \"spawnCount\": 3,\n  \"typeWeights\": {\n    \"professor\": 0.3,\n    \"tourist\": 0.7\n  }\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Trigger special action",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/zombies/{{zombieInstanceId}}/special-action",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "zombies",
+                    "{{zombieInstanceId}}",
+                    "special-action"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"targetPlayerId\": \"{{playerId}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Base Service",
+      "description": "Player bases: rooms, barricades, facilities, decorations and Kiki. Routed by the Gateway: /api/base.",
+      "item": [
+        {
+          "name": "List bases",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gatewayUrl}}/api/base?skip=0&take=50",
+              "host": [
+                "{{gatewayUrl}}"
+              ],
+              "path": [
+                "api",
+                "base"
+              ],
+              "query": [
+                {
+                  "key": "skip",
+                  "value": "0"
+                },
+                {
+                  "key": "take",
+                  "value": "50"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get player base",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gatewayUrl}}/api/base/{{playerId}}",
+              "host": [
+                "{{gatewayUrl}}"
+              ],
+              "path": [
+                "api",
+                "base",
+                "{{playerId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create base (newbie)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is one of [201, 409]', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayUrl}}/api/base",
+              "host": [
+                "{{gatewayUrl}}"
+              ],
+              "path": [
+                "api",
+                "base"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"playerId\": \"{{newbieId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "409 once the newbie already has a base; run 'Delete base (newbie)' to reset."
+          },
+          "response": []
+        },
+        {
+          "name": "Claim room",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is one of [200, 409]', () => pm.expect(pm.response.code).to.be.oneOf([200, 409]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayUrl}}/api/base/{{playerId}}/rooms",
+              "host": [
+                "{{gatewayUrl}}"
+              ],
+              "path": [
+                "api",
+                "base",
+                "{{playerId}}",
+                "rooms"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idempotencyKey\": \"claim_{{$timestamp}}\",\n  \"roomId\": \"mainCorridor\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Unclaim room",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is one of [204, 404]', () => pm.expect(pm.response.code).to.be.oneOf([204, 404]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{gatewayUrl}}/api/base/{{playerId}}/rooms/mainCorridor",
+              "host": [
+                "{{gatewayUrl}}"
+              ],
+              "path": [
+                "api",
+                "base",
+                "{{playerId}}",
+                "rooms",
+                "mainCorridor"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Barricade room",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayUrl}}/api/base/{{playerId}}/barricade",
+              "host": [
+                "{{gatewayUrl}}"
+              ],
+              "path": [
+                "api",
+                "base",
+                "{{playerId}}",
+                "barricade"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idempotencyKey\": \"barricade_{{$timestamp}}\",\n  \"roomId\": \"faf_cab\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Upgrade facility",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayUrl}}/api/base/{{playerId}}/facilities",
+              "host": [
+                "{{gatewayUrl}}"
+              ],
+              "path": [
+                "api",
+                "base",
+                "{{playerId}}",
+                "facilities"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idempotencyKey\": \"facility_{{$timestamp}}\",\n  \"facilityType\": \"storage\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Place decoration",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));",
+                  "if (pm.response.code < 300) {",
+                  "    const json = pm.response.json();",
+                  "    const createdDecorationIdValue = json.decorationId;",
+                  "    if (createdDecorationIdValue !== undefined && createdDecorationIdValue !== null) pm.environment.set('createdDecorationId', String(createdDecorationIdValue));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayUrl}}/api/base/{{playerId}}/decorations",
+              "host": [
+                "{{gatewayUrl}}"
+              ],
+              "path": [
+                "api",
+                "base",
+                "{{playerId}}",
+                "decorations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idempotencyKey\": \"decorate_{{$timestamp}}\",\n  \"itemId\": \"string_lights\",\n  \"roomId\": \"faf_cab\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Remove placed decoration",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{gatewayUrl}}/api/base/{{playerId}}/decorations/{{createdDecorationId}}",
+              "host": [
+                "{{gatewayUrl}}"
+              ],
+              "path": [
+                "api",
+                "base",
+                "{{playerId}}",
+                "decorations",
+                "{{createdDecorationId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Seeded decoration transaction",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gatewayUrl}}/api/base/{{playerId}}/transactions/seed_decorate_veteran_faf_poster",
+              "host": [
+                "{{gatewayUrl}}"
+              ],
+              "path": [
+                "api",
+                "base",
+                "{{playerId}}",
+                "transactions",
+                "seed_decorate_veteran_faf_poster"
+              ]
+            },
+            "description": "Status of the seed's decoration ({{decorationId}}), looked up by its idempotency key."
+          },
+          "response": []
+        },
+        {
+          "name": "Feed Kiki",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is one of [200, 422]', () => pm.expect(pm.response.code).to.be.oneOf([200, 422]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayUrl}}/api/base/{{playerId}}/kiki/interact",
+              "host": [
+                "{{gatewayUrl}}"
+              ],
+              "path": [
+                "api",
+                "base",
+                "{{playerId}}",
+                "kiki",
+                "interact"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idempotencyKey\": \"kiki_{{$timestamp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "422 while Kiki is on cooldown."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete base (newbie)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is one of [204, 404]', () => pm.expect(pm.response.code).to.be.oneOf([204, 404]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{gatewayUrl}}/api/base/{{newbieId}}",
+              "host": [
+                "{{gatewayUrl}}"
+              ],
+              "path": [
+                "api",
+                "base",
+                "{{newbieId}}"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Crafting Service",
+      "description": "Recipes, unlocks and crafting. Routed by the Gateway: /api/recipes, /api/craft, /api/crafts.",
+      "item": [
+        {
+          "name": "Recipes",
+          "item": [
+            {
+              "name": "List recipes for player",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/recipes?playerId={{playerId}}&includeLocked=true",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "recipes"
+                  ],
+                  "query": [
+                    {
+                      "key": "playerId",
+                      "value": "{{playerId}}"
+                    },
+                    {
+                      "key": "includeLocked",
+                      "value": "true"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "List unlocked recipes for player",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/recipes?playerId={{playerId}}&includeLocked=false",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "recipes"
+                  ],
+                  "query": [
+                    {
+                      "key": "playerId",
+                      "value": "{{playerId}}"
+                    },
+                    {
+                      "key": "includeLocked",
+                      "value": "false"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get recipe",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/recipes/{{recipeId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "recipes",
+                    "{{recipeId}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Recipe eligibility",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/recipes/{{recipeId}}/eligibility?playerId={{playerId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "recipes",
+                    "{{recipeId}}",
+                    "eligibility"
+                  ],
+                  "query": [
+                    {
+                      "key": "playerId",
+                      "value": "{{playerId}}"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Create recipe",
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.environment.set('createdRecipeId', 'recipe_postman_' + Date.now().toString(36));"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/recipes",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "recipes"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"recipeId\": \"{{createdRecipeId}}\",\n  \"name\": \"Duct Tape Armor\",\n  \"ingredients\": [\n    {\n      \"resourceType\": \"paper\",\n      \"amount\": 1\n    },\n    {\n      \"resourceType\": \"metal\",\n      \"amount\": 1\n    }\n  ],\n  \"output\": \"duct_tape_armor\",\n  \"unlockCondition\": {\n    \"type\": \"playerLevel\",\n    \"minLevel\": 1\n  }\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Update created recipe",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/recipes/{{createdRecipeId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "recipes",
+                    "{{createdRecipeId}}"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Reinforced Duct Tape Armor\",\n  \"ingredients\": [\n    {\n      \"resourceType\": \"paper\",\n      \"amount\": 2\n    },\n    {\n      \"resourceType\": \"metal\",\n      \"amount\": 1\n    }\n  ],\n  \"output\": \"duct_tape_armor\",\n  \"unlockCondition\": null\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete created recipe",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/recipes/{{createdRecipeId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "recipes",
+                    "{{createdRecipeId}}"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Crafting",
+          "item": [
+            {
+              "name": "Craft",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));",
+                      "if (pm.response.code < 300) {",
+                      "    const json = pm.response.json();",
+                      "    const craftIdValue = json.craftId;",
+                      "    if (craftIdValue !== undefined && craftIdValue !== null) pm.environment.set('craftId', String(craftIdValue));",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/craft",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "craft"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"idempotencyKey\": \"craft_{{$timestamp}}\",\n  \"playerId\": \"{{playerId}}\",\n  \"recipeId\": \"{{recipeId}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get craft",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/crafts/{{craftId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "crafts",
+                    "{{craftId}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "List crafts of player",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/crafts?playerId={{playerId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "crafts"
+                  ],
+                  "query": [
+                    {
+                      "key": "playerId",
+                      "value": "{{playerId}}"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
