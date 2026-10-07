@@ -1022,17 +1022,18 @@ Responsible for the player's survival base, initially represented by the FAF Cab
 
 ### **DockerHub Image**
 - **Repository:** [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service)
-- **Image Tag:** `cristi150404/base-service:1.0.0`
-- **Default Port:** `5003`
+- **Image Tag:** `cristi150404/base-service:2.0.0`
+- **Default Port:** `Internal only (5003), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
 
-- `GET /world/rooms/{roomId}` *(World Service)* — confirms a room exists and its zone is unlocked.
+- `GET /world/rooms/{roomId}` *(World Service)* — confirms a room exists and finds its zone.
+- `GET /world/zones` *(World Service)* — confirms the room's zone is unlocked.
 - `POST /api/spend` *(Resource Service)* — deducts resources before applying a barricade, facility upgrade, decoration, or Kiki feeding.
 - `POST /api/refund` *(Resource Service)* — returns the resources if the effect cannot be applied.
 - `POST /api/players/{player_id}/inventory/items` *(Player Service)* — delivers a Kiki reward to the player's inventory.
 
-Every state-changing endpoint spends first, then applies the effect in one database transaction. If that fails, Base Service refunds the resources rather than leaving the player having paid for nothing.
+Base Service calls them through the Gateway with a service token (`kind: service`, forwarded as `X-Service-Name: base-service`); Resource Service is called directly until it has a Gateway route. Every state-changing endpoint spends first, then applies the effect in one database transaction. If that fails, Base Service refunds the resources rather than leaving the player having paid for nothing.
 
 ### **Exposed API Endpoints**
 
@@ -1170,8 +1171,8 @@ Allows players to combine resources into useful survival equipment.
 
 ### **DockerHub Image**
 - **Repository:** [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service)
-- **Image Tag:** `cristi150404/crafting-service:1.0.0`
-- **Default Port:** `5004`
+- **Image Tag:** `cristi150404/crafting-service:2.0.0`
+- **Default Port:** `Internal only (5004), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
 
@@ -1180,9 +1181,9 @@ Allows players to combine resources into useful survival equipment.
 - `POST /api/players/{player_id}/inventory/items` *(Player Service)* — delivers the crafted item.
 - `GET /api/players/{player_id}` *(Player Service)* — reads the player's level.
 - `GET /players/{playerId}/progress` *(Exam Service)* — reads passed exams.
-- `GET /world/map` *(World Service)* — reads unlocked zones.
+- `GET /world/zones` *(World Service)* — reads unlocked zones.
 
-A recipe can be gated on a player level, a passed exam, an unlocked zone, or a discovered resource, which is why this service reads from four others. If delivery fails after the ingredients were consumed, Crafting Service refunds them — this is the saga's rollback path.
+Crafting Service calls them through the Gateway with a service token (`kind: service`, forwarded as `X-Service-Name: crafting-service`); Resource Service is called directly until it has a Gateway route. A recipe can be gated on a player level, a passed exam, an unlocked zone, or a discovered resource, which is why this service reads from four others. If delivery fails after the ingredients were consumed, Crafting Service refunds them — this is the saga's rollback path.
 
 ### **Exposed API Endpoints**
 
@@ -1202,6 +1203,8 @@ Response
   ]
 }
 ```
+
+If the service behind a recipe's condition cannot be reached, that recipe is returned locked with `"unavailable": "exam_service_unavailable"` (or the matching service), and the other recipes are evaluated as usual.
 
 **`GET /api/recipes/{recipeId}/eligibility`** *(Consumed by Gateway)*
 
@@ -1462,8 +1465,8 @@ The microservices are containerized and published on DockerHub:
 | **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:2.5.0` | `Internal (8080), WebSocket 3003` | Game sessions, day/night cycle, and timed player actions |
 | **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:1.1.0` | `4001` | Zombie type definitions, spawned instances, and special actions |
 | **Resource Service** | [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service) | `costinloredana/resource-service:1.1.0` | `4002` | Resource types, player balances, nodes, and idempotent transactions |
-| **Base Service** | [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service) | `cristi150404/base-service:1.0.0` | `5003` | Player bases, barricades, facilities, and decorations |
-| **Crafting Service** | [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service) | `cristi150404/crafting-service:1.0.0` | `5004` | Recipes, unlock conditions, and crafting sagas |
+| **Base Service** | [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service) | `cristi150404/base-service:2.0.0` | `Internal (5003)` | Player bases, barricades, facilities, and decorations |
+| **Crafting Service** | [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service) | `cristi150404/crafting-service:2.0.0` | `Internal (5004)` | Recipes, unlock conditions, and crafting sagas |
 
 ---
 
