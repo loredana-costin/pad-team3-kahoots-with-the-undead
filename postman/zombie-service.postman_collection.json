@@ -7,7 +7,7 @@
   "variable": [
     {
       "key": "baseUrl",
-      "value": "http://localhost:4001",
+      "value": "http://localhost:8000",
       "type": "string"
     },
     {
@@ -27,8 +27,33 @@
       "value": "",
       "type": "string",
       "description": "Set automatically by 'Spawn Zombies' via its test script (first zombie in the response)."
+    },
+    {
+      "key": "runId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "username",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "jwt",
+      "value": "",
+      "type": "string"
     }
   ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{jwt}}",
+        "type": "string"
+      }
+    ]
+  },
   "item": [
     {
       "name": "Health Check",
@@ -42,6 +67,75 @@
           "path": [
             "health"
           ]
+        },
+        "auth": {
+          "type": "noauth"
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Register a test player (200)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// A fresh player per run, so the collection can be run repeatedly against the same databases.",
+              "pm.collectionVariables.set('runId', Date.now().toString(36));",
+              "pm.collectionVariables.set('username', 'pm_' + pm.collectionVariables.get('runId'));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "pm.test(\"Token is returned\", function () {",
+              "    const json = pm.response.json();",
+              "    pm.collectionVariables.set('jwt', json.jwt);",
+              "    pm.expect(json.jwt).to.be.a('string');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/register",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "register"
+          ]
+        },
+        "description": "Registers a fresh player through the Gateway; every later request sends its token as the collection's bearer auth.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"pm_{{runId}}_password\",\n  \"email\": \"{{username}}@test.local\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "auth": {
+          "type": "noauth"
         }
       },
       "response": []
