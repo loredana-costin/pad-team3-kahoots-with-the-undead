@@ -226,11 +226,9 @@ services:
       ConnectionStrings__Postgres: "Host=game-db;Port=5432;Database=game_db;Username=postgres;Password=postgres"
       ASPNETCORE_ENVIRONMENT: Development
       Services__World: http://gateway-service:8000
-      # Direct until Zombie Service has a Gateway route; then http://gateway-service:8000.
-      Services__Zombie: http://zombie-service:4001
+      Services__Zombie: http://gateway-service:8000
       Integrations__MockedServices: ""
-      # Direct until Resource Service has a Gateway route; then http://gateway-service:8000.
-      Services__Resource: http://resource-service:4002
+      Services__Resource: http://gateway-service:8000
       # Direct until Base Service has a Gateway route; then http://gateway-service:8000.
       Services__Base: http://base-service:5003
       Services__Exam: http://gateway-service:8000
@@ -248,7 +246,7 @@ services:
       - kahoots-network
 
   resource-service:
-    image: costinloredana/resource-service:1.1.0
+    image: costinloredana/resource-service:2.0.0
     container_name: resource-service
     restart: always
     environment:
@@ -258,8 +256,9 @@ services:
       POSTGRES_USER: ${RESOURCE_DB_USER:-postgres}
       POSTGRES_PASSWORD: ${RESOURCE_DB_PASSWORD:-postgres}
       POSTGRES_DB: resource_db
-    ports:
-      - "4002:4002"
+    # Internal only: reachable through the gateway on :8000
+    expose:
+      - "4002"
     depends_on:
       resource-db:
         condition: service_healthy
@@ -267,14 +266,15 @@ services:
       - kahoots-network
 
   zombie-service:
-    image: costinloredana/zombie-service:1.1.0
+    image: costinloredana/zombie-service:2.0.0
     container_name: zombie-service
     restart: always
     environment:
       PORT: 4001
       MONGO_URI: "mongodb://zombie-db:27017/zombie_db"
-    ports:
-      - "4001:4001"
+    # Internal only: reachable through the gateway on :8000
+    expose:
+      - "4001"
     depends_on:
       zombie-db:
         condition: service_healthy
@@ -343,6 +343,7 @@ services:
       WORLD_SERVICE_URL: http://world-service:3001
       PLAYER_SERVICE_URL: http://player-service:8080
       GAME_SERVICE_URL: http://game-service:8080
+      ZOMBIE_SERVICE_URL: http://zombie-service:4001
       BASE_SERVICE_URL: http://base-service:5003
       CRAFTING_SERVICE_URL: http://crafting-service:5004
       RESOURCE_SERVICE_URL: http://resource-service:4002
