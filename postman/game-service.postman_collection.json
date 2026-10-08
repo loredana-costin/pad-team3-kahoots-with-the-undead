@@ -105,9 +105,77 @@
       "key": "examAttemptB",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "gatewayUrl",
+      "value": "http://localhost:8000"
+    },
+    {
+      "key": "tokenUser",
+      "value": ""
+    },
+    {
+      "key": "jwt",
+      "value": ""
     }
   ],
   "item": [
+    {
+      "name": "00. Get A Token (200)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Every route except register, login and /health needs a bearer token at the Gateway.",
+              "pm.collectionVariables.set(\"tokenUser\", \"postman_\" + Date.now());"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Returns a jwt for the collection\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body).to.have.property(\"jwt\");",
+              "    pm.collectionVariables.set(\"jwt\", body.jwt);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"{{tokenUser}}\",\n  \"password\": \"hunter2pass\",\n  \"email\": \"{{tokenUser}}@faf.md\"\n}"
+        },
+        "url": {
+          "raw": "{{gatewayUrl}}/api/auth/register",
+          "host": [
+            "{{gatewayUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "register"
+          ]
+        }
+      }
+    },
     {
       "name": "01. Gateway Health Check (200)",
       "event": [
@@ -3104,5 +3172,15 @@
         }
       }
     }
-  ]
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{jwt}}",
+        "type": "string"
+      }
+    ]
+  }
 }

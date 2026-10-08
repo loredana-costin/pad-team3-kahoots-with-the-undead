@@ -201,7 +201,7 @@ services:
       - kahoots-network
 
   player-service:
-    image: andrei045/player-service:2.1.0
+    image: andrei045/player-service:2.2.0
     container_name: player-service
     restart: always
     environment:
@@ -219,7 +219,7 @@ services:
       - kahoots-network
 
   game-service:
-    image: andrei045/game-service:2.5.0
+    image: andrei045/game-service:2.6.0
     container_name: game-service
     restart: always
     environment:
@@ -229,9 +229,12 @@ services:
       Services__Zombie: http://gateway-service:8000
       Integrations__MockedServices: ""
       Services__Resource: http://gateway-service:8000
-      # Direct until Base Service has a Gateway route; then http://gateway-service:8000.
-      Services__Base: http://base-service:5003
+      Services__Base: http://gateway-service:8000
       Services__Exam: http://gateway-service:8000
+      # Signs Game Service's own calls through the Gateway; same secret as Player Service and the Gateway.
+      Jwt__Secret: "team-compose-development-secret-at-least-32-chars"
+      Jwt__Issuer: player-service
+      Jwt__Audience: kahoots-with-the-undead
       # The URL clients get from POST /api/sessions/{id}/websocket; the socket port is the
       # only one published, REST stays behind the Gateway.
       WebSocket__PublicBaseUrl: ws://localhost:3003
