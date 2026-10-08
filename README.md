@@ -280,7 +280,7 @@ Owns the definitions of all courses, questions, and the logic to grade them.
 
 ### **DockerHub Image**
 - **Repository:** [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service)
-- **Image Tag:** `mariaelenabotnari/exam-service:2.0.1`
+- **Image Tag:** `mariaelenabotnari/exam-service:2.1.1`
 - **Default Port:** `Internal only (3000), accessible via Gateway (8000)`
 
 ### **Exposed API Endpoints**
@@ -445,7 +445,7 @@ Owns the persistent physical state of the university.
 
 ### **DockerHub Image**
 - **Repository:** [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service)
-- **Image Tag:** `mariaelenabotnari/world-service:2.0.1`
+- **Image Tag:** `mariaelenabotnari/world-service:2.1.1`
 - **Default Port:** `Internal only (3001), accessible via Gateway (8000)`
 
 ### **Exposed API Endpoints**
@@ -1467,8 +1467,8 @@ The microservices are containerized and published on DockerHub:
 | Service | DockerHub Repository | Image Tag | Default Port | Description |
 |---|---|---|---|---|
 | **Gateway Service** | [`mariaelenabotnari/gateway-service`](https://hub.docker.com/r/mariaelenabotnari/gateway-service) | `mariaelenabotnari/gateway-service:2.4.0` | `8000` | System entry point, async request routing layer |
-| **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:2.0.0` | `Internal (3000)` | Academic progression, exams, and achievements |
-| **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:2.0.0` | `Internal (3001)` | Physical campus layout, rooms, zones, and spawn points |
+| **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:2.1.1` | `Internal (3000)` | Academic progression, exams, and achievements |
+| **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:2.1.1` | `Internal (3001)` | Physical campus layout, rooms, zones, and spawn points |
 | **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:2.2.0` | `Internal (8080)` | Player identity, progression, inventory, and trades |
 | **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:2.6.1` | `Internal (8080), WebSocket 3003` | Game sessions, day/night cycle, and timed player actions |
 | **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:2.0.0` | `Internal (4001)` | Zombie type definitions, spawned instances, and special actions |
