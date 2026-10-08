@@ -159,7 +159,7 @@ services:
 
   # --- Microservices (using uploaded DockerHub images) ---
   exam-service:
-    image: mariaelenabotnari/exam-service:1.1.0
+    image: mariaelenabotnari/exam-service:2.1.1
     container_name: exam-service
     restart: always
     environment:
@@ -171,8 +171,8 @@ services:
       DB_PASSWORD: postgres
       DB_NAME: exam_db
       DATABASE_URL: "postgresql://postgres:postgres@exam-db:5432/exam_db?schema=public"
-    ports:
-      - "3000:3000"
+    expose:
+      - "3000"
     depends_on:
       exam-db:
         condition: service_healthy
@@ -180,7 +180,7 @@ services:
       - kahoots-network
 
   world-service:
-    image: mariaelenabotnari/world-service:1.2.0
+    image: mariaelenabotnari/world-service:2.1.1
     container_name: world-service
     restart: always
     environment:
@@ -192,8 +192,8 @@ services:
       DB_PASSWORD: postgres
       DB_NAME: world_db
       DATABASE_URL: "postgresql://postgres:postgres@world-db:5432/world_db?schema=public"
-    ports:
-      - "3001:3001"
+    expose:
+      - "3001"
     depends_on:
       world-db:
         condition: service_healthy
@@ -201,7 +201,7 @@ services:
       - kahoots-network
 
   player-service:
-    image: andrei045/player-service:1.1.0
+    image: andrei045/player-service:2.2.0
     container_name: player-service
     restart: always
     environment:
@@ -210,8 +210,8 @@ services:
       Jwt__Issuer: player-service
       Jwt__Audience: kahoots-with-the-undead
       ASPNETCORE_ENVIRONMENT: Development
-    ports:
-      - "3002:8080"
+    expose:
+      - "8080"
     depends_on:
       player-db:
         condition: service_healthy
@@ -219,14 +219,29 @@ services:
       - kahoots-network
 
   game-service:
-    image: andrei045/game-service:1.1.1
+    image: andrei045/game-service:2.6.1
     container_name: game-service
     restart: always
     environment:
       ConnectionStrings__Postgres: "Host=game-db;Port=5432;Database=game_db;Username=postgres;Password=postgres"
       ASPNETCORE_ENVIRONMENT: Development
+      Services__World: http://gateway-service:8000
+      Services__Zombie: http://gateway-service:8000
+      Integrations__MockedServices: ""
+      Services__Resource: http://gateway-service:8000
+      Services__Base: http://gateway-service:8000
+      Services__Exam: http://gateway-service:8000
+      # Signs Game Service's own calls through the Gateway; same secret as Player Service and the Gateway.
+      Jwt__Secret: "team-compose-development-secret-at-least-32-chars"
+      Jwt__Issuer: player-service
+      Jwt__Audience: kahoots-with-the-undead
+      # The URL clients get from POST /api/sessions/{id}/websocket; the socket port is the
+      # only one published, REST stays behind the Gateway.
+      WebSocket__PublicBaseUrl: ws://localhost:3003
     ports:
-      - "3003:8080"
+      - "3003:8081"
+    expose:
+      - "8080"
     depends_on:
       game-db:
         condition: service_healthy
@@ -234,7 +249,7 @@ services:
       - kahoots-network
 
   resource-service:
-    image: costinloredana/resource-service:1.1.0
+    image: costinloredana/resource-service:2.0.0
     container_name: resource-service
     restart: always
     environment:
@@ -244,8 +259,9 @@ services:
       POSTGRES_USER: ${RESOURCE_DB_USER:-postgres}
       POSTGRES_PASSWORD: ${RESOURCE_DB_PASSWORD:-postgres}
       POSTGRES_DB: resource_db
-    ports:
-      - "4002:4002"
+    # Internal only: reachable through the gateway on :8000
+    expose:
+      - "4002"
     depends_on:
       resource-db:
         condition: service_healthy
@@ -253,14 +269,15 @@ services:
       - kahoots-network
 
   zombie-service:
-    image: costinloredana/zombie-service:1.1.0
+    image: costinloredana/zombie-service:2.0.0
     container_name: zombie-service
     restart: always
     environment:
       PORT: 4001
       MONGO_URI: "mongodb://zombie-db:27017/zombie_db"
-    ports:
-      - "4001:4001"
+    # Internal only: reachable through the gateway on :8000
+    expose:
+      - "4001"
     depends_on:
       zombie-db:
         condition: service_healthy
@@ -268,7 +285,7 @@ services:
       - kahoots-network
 
   base-service:
-    image: cristi150404/base-service:1.0.0
+    image: cristi150404/base-service:2.0.0
     container_name: base-service
     restart: always
     environment:
@@ -277,13 +294,15 @@ services:
       POSTGRES_USER: ${BASE_DB_USER:-postgres}
       POSTGRES_PASSWORD: ${BASE_DB_PASSWORD:-postgres}
       POSTGRES_DB: base_db
-      Integrations__UseMocks: "true"
-      Services__Resource: http://resource-service:4002
-      Services__Player: http://player-service:8080
-      Services__World: http://world-service:3001
+      Integrations__UseMocks: "false"
+      Services__Resource: http://gateway-service:8000
+      Services__Player: http://gateway-service:8000
+      Services__World: http://gateway-service:8000
+      # Signs the service token the Gateway accepts; same value as the Gateway's JWT_SECRET.
+      Jwt__Secret: team-compose-development-secret-at-least-32-chars
       ASPNETCORE_ENVIRONMENT: Development
-    ports:
-      - "5003:5003"
+    expose:
+      - "5003"
     depends_on:
       base-db:
         condition: service_healthy
@@ -291,7 +310,7 @@ services:
       - kahoots-network
 
   crafting-service:
-    image: cristi150404/crafting-service:1.0.0
+    image: cristi150404/crafting-service:2.0.0
     container_name: crafting-service
     restart: always
     environment:
@@ -300,17 +319,39 @@ services:
       POSTGRES_USER: ${CRAFTING_DB_USER:-postgres}
       POSTGRES_PASSWORD: ${CRAFTING_DB_PASSWORD:-postgres}
       POSTGRES_DB: crafting_db
-      Integrations__UseMocks: "true"
-      Services__Resource: http://resource-service:4002
-      Services__Player: http://player-service:8080
-      Services__Exam: http://exam-service:3000
-      Services__World: http://world-service:3001
+      Integrations__UseMocks: "false"
+      Services__Resource: http://gateway-service:8000
+      Services__Player: http://gateway-service:8000
+      Services__Exam: http://gateway-service:8000
+      Services__World: http://gateway-service:8000
+      # Signs the service token the Gateway accepts; same value as the Gateway's JWT_SECRET.
+      Jwt__Secret: team-compose-development-secret-at-least-32-chars
       ASPNETCORE_ENVIRONMENT: Development
-    ports:
-      - "5004:5004"
+    expose:
+      - "5004"
     depends_on:
       crafting-db:
         condition: service_healthy
+    networks:
+      - kahoots-network
+
+  gateway-service:
+    image: mariaelenabotnari/gateway-service:2.4.0
+    container_name: gateway-service
+    restart: always
+    environment:
+      PORT: 8000
+      JWT_SECRET: team-compose-development-secret-at-least-32-chars
+      EXAM_SERVICE_URL: http://exam-service:3000
+      WORLD_SERVICE_URL: http://world-service:3001
+      PLAYER_SERVICE_URL: http://player-service:8080
+      GAME_SERVICE_URL: http://game-service:8080
+      ZOMBIE_SERVICE_URL: http://zombie-service:4001
+      BASE_SERVICE_URL: http://base-service:5003
+      CRAFTING_SERVICE_URL: http://crafting-service:5004
+      RESOURCE_SERVICE_URL: http://resource-service:4002
+    ports:
+      - "8000:8000"
     networks:
       - kahoots-network
 

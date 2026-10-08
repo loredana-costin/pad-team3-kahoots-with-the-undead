@@ -2,13 +2,13 @@
   "info": {
     "_postman_id": "7f3c1a92-5d48-4e6b-9a12-3b8e0c4d7f51",
     "name": "Player Service",
-    "description": "Postman Collection for testing Player Service: authentication, profile, XP progression, inventory, achievements and atomic trades.\n\nRun the collection in order - requests share state through collection variables. Usernames are randomised per run, so it can be run repeatedly without resetting the database.\n\nStart the service first (see player-service/README.md). Default baseUrl is http://localhost:5199.",
+    "description": "Postman Collection for testing Player Service: authentication, profile, XP progression, inventory, achievements and atomic trades.\n\nRun the collection in order - requests share state through collection variables. Usernames are randomised per run, so it can be run repeatedly without resetting the database.\n\nStart the service first (see player-service/README.md). Default baseUrl is http://localhost:8000, the Gateway, which forwards /api/auth, /api/players and /api/trades to Player Service.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     {
       "key": "baseUrl",
-      "value": "http://localhost:3002",
+      "value": "http://localhost:8000",
       "type": "string"
     },
     {
@@ -45,11 +45,16 @@
       "key": "idempotencyKey",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "attemptId",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
     {
-      "name": "01. Health Check (200)",
+      "name": "01. Gateway Health Check (200)",
       "event": [
         {
           "listen": "test",
@@ -57,7 +62,7 @@
             "type": "text/javascript",
             "exec": [
               "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
-              "pm.test(\"Service reports healthy\", () => pm.expect(pm.response.json().status).to.eql(\"healthy\"));"
+              "pm.test(\"Gateway reports ok\", () => pm.expect(pm.response.json().status).to.eql(\"ok\"));"
             ]
           }
         }
@@ -351,7 +356,9 @@
           "script": {
             "type": "text/javascript",
             "exec": [
-              "pm.test(\"Status code is 401 Unauthorized\", () => pm.response.to.have.status(401));"
+              "pm.test(\"Status code is 401 Unauthorized\", () => pm.response.to.have.status(401));",
+              "pm.test(\"Gateway rejects with missing_token\", () => pm.expect(pm.response.json().error).to.eql(\"missing_token\"));",
+              "pm.test(\"Asks for a bearer token\", () => pm.expect(pm.response.headers.get(\"WWW-Authenticate\")).to.eql(\"Bearer\"));"
             ]
           }
         }
@@ -369,6 +376,9 @@
             "players",
             "{{playerId}}"
           ]
+        },
+        "auth": {
+          "type": "noauth"
         }
       }
     },
@@ -396,12 +406,7 @@
       ],
       "request": {
         "method": "GET",
-        "header": [
-          {
-            "key": "Authorization",
-            "value": "Bearer {{jwt}}"
-          }
-        ],
+        "header": [],
         "url": {
           "raw": "{{baseUrl}}/api/players/{{playerId}}",
           "host": [
@@ -431,12 +436,7 @@
       ],
       "request": {
         "method": "GET",
-        "header": [
-          {
-            "key": "Authorization",
-            "value": "Bearer {{jwt}}"
-          }
-        ],
+        "header": [],
         "url": {
           "raw": "{{baseUrl}}/api/players/p_doesnotexist",
           "host": [
@@ -1062,6 +1062,225 @@
           ]
         }
       }
+    },
+    {
+      "name": "26. Deliver ExamPassedEvent (200)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set(\"attemptId\", \"attempt_\" + Date.now());"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Event applied and XP awarded\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.eventName).to.eql(\"ExamPassedEvent\");",
+              "    pm.expect(body.status).to.eql(\"applied\");",
+              "    pm.expect(body.xp).to.be.a(\"number\").that.is.at.least(100);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventName\": \"ExamPassedEvent\",\n  \"payload\": {\n    \"playerId\": \"{{playerId}}\",\n    \"courseCategory\": \"mathematics\",\n    \"examId\": \"exam_math_1\",\n    \"attemptId\": \"{{attemptId}}\",\n    \"grade\": 9,\n    \"xpAwarded\": 100,\n    \"timestamp\": \"2026-10-05T12:00:00Z\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/players/events",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "players",
+            "events"
+          ]
+        }
+      }
+    },
+    {
+      "name": "27. Deliver Same Event Again Is Idempotent (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Replay is reported as already_processed with no XP change\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.status).to.eql(\"already_processed\");",
+              "    pm.expect(body.xp).to.be.null;",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventName\": \"ExamPassedEvent\",\n  \"payload\": {\n    \"playerId\": \"{{playerId}}\",\n    \"courseCategory\": \"mathematics\",\n    \"examId\": \"exam_math_1\",\n    \"attemptId\": \"{{attemptId}}\",\n    \"grade\": 9,\n    \"xpAwarded\": 100,\n    \"timestamp\": \"2026-10-05T12:00:00Z\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/players/events",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "players",
+            "events"
+          ]
+        }
+      }
+    },
+    {
+      "name": "28. Deliver Unknown Event (400)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 400 Bad Request\", () => pm.response.to.have.status(400));",
+              "pm.test(\"Rejected with unknown_event\", () => pm.expect(pm.response.json().reason).to.eql(\"unknown_event\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventName\": \"SomethingNobodyPublishes\",\n  \"payload\": {}\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/players/events",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "players",
+            "events"
+          ]
+        }
+      }
+    },
+    {
+      "name": "29. Get Profile With A Forged Token (401)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 401 Unauthorized\", () => pm.response.to.have.status(401));",
+              "pm.test(\"Gateway rejects with invalid_token\", () => pm.expect(pm.response.json().error).to.eql(\"invalid_token\"));",
+              "pm.test(\"Asks for a bearer token\", () => pm.expect(pm.response.headers.get(\"WWW-Authenticate\")).to.eql(\"Bearer\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJwXzQ0IiwiaXNzIjoicGxheWVyLXNlcnZpY2UiLCJhdWQiOiJrYWhvb3RzLXdpdGgtdGhlLXVuZGVhZCIsImV4cCI6NDEwMjQ0NDgwMH0.c2lnbmVkLXdpdGgtdGhlLXdyb25nLXNlY3JldA",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/players/{{playerId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "players",
+            "{{playerId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "30. Create Trade Without Token (401)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 401 Unauthorized\", () => pm.response.to.have.status(401));",
+              "pm.test(\"Gateway rejects with missing_token\", () => pm.expect(pm.response.json().error).to.eql(\"missing_token\"));",
+              "pm.test(\"Asks for a bearer token\", () => pm.expect(pm.response.headers.get(\"WWW-Authenticate\")).to.eql(\"Bearer\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/trades",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "trades"
+          ]
+        }
+      }
     }
-  ]
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{jwt}}",
+        "type": "string"
+      }
+    ]
+  }
 }

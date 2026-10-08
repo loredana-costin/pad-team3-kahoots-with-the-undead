@@ -4,14 +4,14 @@ Collections for testing each service. One file per service, Postman schema v2.1.
 
 | Collection | Service | Default baseUrl |
 |---|---|---|
-| `player-service.postman_collection.json` | Player Service | `http://localhost:3002` |
-| `game-service.postman_collection.json` | Game Service | `http://localhost:3003` |
+| `player-service.postman_collection.json` | Player Service | `http://localhost:8000` |
+| `game-service.postman_collection.json` | Game Service | `http://localhost:8000` |
 | `exam-service.postman_collection.json` | Exam Service | `http://localhost:3000` |
 | `world-service.postman_collection.json` | World Service | `http://localhost:3001` |
-| `zombie-service.postman_collection.json` | Zombie Service | `http://localhost:4001` |
-| `resource-service.postman_collection.json` | Resource Service | `http://localhost:4002` |
-| `base-service.postman_collection.json` | Base Service | `http://localhost:5003` |
-| `crafting-service.postman_collection.json` | Crafting Service | `http://localhost:5004` |
+| `zombie-service.postman_collection.json` | Zombie Service | `http://localhost:8000` |
+| `resource-service.postman_collection.json` | Resource Service | `http://localhost:8000` |
+| `base-service.postman_collection.json` | Base Service | `http://localhost:8000` |
+| `crafting-service.postman_collection.json` | Crafting Service | `http://localhost:8000` |
 
 ## Running in Postman
 

@@ -19,7 +19,7 @@ Microservices are implemented using two technologies:
 |---|---|
 | Ceaetchii Andrei | Player Service, Game Service |
 | Botnari Maria-Elena | Exam Service, World Service |
-| Costin Loredana | Zombie Service, Resource Service |
+| Costin Loredana | Gateway Service, Zombie Service, Resource Service |
 | Bulat Cristian | Base Service, Crafting Service |
 
 ---
@@ -47,7 +47,7 @@ The full communication contract — every endpoint, its payload, and its respons
 |---|---|---|---|---|---|
 | Ceaetchii Andrei | Player Service, Game Service | C# / ASP.NET Core | PostgreSQL (both services) | REST/HTTP + WebSockets + RabbitMQ Events | C# provides strong typing and asynchronous programming. PostgreSQL ensures data integrity and transactions for player identity, inventory and trades. Game Service uses it as well so both services share one architecture: the same generic repository, migration runner and base entity. Its state is short-lived but still relational (sessions, rosters, timed actions), and one DBMS keeps deployment and the shared compose file simpler. REST is used for request/response communication, WebSockets for real-time updates, and RabbitMQ for asynchronous cross-service events. Trade-off: Redis would fit ephemeral session state better and was the original choice, but running a single database across both services is simpler to operate at this scale. |
 | Botnari Maria-Elena | Exam Service, World Service | Node.js/TypeScript (Express) | PostgreSQL | REST + RabbitMQ events | Both services store structured, relational data (exams and attempts for one, rooms and connections for the other), so one language and one database keeps things simple and easy to maintain across both. Trade-off: without EF Core's built-in migration tooling, schema changes to the room graph require more manual discipline to keep consistent. |
-| Costin Loredana | Zombie Service, Resource Service | Node.js/TypeScript (Express) | Zombie: MongoDB; Resource: PostgreSQL | Zombie: REST; Resource: REST, idempotency-key-gated | Node's non-blocking I/O fits both I/O-bound services, which wait on DB calls. MongoDB's flexible schema enables rapid Zombie Service iteration without migrations as ability types expand. The correctness-critical Resource Service uses TypeScript and DB transactions to enforce atomic, idempotent balance updates, so duplicate completion events never double-award resources. Trade-off: Node is weaker at CPU-heavy work, but neither service does any, so this cost doesn't apply here. |
+| Costin Loredana | Gateway Service, Zombie Service, Resource Service | Gateway: Python (FastAPI); Others: Node.js/TypeScript (Express) | Gateway: None; Zombie: MongoDB; Resource: PostgreSQL | Gateway: REST routing; Zombie: REST; Resource: REST, idempotency-key-gated | Gateway uses FastAPI to provide an async entry point and routing layer. Node's non-blocking I/O fits the other two I/O-bound services. MongoDB's flexible schema enables rapid Zombie Service iteration without migrations as ability types expand. The correctness-critical Resource Service uses TypeScript and DB transactions to enforce atomic, idempotent balance updates. Trade-off: Node is weaker at CPU-heavy work, but neither service does any, so this cost doesn't apply here. |
 | Bulat Cristian | Base Service, Crafting Service | C#/.NET (ASP.NET Core) | PostgreSQL | REST for Base and Crafting Services; RabbitMQ publisher and consumer for both | Both services perform "spend and apply" operations that must not partially succeed. C#'s explicit exception handling and EF Core transactions make atomic, saga-style operations across service calls easier to reason about than a dynamically-typed alternative. Trade-off: more boilerplate than Node for simple CRUD, accepted for the correctness guarantee. |
 
 ---
@@ -56,6 +56,14 @@ The full communication contract — every endpoint, its payload, and its respons
 ![architecture-diagram](architectural-diagram.png)
 
 The diagram illustrates the microservices architecture for the **In Kahoots with the Undead** system. Game Service acts as the central service handling the others, making synchronous calls to Player, Exam, World, Zombie, Resource, and Base Service to run a gameplay cycle. Resource Service and Zombie Service never call outward to other microservices. Exam Service and World Service are loosely coupled via asynchronous events — `AchievementUnlocked` (consumed by World Service, Player Service, and Crafting Service) and `ZoneUnlocked` (consumed by Game Service, Base Service, and Crafting Service) — so grading a player's exam doesn't block on procedural map generation. Base Service and Crafting Service each additionally read from and coordinate sagas across several other services to validate and apply their own effects — see the dependency diagram below for the full picture. Crafting Service specifically coordinates a saga across Resource Service and Player Service to atomically consume ingredients and deliver crafted items, and reads from Player, Exam, and World Service to evaluate recipe unlock conditions.
+
+## Authorization at the Gateway
+
+Every request to the Gateway (`http://localhost:8000`) needs `Authorization: Bearer <jwt>`, except `GET /health`, `POST /api/auth/register` and `POST /api/auth/login`, which return the token. The Gateway validates the token (HS256, signed by Player Service, issuer `player-service`, audience `kahoots-with-the-undead`, not expired) and never forwards the `Authorization` header; for a player token it forwards `X-Player-Id` and `X-Username` instead. A missing, invalid or expired token is answered by the Gateway with `401` and `{ "error": "missing_token" | "invalid_token" | "token_expired", "message": "..." }`.
+
+Services calling through the Gateway present a service token signed with the same secret (`"kind": "service"`); the Gateway forwards its subject as `X-Service-Name` instead of player headers. The secret is `JWT_SECRET` on the Gateway and `Jwt__Secret` on Player and Game Service; all three must match.
+
+Service-to-service calls through the Gateway: Game Service to World, Exam, Zombie, Resource and Base Service. The Postman collections get a token first and send it on every request.
 
 ---
 ## **1. Player Service**
@@ -234,13 +242,23 @@ Response
 
 **WebSocket Connection**
 
-`wss://api.game/ws/sessions/{session_id}?token=<JWT>` — real-time action progress and cycle events.
+Negotiate through the Gateway, then connect directly to Game Service's socket port.
+
+**`POST /api/sessions/{session_id}/websocket`** *(Consumed by Gateway)*
+
+Response
+```json
+{ "url": "ws://localhost:3003/ws/sessions/session_8bc13aea?ticket=3f9c0e1b7a2d4c6e8f0a1b2c3d4e5f60", "expiresAt": "2026-10-06T08:00:00Z" }
+```
+
+The ticket is single-use and valid for one minute. `ws://.../ws/sessions/{session_id}?ticket=...` is served on Game Service's socket port only, so its REST API stays reachable only through the Gateway. A reconnect replays every notification not yet delivered.
 
 **Server → Client Events**
-- `action_progress`: `{"type":"action_progress","actionId":"act_991","percent":40}`
-- `action_completed`: `{"type":"action_completed","actionId":"act_991","result":{"food":12}}`
-- `cycle_changed`: `{"type":"cycle_changed","cycle":"night","zone":"zone_12"}`
-- `zombie_encounter`: `{"type":"zombie_encounter","zombieInstanceId":"z_991","zombieType":"professor"}`
+- `action_progress`: `{"type":"action_progress","actionId":"act_991","playerId":"p_44","actionType":"scavenge","percent":40}` (sent when the percentage changes)
+- `action_completed`: `{"type":"action_completed","actionId":"act_991","playerId":"p_44","actionType":"scavenge","result":{"kind":"gather","gather":{"status":"applied","newBalance":{"food":12}},"barricade":null,"facility":null}}`
+- `cycle_changed`: `{"type":"cycle_changed","cycle":"night","cycleNumber":1,"zone":"mathematicsWing"}`
+- `zombie_encounter`: `{"type":"zombie_encounter","zombieInstanceId":"z_991","zombieType":"professor","typeId":"prof_calc","spawnPoint":"mathematicsWing_spawn_1"}`
+- `exam_failed`, `zone_unlocked`: the events below, relayed to the session
 
 ### **Message Queue Events**
 
@@ -262,8 +280,8 @@ Owns the definitions of all courses, questions, and the logic to grade them.
 
 ### **DockerHub Image**
 - **Repository:** [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service)
-- **Image Tag:** `mariaelenabotnari/exam-service:1.1.0`
-- **Default Port:** `3000`
+- **Image Tag:** `mariaelenabotnari/exam-service:2.1.1`
+- **Default Port:** `Internal only (3000), accessible via Gateway (8000)`
 
 ### **Exposed API Endpoints**
 
@@ -427,8 +445,8 @@ Owns the persistent physical state of the university.
 
 ### **DockerHub Image**
 - **Repository:** [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service)
-- **Image Tag:** `mariaelenabotnari/world-service:1.2.0`
-- **Default Port:** `3001`
+- **Image Tag:** `mariaelenabotnari/world-service:2.1.1`
+- **Default Port:** `Internal only (3001), accessible via Gateway (8000)`
 
 ### **Exposed API Endpoints**
 
@@ -675,8 +693,8 @@ Owns the persistent definitions and short-lived instance state of zombies.
 
 ### **DockerHub Image**
 - **Repository:** [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service)
-- **Image Tag:** `costinloredana/zombie-service:1.1.0`
-- **Default Port:** `4001`
+- **Image Tag:** `costinloredana/zombie-service:2.0.0`
+- **Default Port:** `Internal only (4001), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
 
@@ -834,8 +852,8 @@ Owns the university's resource economy independently from the physical map.
 
 ### **DockerHub Image**
 - **Repository:** [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service)
-- **Image Tag:** `costinloredana/resource-service:1.1.0`
-- **Default Port:** `4002`
+- **Image Tag:** `costinloredana/resource-service:2.0.0`
+- **Default Port:** `Internal only (4002), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
 
@@ -1012,17 +1030,18 @@ Responsible for the player's survival base, initially represented by the FAF Cab
 
 ### **DockerHub Image**
 - **Repository:** [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service)
-- **Image Tag:** `cristi150404/base-service:1.0.0`
-- **Default Port:** `5003`
+- **Image Tag:** `cristi150404/base-service:2.0.0`
+- **Default Port:** `Internal only (5003), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
 
-- `GET /world/rooms/{roomId}` *(World Service)* — confirms a room exists and its zone is unlocked.
+- `GET /world/rooms/{roomId}` *(World Service)* — confirms a room exists and finds its zone.
+- `GET /world/zones` *(World Service)* — confirms the room's zone is unlocked.
 - `POST /api/spend` *(Resource Service)* — deducts resources before applying a barricade, facility upgrade, decoration, or Kiki feeding.
 - `POST /api/refund` *(Resource Service)* — returns the resources if the effect cannot be applied.
 - `POST /api/players/{player_id}/inventory/items` *(Player Service)* — delivers a Kiki reward to the player's inventory.
 
-Every state-changing endpoint spends first, then applies the effect in one database transaction. If that fails, Base Service refunds the resources rather than leaving the player having paid for nothing.
+Base Service calls them through the Gateway with a service token (`kind: service`, forwarded as `X-Service-Name: base-service`). Every state-changing endpoint spends first, then applies the effect in one database transaction. If that fails, Base Service refunds the resources rather than leaving the player having paid for nothing.
 
 ### **Exposed API Endpoints**
 
@@ -1160,8 +1179,8 @@ Allows players to combine resources into useful survival equipment.
 
 ### **DockerHub Image**
 - **Repository:** [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service)
-- **Image Tag:** `cristi150404/crafting-service:1.0.0`
-- **Default Port:** `5004`
+- **Image Tag:** `cristi150404/crafting-service:2.0.0`
+- **Default Port:** `Internal only (5004), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
 
@@ -1170,9 +1189,9 @@ Allows players to combine resources into useful survival equipment.
 - `POST /api/players/{player_id}/inventory/items` *(Player Service)* — delivers the crafted item.
 - `GET /api/players/{player_id}` *(Player Service)* — reads the player's level.
 - `GET /players/{playerId}/progress` *(Exam Service)* — reads passed exams.
-- `GET /world/map` *(World Service)* — reads unlocked zones.
+- `GET /world/zones` *(World Service)* — reads unlocked zones.
 
-A recipe can be gated on a player level, a passed exam, an unlocked zone, or a discovered resource, which is why this service reads from four others. If delivery fails after the ingredients were consumed, Crafting Service refunds them — this is the saga's rollback path.
+Crafting Service calls them through the Gateway with a service token (`kind: service`, forwarded as `X-Service-Name: crafting-service`). A recipe can be gated on a player level, a passed exam, an unlocked zone, or a discovered resource, which is why this service reads from four others. If delivery fails after the ingredients were consumed, Crafting Service refunds them — this is the saga's rollback path.
 
 ### **Exposed API Endpoints**
 
@@ -1192,6 +1211,8 @@ Response
   ]
 }
 ```
+
+If the service behind a recipe's condition cannot be reached, that recipe is returned locked with `"unavailable": "exam_service_unavailable"` (or the matching service), and the other recipes are evaluated as usual.
 
 **`GET /api/recipes/{recipeId}/eligibility`** *(Consumed by Gateway)*
 
@@ -1319,7 +1340,6 @@ type/short-description-issueID
 2. Make commits with clear, descriptive messages
 3. Open Pull Request to `development`
 4. After approval, squash and merge
-5. Delete feature branch after merge
 
 ## Pull Request Requirements
 
@@ -1331,7 +1351,7 @@ Located at `.github/PULL_REQUEST_TEMPLATE.md`:
 
 ```markdown
 ## What does this PR do?
-Brief description and related issue (Closes #XX)
+Brief description and related issue
 
 ## Changes Made
 - Change 1
@@ -1446,14 +1466,15 @@ The microservices are containerized and published on DockerHub:
 
 | Service | DockerHub Repository | Image Tag | Default Port | Description |
 |---|---|---|---|---|
-| **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:1.1.0` | `3000` | Academic progression, exams, and achievements |
-| **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:1.2.0` | `3001` | Physical campus layout, rooms, zones, and spawn points |
-| **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:1.1.0` | `3002` | Player identity, progression, inventory, and trades |
-| **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:1.1.1` | `3003` | Game sessions, day/night cycle, and timed player actions |
-| **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:1.1.0` | `4001` | Zombie type definitions, spawned instances, and special actions |
-| **Resource Service** | [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service) | `costinloredana/resource-service:1.1.0` | `4002` | Resource types, player balances, nodes, and idempotent transactions |
-| **Base Service** | [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service) | `cristi150404/base-service:1.0.0` | `5003` | Player bases, barricades, facilities, and decorations |
-| **Crafting Service** | [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service) | `cristi150404/crafting-service:1.0.0` | `5004` | Recipes, unlock conditions, and crafting sagas |
+| **Gateway Service** | [`mariaelenabotnari/gateway-service`](https://hub.docker.com/r/mariaelenabotnari/gateway-service) | `mariaelenabotnari/gateway-service:2.4.0` | `8000` | System entry point, async request routing layer |
+| **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:2.1.1` | `Internal (3000)` | Academic progression, exams, and achievements |
+| **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:2.1.1` | `Internal (3001)` | Physical campus layout, rooms, zones, and spawn points |
+| **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:2.2.0` | `Internal (8080)` | Player identity, progression, inventory, and trades |
+| **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:2.6.1` | `Internal (8080), WebSocket 3003` | Game sessions, day/night cycle, and timed player actions |
+| **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:2.0.0` | `Internal (4001)` | Zombie type definitions, spawned instances, and special actions |
+| **Resource Service** | [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service) | `costinloredana/resource-service:2.0.0` | `Internal (4002)` | Resource types, player balances, nodes, and idempotent transactions |
+| **Base Service** | [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service) | `cristi150404/base-service:2.0.0` | `Internal (5003)` | Player bases, barricades, facilities, and decorations |
+| **Crafting Service** | [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service) | `cristi150404/crafting-service:2.0.0` | `Internal (5004)` | Recipes, unlock conditions, and crafting sagas |
 
 ---
 
@@ -1465,16 +1486,12 @@ To run these services locally via Docker Compose, ensure the host machine meets 
    - Docker Engine `20.10.0+` or Docker Desktop `4.0.0+`
    - Docker Compose `v2.0.0+`
 2. **Available Host Ports**:
-   - `3000` — Exam Service HTTP API
-   - `3001` — World Service HTTP API
+   - `8000` — Gateway Service HTTP API (Routes to Exam, World, Player, Game, Zombie and Resource Services)
+   - `3003` — Game Service WebSocket (negotiate through the Gateway first; REST is not served here)
    - `5433` — Exam PostgreSQL Database (`exam-db`)
    - `5434` — World PostgreSQL Database (`world-db`)
-   - `3002` — Player Service HTTP API
-   - `3003` — Game Service HTTP API
    - `5435` — Player PostgreSQL Database (`player-db`)
    - `5436` — Game PostgreSQL Database (`game-db`)
-   - `4001` — Zombie Service HTTP API
-   - `4002` — Resource Service HTTP API
    - `5437` — Resource PostgreSQL Database (`resource-db`)
    - `27017` — Zombie MongoDB Database (`zombie-db`)
    - `5003` — Base Service HTTP API
@@ -1493,7 +1510,7 @@ Both images are multi-stage Node.js 20 builds that run as the non-root `node` us
 
 | | Zombie Service | Resource Service |
 |---|---|---|
-| **Image** | `costinloredana/zombie-service:1.1.0` (`node:20-alpine`) | `costinloredana/resource-service:1.1.0` (`node:20-slim` + OpenSSL for Prisma) |
+| **Image** | `costinloredana/zombie-service:2.0.0` (`node:20-alpine`) | `costinloredana/resource-service:2.0.0` (`node:20-slim` + OpenSSL for Prisma) |
 | **Database** | MongoDB 8 (`mongo:8`) | PostgreSQL 17 (`postgres:17-alpine`) |
 | **Required env** | `MONGO_URI`, e.g. `mongodb://zombie-db:27017/zombie_db` | `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, or a single `DATABASE_URL` that takes precedence over them |
 | **Optional env** | `PORT` (default `4001`) | `PORT` (default `4002`) |
@@ -1506,11 +1523,11 @@ The service exits on startup if its database is unreachable, so start it only af
 
 # Zombie Service
 docker run -d --name zombie-db --network kahoots-net mongo:8
-docker run -d --name zombie-service --network kahoots-net -p 4001:4001   -e MONGO_URI=mongodb://zombie-db:27017/zombie_db   costinloredana/zombie-service:1.1.0
+docker run -d --name zombie-service --network kahoots-net -p 4001:4001   -e MONGO_URI=mongodb://zombie-db:27017/zombie_db   costinloredana/zombie-service:2.0.0
 
 # Resource Service
 docker run -d --name resource-db --network kahoots-net   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=resource_db postgres:17-alpine
-docker run -d --name resource-service --network kahoots-net -p 4002:4002   -e POSTGRES_HOST=resource-db -e POSTGRES_PORT=5432 -e POSTGRES_USER=postgres   -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=resource_db   costinloredana/resource-service:1.1.0
+docker run -d --name resource-service --network kahoots-net -p 4002:4002   -e POSTGRES_HOST=resource-db -e POSTGRES_PORT=5432 -e POSTGRES_USER=postgres   -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=resource_db   costinloredana/resource-service:2.0.0
 ```
 
 If a container exits right away, the database probably wasn't ready yet. Wait a few seconds and run `docker start zombie-service` or `docker start resource-service`.
@@ -1520,11 +1537,11 @@ If a container exits right away, the database probably wasn't ready yet. Wait a 
 ### Step-by-Step Execution Guide
 
 #### 1. Start the Microservices & Databases
-From the repository root, start all sixteen containers in detached mode:
+From the repository root, start all seventeen containers in detached mode:
 ```bash
 docker compose up -d
 ```
-Docker Compose will automatically pull the images from DockerHub, initialize the database containers (`exam-db` on 5433, `world-db` on 5434, `player-db` on 5435, `game-db` on 5436, `resource-db` on 5437, `zombie-db` on 27017, `base-db` on 5438, `crafting-db` on 5439), perform healthchecks, and launch `exam-service`, `world-service`, `player-service`, `game-service`, `zombie-service`, `resource-service`, `base-service` and `crafting-service`.
+Docker Compose will automatically pull the images from DockerHub, initialize the database containers (`exam-db` on 5433, `world-db` on 5434, `player-db` on 5435, `game-db` on 5436, `resource-db` on 5437, `zombie-db` on 27017, `base-db` on 5438, `crafting-db` on 5439), perform healthchecks, and launch `gateway-service`, `exam-service`, `world-service`, `player-service`, `game-service`, `zombie-service`, `resource-service`, `base-service` and `crafting-service`.
 
 To check container health and status:
 ```bash
@@ -1578,35 +1595,39 @@ docker compose exec resource-service npm run db:seed
 #### 3. Verify Endpoints
 Once seeded, you can verify the persistent data via HTTP requests (Postman, browser, or curl):
 
+Every request except register and login needs the token the Gateway hands out, so get one first:
+
 ```bash
-# Verify Exam Service
-curl -s http://localhost:3000/exams
+# Register a throwaway account through the Gateway and keep its token (password must be 8+ characters)
+TOKEN=$(curl -s -X POST http://localhost:8000/api/auth/register -H "Content-Type: application/json" -d "{\"username\":\"verify_$RANDOM\",\"password\":\"hunter2pass\",\"email\":\"verify@faf.md\"}" | sed -E 's/.*"jwt":"([^"]+)".*/\1/')
+AUTH="Authorization: Bearer $TOKEN"
 
-# Verify World Service Zones
-curl -s http://localhost:3001/zones
+# Exam Service
+curl -s http://localhost:8000/exams -H "$AUTH"
 
-# Verify World Service Rooms
-curl -s http://localhost:3001/rooms
+# World Service zones, rooms and spawn points
+curl -s http://localhost:8000/world/zones -H "$AUTH"
+curl -s http://localhost:8000/world/rooms -H "$AUTH"
+curl -s http://localhost:8000/world/spawnPoints -H "$AUTH"
 
-# Verify Base Service
-curl -s http://localhost:5003/api/base
+# Game Service
+curl -s http://localhost:8000/api/sessions -H "$AUTH"
 
-# Verify Crafting Service
-curl -s http://localhost:5004/api/recipes/definitions
+# Base Service and Crafting Service
+curl -s http://localhost:8000/api/base -H "$AUTH"
+curl -s http://localhost:8000/api/recipes/definitions -H "$AUTH"
 
-# Verify World Service Spawn Points
-curl -s http://localhost:3001/spawnPoints
-```
+# Zombie Service types, then spawn instances for a cycle
+curl -s http://localhost:8000/api/zombie-types -H "$AUTH"
+curl -s -X POST http://localhost:8000/api/zombies/spawn -H "$AUTH" -H "Content-Type: application/json" -d '{"cycleId":"cyc_1","worldZoneId":"zoneZero","spawnCount":3,"typeWeights":{"professor":0.5,"tourist":0.5}}'
 
-# Verify Zombie Service types, then spawn instances for a cycle
-```bash
-curl -s http://localhost:4001/api/zombie-types
-curl -s -X POST http://localhost:4001/api/zombies/spawn -H "Content-Type: application/json"   -d '{"cycleId":"cyc_1","worldZoneId":"zoneZero","spawnCount":3,"typeWeights":{"professor":0.5,"tourist":0.5}}'
+# Resource Service types, nodes and an idempotent gather (run it twice: the second returns "already_applied")
+curl -s http://localhost:8000/api/resource-types -H "$AUTH"
+curl -s http://localhost:8000/api/nodes/node_1 -H "$AUTH"
+curl -s -X POST http://localhost:8000/api/gather -H "$AUTH" -H "Content-Type: application/json" -d '{"idempotencyKey":"verify_1","playerId":"p_1","nodeId":"node_1","resourceType":"wood","amount":5}'
 
-# Verify Resource Service types, nodes and an idempotent gather (run it twice: the second returns "already_applied")
-curl -s http://localhost:4002/api/resource-types
-curl -s http://localhost:4002/api/nodes/node_1
-curl -s -X POST http://localhost:4002/api/gather -H "Content-Type: application/json"   -d '{"idempotencyKey":"verify_1","playerId":"p_1","nodeId":"node_1","resourceType":"wood","amount":5}'
+# Without a token the Gateway answers 401 missing_token
+curl -s http://localhost:8000/api/sessions
 ```
 
 Postman collections for every service are in [`postman/`](postman/README.md).

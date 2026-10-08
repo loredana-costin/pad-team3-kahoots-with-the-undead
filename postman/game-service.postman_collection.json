@@ -2,13 +2,13 @@
   "info": {
     "_postman_id": "b41e7d05-9c62-4f38-a7d1-6e2b5c930f44",
     "name": "Game Service",
-    "description": "Postman Collection for testing Game Service: sessions and lobbies, the day/night cycle, and timed player actions.\n\nRun the collection in order - requests share state through collection variables. Every run creates its own sessions, so it can be run repeatedly without resetting the database.\n\nStart the service first (see game-service/README.md). Default baseUrl is http://localhost:5299.",
+    "description": "Postman Collection for testing Game Service: sessions and lobbies, the day/night cycle, and timed player actions.\n\nRun the collection in order - requests share state through collection variables. Every run creates its own sessions, so it can be run repeatedly without resetting the database.\n\nStart the service first (see game-service/README.md). Default baseUrl is http://localhost:8000, the Gateway, which forwards /api/sessions, /api/actions and /api/rooms to Game Service.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     {
       "key": "baseUrl",
-      "value": "http://localhost:3003",
+      "value": "http://localhost:8000",
       "type": "string"
     },
     {
@@ -30,11 +30,158 @@
       "key": "secondActionId",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "eventZoneId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "eventSessionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "zombieInstanceId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "basePlayerId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "baseSessionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "barricadeActionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "upgradeActionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "unclaimedActionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "examPlayerA",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "examPlayerB",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "examSessionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "examZombieA",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "examZombieB",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "examAttemptA",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "examAttemptB",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "gatewayUrl",
+      "value": "http://localhost:8000"
+    },
+    {
+      "key": "tokenUser",
+      "value": ""
+    },
+    {
+      "key": "jwt",
+      "value": ""
+    },
+    {
+      "key": "brokeActionId",
+      "value": ""
     }
   ],
   "item": [
     {
-      "name": "01. Health Check (200)",
+      "name": "00. Get A Token (200)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Every route except register, login and /health needs a bearer token at the Gateway.",
+              "pm.collectionVariables.set(\"tokenUser\", \"postman_\" + Date.now());"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Returns a jwt for the collection\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body).to.have.property(\"jwt\");",
+              "    pm.collectionVariables.set(\"jwt\", body.jwt);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"{{tokenUser}}\",\n  \"password\": \"hunter2pass\",\n  \"email\": \"{{tokenUser}}@faf.md\"\n}"
+        },
+        "url": {
+          "raw": "{{gatewayUrl}}/api/auth/register",
+          "host": [
+            "{{gatewayUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "register"
+          ]
+        }
+      }
+    },
+    {
+      "name": "01. Gateway Health Check (200)",
       "event": [
         {
           "listen": "test",
@@ -42,7 +189,7 @@
             "type": "text/javascript",
             "exec": [
               "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
-              "pm.test(\"Service reports healthy\", () => pm.expect(pm.response.json().status).to.eql(\"healthy\"));"
+              "pm.test(\"Gateway reports ok\", () => pm.expect(pm.response.json().status).to.eql(\"ok\"));"
             ]
           }
         }
@@ -93,7 +240,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"name\": \"FAF Block 1\",\n  \"zoneId\": \"zone_12\",\n  \"maxPlayers\": 4\n}"
+          "raw": "{\n  \"name\": \"FAF Block 1\",\n  \"zoneId\": \"mathematicsWing\",\n  \"maxPlayers\": 4\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/api/sessions",
@@ -135,7 +282,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"name\": \"x\",\n  \"zoneId\": \"zone_12\",\n  \"maxPlayers\": 99\n}"
+          "raw": "{\n  \"name\": \"x\",\n  \"zoneId\": \"mathematicsWing\",\n  \"maxPlayers\": 99\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/api/sessions",
@@ -355,7 +502,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"playerId\": \"p_44\",\n  \"actionType\": \"scavenge\",\n  \"targetNodeId\": \"node_7\",\n  \"durationSeconds\": 300\n}"
+          "raw": "{\n  \"playerId\": \"p_44\",\n  \"actionType\": \"scavenge\",\n  \"targetNodeId\": \"node_3\",\n  \"durationSeconds\": 25\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/actions",
@@ -472,7 +619,7 @@
               "    pm.collectionVariables.set(\"actionId\", body.actionId);",
               "});",
               "pm.test(\"Idempotency key carries type, player and node\", () => {",
-              "    pm.expect(pm.response.json().idempotencyKey).to.match(/^scavenge_p_44_node_7_/);",
+              "    pm.expect(pm.response.json().idempotencyKey).to.match(/^scavenge_p_44_node_3_/);",
               "});"
             ]
           }
@@ -488,7 +635,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"playerId\": \"p_44\",\n  \"actionType\": \"scavenge\",\n  \"targetNodeId\": \"node_7\",\n  \"durationSeconds\": 300\n}"
+          "raw": "{\n  \"playerId\": \"p_44\",\n  \"actionType\": \"scavenge\",\n  \"targetNodeId\": \"node_3\",\n  \"durationSeconds\": 25\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/actions",
@@ -795,6 +942,9 @@
               "    const body = pm.response.json();",
               "    pm.expect(body.status).to.eql(\"completed\");",
               "    pm.expect(body.percent).to.eql(100);",
+              "    pm.expect(body.result.kind).to.eql(\"gather\");",
+              "    pm.expect(body.result.gather.status).to.eql(\"applied\");",
+              "    pm.expect(body.result.gather.newBalance.food).to.be.at.least(1);",
               "});"
             ]
           }
@@ -919,7 +1069,7 @@
               "    const body = pm.response.json();",
               "    pm.expect(body.cycle).to.eql(\"night\");",
               "    pm.expect(body.cycleNumber).to.eql(1);",
-              "    pm.expect(body.zone).to.eql(\"zone_12\");",
+              "    pm.expect(body.zone).to.eql(\"mathematicsWing\");",
               "});"
             ]
           }
@@ -1236,6 +1386,1940 @@
           ]
         }
       }
+    },
+    {
+      "name": "32. Create A Lobby In A Fresh Zone (200)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set(\"eventZoneId\", \"zone_evt_\" + Date.now());"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Lobby opened in the fresh zone\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.zoneId).to.eql(pm.collectionVariables.get(\"eventZoneId\"));",
+              "    pm.collectionVariables.set(\"eventSessionId\", body.session_id);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Event Zone Lobby\",\n  \"zoneId\": \"{{eventZoneId}}\",\n  \"maxPlayers\": 2\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "33. Start The Fresh Zone Session (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Session is active\", () => pm.expect(pm.response.json().status).to.eql(\"active\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{eventSessionId}}/start",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{eventSessionId}}",
+            "start"
+          ]
+        }
+      }
+    },
+    {
+      "name": "34. Deliver ZoneUnlockedEvent (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Event applied and the active session in that zone was notified\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.eventName).to.eql(\"ZoneUnlockedEvent\");",
+              "    pm.expect(body.status).to.eql(\"applied\");",
+              "    pm.expect(body.notificationsCreated).to.eql(1);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventName\": \"ZoneUnlockedEvent\",\n  \"payload\": {\n    \"zoneId\": \"{{eventZoneId}}\",\n    \"roomsAdded\": [\"room_evt_1\", \"room_evt_2\"],\n    \"timestamp\": \"2026-10-05T12:00:00Z\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/events",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "events"
+          ]
+        }
+      }
+    },
+    {
+      "name": "35. Pending Notifications Include zone_unlocked (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"A zone_unlocked notification is waiting for the session\", () => {",
+              "    const hit = pm.response.json().find(n => n.type === \"zone_unlocked\");",
+              "    pm.expect(hit, \"zone_unlocked notification\").to.exist;",
+              "    pm.expect(hit.payload.zone).to.eql(pm.collectionVariables.get(\"eventZoneId\"));",
+              "    pm.expect(hit.payload.roomsAdded).to.eql([\"room_evt_1\", \"room_evt_2\"]);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{eventSessionId}}/notifications",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{eventSessionId}}",
+            "notifications"
+          ]
+        }
+      }
+    },
+    {
+      "name": "36. Deliver Same Event Again Is Idempotent (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Replay is reported as already_processed and notifies nobody\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.status).to.eql(\"already_processed\");",
+              "    pm.expect(body.notificationsCreated).to.eql(0);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventName\": \"ZoneUnlockedEvent\",\n  \"payload\": {\n    \"zoneId\": \"{{eventZoneId}}\",\n    \"roomsAdded\": [\"room_evt_1\", \"room_evt_2\"],\n    \"timestamp\": \"2026-10-05T12:00:00Z\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/events",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "events"
+          ]
+        }
+      }
+    },
+    {
+      "name": "37. Deliver Unknown Event (400)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 400 Bad Request\", () => pm.response.to.have.status(400));",
+              "pm.test(\"Rejected with unknown_event\", () => pm.expect(pm.response.json().reason).to.eql(\"unknown_event\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventName\": \"SomethingNobodyPublishes\",\n  \"payload\": {}\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/events",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "events"
+          ]
+        }
+      }
+    },
+    {
+      "name": "38. Rooms In The Session Zone (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Rooms of mathematicsWing come from World Service\", () => {",
+              "    const rooms = pm.response.json().rooms;",
+              "    pm.expect(rooms).to.be.an(\"array\").that.is.not.empty;",
+              "    rooms.forEach(r => pm.expect(r.zoneName).to.eql(\"mathematicsWing\"));",
+              "    pm.expect(rooms.map(r => r.roomName)).to.include(\"mathematicsExamHall\");",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/rooms",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "rooms"
+          ]
+        }
+      }
+    },
+    {
+      "name": "39. Spawn Points In The Exam Hall (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Professor spawn points only\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.roomId).to.eql(\"mathematicsExamHall\");",
+              "    pm.expect(body.spawnPoints.length).to.be.at.least(2);",
+              "    body.spawnPoints.forEach(p => pm.expect(p.zombieCategoryAllowed).to.eql(\"professor\"));",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/rooms/mathematicsExamHall/spawn-points",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "rooms",
+            "mathematicsExamHall",
+            "spawn-points"
+          ]
+        }
+      }
+    },
+    {
+      "name": "40. Spawn Zombies For The Cycle (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Five zombies with Zombie Service instance ids\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body).to.have.lengthOf(5);",
+              "    body.forEach(z => {",
+              "        pm.expect(z.instanceId).to.match(/^z_/);",
+              "        pm.expect(z.health).to.be.above(0);",
+              "    });",
+              "    pm.collectionVariables.set(\"zombieInstanceId\", body[0].instanceId);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/zombies/spawn",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "zombies",
+            "spawn"
+          ]
+        }
+      }
+    },
+    {
+      "name": "41. Spawn Again Returns The Same Wave (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"One wave per cycle\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body).to.have.lengthOf(5);",
+              "    pm.expect(body[0].instanceId).to.eql(pm.collectionVariables.get(\"zombieInstanceId\"));",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/zombies/spawn",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "zombies",
+            "spawn"
+          ]
+        }
+      }
+    },
+    {
+      "name": "42. List Session Zombies (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"The wave is stored with the session\", () => pm.expect(pm.response.json().length).to.be.at.least(5));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/zombies",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "zombies"
+          ]
+        }
+      }
+    },
+    {
+      "name": "43. Trigger Special Action On p_44 (200 or 409)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Zombie Service decided the action, or Exam Service refused a repeat for p_44\", () => {",
+              "    const body = pm.response.json();",
+              "    if (pm.response.code === 409) {",
+              "        pm.expect([\"exam_retry_cooldown\", \"exam_attempt_already_in_progress\"]).to.include(body.reason);",
+              "        return;",
+              "    }",
+              "    pm.expect(pm.response.code).to.eql(200);",
+              "    pm.expect(body.targetPlayerId).to.eql(\"p_44\");",
+              "    pm.expect([\"initiate_exam\", \"steal_resource\", \"steal_xp\"]).to.include(body.actionType);",
+              "    if (body.actionType === \"initiate_exam\") pm.expect(body.exam.attemptId).to.be.a(\"string\");",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"targetPlayerId\": \"p_44\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/zombies/{{zombieInstanceId}}/special-action",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "zombies",
+            "{{zombieInstanceId}}",
+            "special-action"
+          ]
+        }
+      }
+    },
+    {
+      "name": "44. Special Action On Unknown Zombie (404)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 404 Not Found\", () => pm.response.to.have.status(404));",
+              "pm.test(\"Rejected with zombie_not_found\", () => pm.expect(pm.response.json().reason).to.eql(\"zombie_not_found\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"targetPlayerId\": \"p_44\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/zombies/z_doesnotexist/special-action",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "zombies",
+            "z_doesnotexist",
+            "special-action"
+          ]
+        }
+      }
+    },
+    {
+      "name": "45. Special Action For Player Not In Session (404)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 404 Not Found\", () => pm.response.to.have.status(404));",
+              "pm.test(\"Rejected with player_not_in_session\", () => pm.expect(pm.response.json().reason).to.eql(\"player_not_in_session\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"targetPlayerId\": \"p_nobody\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/zombies/{{zombieInstanceId}}/special-action",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "zombies",
+            "{{zombieInstanceId}}",
+            "special-action"
+          ]
+        }
+      }
+    },
+    {
+      "name": "46. Start Gather On Unknown Node (404)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 404 Not Found\", () => pm.response.to.have.status(404));",
+              "pm.test(\"Rejected with node_not_found\", () => pm.expect(pm.response.json().reason).to.eql(\"node_not_found\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"p_77\",\n  \"actionType\": \"scavenge\",\n  \"targetNodeId\": \"node_99\",\n  \"durationSeconds\": 300\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/actions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "actions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "47. Create A Lobby For A Fresh Base Owner (200)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set(\"basePlayerId\", \"p_base_\" + Date.now());"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Lobby opened\", () => pm.collectionVariables.set(\"baseSessionId\", pm.response.json().session_id));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Base Actions Lobby\",\n  \"zoneId\": \"mathematicsWing\",\n  \"maxPlayers\": 2\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "48. Join The Fresh Base Owner (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Roster holds the new player\", () => pm.expect(pm.response.json().players).to.have.lengthOf(1));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"{{basePlayerId}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{baseSessionId}}/players",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{baseSessionId}}",
+            "players"
+          ]
+        }
+      }
+    },
+    {
+      "name": "49. Start The Base Actions Session (200)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Base Service 2.0.0 spends real resources through Resource Service. Credit the fresh base",
+              "// owner with exactly what 51 (5 wood, 2 metal) and 53 (8 wood) cost, via Resource's refund,",
+              "// so the run does not depend on a shared node that other runs drain.",
+              "pm.sendRequest({",
+              "    url: pm.collectionVariables.get(\"baseUrl\") + \"/api/refund\",",
+              "    method: \"POST\",",
+              "    header: { \"Content-Type\": \"application/json\", \"Authorization\": \"Bearer \" + pm.collectionVariables.get(\"jwt\") },",
+              "    body: { mode: \"raw\", raw: JSON.stringify({",
+              "        idempotencyKey: \"postman_fund_\" + pm.collectionVariables.get(\"basePlayerId\"),",
+              "        playerId: pm.collectionVariables.get(\"basePlayerId\"),",
+              "        reason: \"postman_setup\",",
+              "        costs: [{ resourceType: \"wood\", amount: 13 }, { resourceType: \"metal\", amount: 2 }]",
+              "    }) }",
+              "}, (err, res) => pm.test(\"Base owner funded with 13 wood and 2 metal\", () => {",
+              "    pm.expect(err).to.eql(null);",
+              "    pm.expect(res.code).to.eql(200);",
+              "}));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Session is active\", () => pm.expect(pm.response.json().status).to.eql(\"active\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{baseSessionId}}/start",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{baseSessionId}}",
+            "start"
+          ]
+        }
+      }
+    },
+    {
+      "name": "50. Start Barricade Of faf_cab (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Barricade action started\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.status).to.eql(\"in_progress\");",
+              "    pm.expect(body.idempotencyKey).to.match(/^barricade_p_base_\\d+_faf_cab_/);",
+              "    pm.collectionVariables.set(\"barricadeActionId\", body.actionId);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"{{basePlayerId}}\",\n  \"actionType\": \"barricade\",\n  \"targetNodeId\": \"faf_cab\",\n  \"durationSeconds\": 60\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{baseSessionId}}/actions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{baseSessionId}}",
+            "actions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "51. Complete Barricade, Base Created On The Way (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Base Service created the base and raised the barricade\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.status).to.eql(\"completed\");",
+              "    pm.expect(body.result.kind).to.eql(\"barricade\");",
+              "    pm.expect(body.result.barricade.roomId).to.eql(\"faf_cab\");",
+              "    pm.expect(body.result.barricade.barricadeLevel).to.eql(1);",
+              "    pm.expect(body.result.barricade.defenseRating).to.be.above(0);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/actions/{{barricadeActionId}}/complete",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "actions",
+            "{{barricadeActionId}}",
+            "complete"
+          ]
+        }
+      }
+    },
+    {
+      "name": "52. Start Storage Upgrade (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Upgrade action started\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.status).to.eql(\"in_progress\");",
+              "    pm.collectionVariables.set(\"upgradeActionId\", body.actionId);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"{{basePlayerId}}\",\n  \"actionType\": \"upgrade_base\",\n  \"targetNodeId\": \"faf_cab\",\n  \"durationSeconds\": 60\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{baseSessionId}}/actions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{baseSessionId}}",
+            "actions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "53. Complete Storage Upgrade (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Base Service upgraded the storage facility\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.result.kind).to.eql(\"facility\");",
+              "    pm.expect(body.result.facility.facilityType).to.eql(\"storage\");",
+              "    pm.expect(body.result.facility.level).to.eql(1);",
+              "    pm.expect(body.result.facility.storageCapacity).to.be.above(150);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/actions/{{upgradeActionId}}/complete",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "actions",
+            "{{upgradeActionId}}",
+            "complete"
+          ]
+        }
+      }
+    },
+    {
+      "name": "54. Start Barricade Of An Unclaimed Room (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Action starts; the room check happens on completion\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.status).to.eql(\"in_progress\");",
+              "    pm.collectionVariables.set(\"unclaimedActionId\", body.actionId);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"{{basePlayerId}}\",\n  \"actionType\": \"barricade\",\n  \"targetNodeId\": \"mathematicsExamHall\",\n  \"durationSeconds\": 60\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{baseSessionId}}/actions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{baseSessionId}}",
+            "actions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "55. Complete Barricade Of An Unclaimed Room (422)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 422 Unprocessable Entity\", () => pm.response.to.have.status(422));",
+              "pm.test(\"Base Service rejection passed through as room_not_claimed\", () => pm.expect(pm.response.json().reason).to.eql(\"room_not_claimed\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/actions/{{unclaimedActionId}}/complete",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "actions",
+            "{{unclaimedActionId}}",
+            "complete"
+          ]
+        }
+      }
+    },
+    {
+      "name": "56. Create An Exam Lobby (200)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const stamp = Date.now();",
+              "pm.collectionVariables.set(\"examPlayerA\", \"p_exam_a_\" + stamp);",
+              "pm.collectionVariables.set(\"examPlayerB\", \"p_exam_b_\" + stamp);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Lobby opened\", () => pm.collectionVariables.set(\"examSessionId\", pm.response.json().session_id));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Exam Lobby\",\n  \"zoneId\": \"mathematicsWing\",\n  \"maxPlayers\": 2\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "57. Join Player A (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"{{examPlayerA}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{examSessionId}}/players",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{examSessionId}}",
+            "players"
+          ]
+        }
+      }
+    },
+    {
+      "name": "58. Join Player B (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Roster holds both\", () => pm.expect(pm.response.json().players).to.have.lengthOf(2));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"{{examPlayerB}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{examSessionId}}/players",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{examSessionId}}",
+            "players"
+          ]
+        }
+      }
+    },
+    {
+      "name": "59. Start The Exam Session (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Session is active\", () => pm.expect(pm.response.json().status).to.eql(\"active\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{examSessionId}}/start",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{examSessionId}}",
+            "start"
+          ]
+        }
+      }
+    },
+    {
+      "name": "60. Spawn A Professor-Only Wave (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Every zombie is a professor\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body).to.have.lengthOf(5);",
+              "    body.forEach(z => pm.expect(z.typeId).to.match(/^prof/));",
+              "    pm.collectionVariables.set(\"examZombieA\", body[0].instanceId);",
+              "    pm.collectionVariables.set(\"examZombieB\", body[1].instanceId);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"typeWeights\": { \"professor\": 1 }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{examSessionId}}/zombies/spawn",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{examSessionId}}",
+            "zombies",
+            "spawn"
+          ]
+        }
+      }
+    },
+    {
+      "name": "61. Professor Examines Player A (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"An exam attempt with questions was started\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.actionType).to.eql(\"initiate_exam\");",
+              "    pm.expect(body.exam.attemptId).to.be.a(\"string\");",
+              "    pm.expect(body.exam.questions).to.have.lengthOf(10);",
+              "    pm.expect(body.exam.questions[0]).to.have.all.keys(\"id\", \"text\", \"options\");",
+              "    pm.collectionVariables.set(\"examAttemptA\", body.exam.attemptId);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"targetPlayerId\": \"{{examPlayerA}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{examSessionId}}/zombies/{{examZombieA}}/special-action",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{examSessionId}}",
+            "zombies",
+            "{{examZombieA}}",
+            "special-action"
+          ]
+        }
+      }
+    },
+    {
+      "name": "62. Professor Examines Player A While In Progress (409)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 409 Conflict\", () => pm.response.to.have.status(409));",
+              "pm.test(\"Rejected with exam_attempt_already_in_progress\", () => pm.expect(pm.response.json().reason).to.eql(\"exam_attempt_already_in_progress\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"targetPlayerId\": \"{{examPlayerA}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{examSessionId}}/zombies/{{examZombieB}}/special-action",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{examSessionId}}",
+            "zombies",
+            "{{examZombieB}}",
+            "special-action"
+          ]
+        }
+      }
+    },
+    {
+      "name": "63. Session Exams List (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"The attempt is listed in progress\", () => {",
+              "    const hit = pm.response.json().find(a => a.attemptId === pm.collectionVariables.get(\"examAttemptA\"));",
+              "    pm.expect(hit, \"attempt\").to.exist;",
+              "    pm.expect(hit.status).to.eql(\"in_progress\");",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{examSessionId}}/exams",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{examSessionId}}",
+            "exams"
+          ]
+        }
+      }
+    },
+    {
+      "name": "64. Get Attempt (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Attempt belongs to player A and is in progress\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.playerId).to.eql(pm.collectionVariables.get(\"examPlayerA\"));",
+              "    pm.expect(body.status).to.eql(\"in_progress\");",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{examSessionId}}/exams/{{examAttemptA}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{examSessionId}}",
+            "exams",
+            "{{examAttemptA}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "65. Retry Eligibility Before Answering (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Player may retry\", () => pm.expect(pm.response.json().canRetry).to.be.true);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{examSessionId}}/exams/{{examAttemptA}}/retry-eligibility",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{examSessionId}}",
+            "exams",
+            "{{examAttemptA}}",
+            "retry-eligibility"
+          ]
+        }
+      }
+    },
+    {
+      "name": "66. Submit Empty Answers (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Exam Service graded it as failed\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.passed).to.be.false;",
+              "    pm.expect(body.grade).to.eql(0);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"answers\": []\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{examSessionId}}/exams/{{examAttemptA}}/submit",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{examSessionId}}",
+            "exams",
+            "{{examAttemptA}}",
+            "submit"
+          ]
+        }
+      }
+    },
+    {
+      "name": "67. Submit Again (409)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 409 Conflict\", () => pm.response.to.have.status(409));",
+              "pm.test(\"Rejected with exam_attempt_not_in_progress\", () => pm.expect(pm.response.json().reason).to.eql(\"exam_attempt_not_in_progress\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"answers\": []\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{examSessionId}}/exams/{{examAttemptA}}/submit",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{examSessionId}}",
+            "exams",
+            "{{examAttemptA}}",
+            "submit"
+          ]
+        }
+      }
+    },
+    {
+      "name": "68. Attempt Recorded As Failed (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Status failed, grade 0\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.status).to.eql(\"failed\");",
+              "    pm.expect(body.grade).to.eql(0);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{examSessionId}}/exams/{{examAttemptA}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{examSessionId}}",
+            "exams",
+            "{{examAttemptA}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "69. Retry Eligibility In Cooldown (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Cooldown after a failed attempt\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.canRetry).to.be.false;",
+              "    pm.expect(body.availableAt).to.be.a(\"string\");",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{examSessionId}}/exams/{{examAttemptA}}/retry-eligibility",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{examSessionId}}",
+            "exams",
+            "{{examAttemptA}}",
+            "retry-eligibility"
+          ]
+        }
+      }
+    },
+    {
+      "name": "70. Professor Examines Player B (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Second attempt started\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.actionType).to.eql(\"initiate_exam\");",
+              "    pm.collectionVariables.set(\"examAttemptB\", body.exam.attemptId);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"targetPlayerId\": \"{{examPlayerB}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{examSessionId}}/zombies/{{examZombieB}}/special-action",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{examSessionId}}",
+            "zombies",
+            "{{examZombieB}}",
+            "special-action"
+          ]
+        }
+      }
+    },
+    {
+      "name": "71. Abandon Player B's Exam (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Abandoned\", () => pm.expect(pm.response.json().abandoned).to.be.true);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"reason\": \"disconnected\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{examSessionId}}/exams/{{examAttemptB}}/abandon",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{examSessionId}}",
+            "exams",
+            "{{examAttemptB}}",
+            "abandon"
+          ]
+        }
+      }
+    },
+    {
+      "name": "72. Attempt Recorded As Abandoned (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Status abandoned\", () => pm.expect(pm.response.json().status).to.eql(\"abandoned\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{examSessionId}}/exams/{{examAttemptB}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{examSessionId}}",
+            "exams",
+            "{{examAttemptB}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "73. Professor Examines Player A Again (409)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 409 Conflict\", () => pm.response.to.have.status(409));",
+              "pm.test(\"Rejected with exam_retry_cooldown\", () => pm.expect(pm.response.json().reason).to.eql(\"exam_retry_cooldown\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"targetPlayerId\": \"{{examPlayerA}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{examSessionId}}/zombies/{{examZombieA}}/special-action",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{examSessionId}}",
+            "zombies",
+            "{{examZombieA}}",
+            "special-action"
+          ]
+        }
+      }
+    },
+    {
+      "name": "74. Spawn With Invalid Weights (400)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 400 Bad Request\", () => pm.response.to.have.status(400));",
+              "pm.test(\"Rejected with type_weights_invalid\", () => pm.expect(pm.response.json().reason).to.eql(\"type_weights_invalid\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"typeWeights\": { \"ghost\": 1 }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{examSessionId}}/zombies/spawn",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{examSessionId}}",
+            "zombies",
+            "spawn"
+          ]
+        }
+      }
+    },
+    {
+      "name": "75. Negotiate A WebSocket URL (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"A direct socket URL with a single-use ticket\", () => {",
+              "    const body = pm.response.json();",
+              "    const id = pm.collectionVariables.get(\"sessionId\");",
+              "    pm.expect(body.url.startsWith(\"ws://\")).to.be.true;",
+              "    pm.expect(body.url).to.include(\"/ws/sessions/\" + id + \"?ticket=\");",
+              "    pm.expect(body.url.split(\"ticket=\")[1]).to.match(/^[0-9a-f]{32}$/);",
+              "    pm.expect(body.expiresAt).to.be.a(\"string\");",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/websocket",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{sessionId}}",
+            "websocket"
+          ]
+        }
+      }
+    },
+    {
+      "name": "76. Negotiate For Unknown Session (404)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 404 Not Found\", () => pm.response.to.have.status(404));",
+              "pm.test(\"Rejected with session_not_found\", () => pm.expect(pm.response.json().reason).to.eql(\"session_not_found\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/session_doesnotexist/websocket",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "session_doesnotexist",
+            "websocket"
+          ]
+        }
+      }
+    },
+    {
+      "name": "77. Cancel The Unclaimed Barricade (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"A completion rejected downstream leaves the action running until cancelled\", () => pm.expect(pm.response.json().status).to.eql(\"cancelled\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/actions/{{unclaimedActionId}}/cancel",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "actions",
+            "{{unclaimedActionId}}",
+            "cancel"
+          ]
+        }
+      }
+    },
+    {
+      "name": "78. Start Another Barricade With The Resources Spent (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Action starts; the cost is checked on completion\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.status).to.eql(\"in_progress\");",
+              "    pm.collectionVariables.set(\"brokeActionId\", body.actionId);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"{{basePlayerId}}\",\n  \"actionType\": \"barricade\",\n  \"targetNodeId\": \"faf_cab\",\n  \"durationSeconds\": 60\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{baseSessionId}}/actions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{baseSessionId}}",
+            "actions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "79. Complete It Without Resources (402)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 402 Payment Required\", () => pm.response.to.have.status(402));",
+              "pm.test(\"Base Service rejection passed through as rejected_insufficient\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.status).to.eql(\"rejected\");",
+              "    pm.expect(body.reason).to.eql(\"rejected_insufficient\");",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/actions/{{brokeActionId}}/complete",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "actions",
+            "{{brokeActionId}}",
+            "complete"
+          ]
+        }
+      }
     }
-  ]
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{jwt}}",
+        "type": "string"
+      }
+    ]
+  }
 }
