@@ -1466,7 +1466,7 @@ The microservices are containerized and published on DockerHub:
 
 | Service | DockerHub Repository | Image Tag | Default Port | Description |
 |---|---|---|---|---|
-| **Gateway Service** | [`mariaelenabotnari/gateway-service`](https://hub.docker.com/r/mariaelenabotnari/gateway-service) | `mariaelenabotnari/gateway-service:2.3.0` | `8000` | System entry point, async request routing layer |
+| **Gateway Service** | [`mariaelenabotnari/gateway-service`](https://hub.docker.com/r/mariaelenabotnari/gateway-service) | `mariaelenabotnari/gateway-service:2.4.0` | `8000` | System entry point, async request routing layer |
 | **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:2.0.0` | `Internal (3000)` | Academic progression, exams, and achievements |
 | **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:2.0.0` | `Internal (3001)` | Physical campus layout, rooms, zones, and spawn points |
 | **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:2.2.0` | `Internal (8080)` | Player identity, progression, inventory, and trades |
