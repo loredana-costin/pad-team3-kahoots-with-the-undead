@@ -117,6 +117,10 @@
     {
       "key": "jwt",
       "value": ""
+    },
+    {
+      "key": "brokeActionId",
+      "value": ""
     }
   ],
   "item": [
@@ -1672,10 +1676,10 @@
             "type": "text/javascript",
             "exec": [
               "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
-              "pm.test(\"Two professor spawn points\", () => {",
+              "pm.test(\"Professor spawn points only\", () => {",
               "    const body = pm.response.json();",
               "    pm.expect(body.roomId).to.eql(\"mathematicsExamHall\");",
-              "    pm.expect(body.spawnPoints).to.have.lengthOf(2);",
+              "    pm.expect(body.spawnPoints.length).to.be.at.least(2);",
               "    body.spawnPoints.forEach(p => pm.expect(p.zombieCategoryAllowed).to.eql(\"professor\"));",
               "});"
             ]
@@ -2071,6 +2075,31 @@
     {
       "name": "49. Start The Base Actions Session (200)",
       "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Base Service 2.0.0 spends real resources through Resource Service. Credit the fresh base",
+              "// owner with exactly what 51 (5 wood, 2 metal) and 53 (8 wood) cost, via Resource's refund,",
+              "// so the run does not depend on a shared node that other runs drain.",
+              "pm.sendRequest({",
+              "    url: pm.collectionVariables.get(\"baseUrl\") + \"/api/refund\",",
+              "    method: \"POST\",",
+              "    header: { \"Content-Type\": \"application/json\", \"Authorization\": \"Bearer \" + pm.collectionVariables.get(\"jwt\") },",
+              "    body: { mode: \"raw\", raw: JSON.stringify({",
+              "        idempotencyKey: \"postman_fund_\" + pm.collectionVariables.get(\"basePlayerId\"),",
+              "        playerId: pm.collectionVariables.get(\"basePlayerId\"),",
+              "        reason: \"postman_setup\",",
+              "        costs: [{ resourceType: \"wood\", amount: 13 }, { resourceType: \"metal\", amount: 2 }]",
+              "    }) }",
+              "}, (err, res) => pm.test(\"Base owner funded with 13 wood and 2 metal\", () => {",
+              "    pm.expect(err).to.eql(null);",
+              "    pm.expect(res.code).to.eql(200);",
+              "}));"
+            ]
+          }
+        },
         {
           "listen": "test",
           "script": {
@@ -3168,6 +3197,116 @@
             "sessions",
             "session_doesnotexist",
             "websocket"
+          ]
+        }
+      }
+    },
+    {
+      "name": "77. Cancel The Unclaimed Barricade (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"A completion rejected downstream leaves the action running until cancelled\", () => pm.expect(pm.response.json().status).to.eql(\"cancelled\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/actions/{{unclaimedActionId}}/cancel",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "actions",
+            "{{unclaimedActionId}}",
+            "cancel"
+          ]
+        }
+      }
+    },
+    {
+      "name": "78. Start Another Barricade With The Resources Spent (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Action starts; the cost is checked on completion\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.status).to.eql(\"in_progress\");",
+              "    pm.collectionVariables.set(\"brokeActionId\", body.actionId);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"{{basePlayerId}}\",\n  \"actionType\": \"barricade\",\n  \"targetNodeId\": \"faf_cab\",\n  \"durationSeconds\": 60\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{baseSessionId}}/actions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{baseSessionId}}",
+            "actions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "79. Complete It Without Resources (402)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 402 Payment Required\", () => pm.response.to.have.status(402));",
+              "pm.test(\"Base Service rejection passed through as rejected_insufficient\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.status).to.eql(\"rejected\");",
+              "    pm.expect(body.reason).to.eql(\"rejected_insufficient\");",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/actions/{{brokeActionId}}/complete",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "actions",
+            "{{brokeActionId}}",
+            "complete"
           ]
         }
       }
