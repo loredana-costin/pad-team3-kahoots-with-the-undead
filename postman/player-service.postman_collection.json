@@ -356,7 +356,9 @@
           "script": {
             "type": "text/javascript",
             "exec": [
-              "pm.test(\"Status code is 401 Unauthorized\", () => pm.response.to.have.status(401));"
+              "pm.test(\"Status code is 401 Unauthorized\", () => pm.response.to.have.status(401));",
+              "pm.test(\"Gateway rejects with missing_token\", () => pm.expect(pm.response.json().error).to.eql(\"missing_token\"));",
+              "pm.test(\"Asks for a bearer token\", () => pm.expect(pm.response.headers.get(\"WWW-Authenticate\")).to.eql(\"Bearer\"));"
             ]
           }
         }
@@ -374,6 +376,9 @@
             "players",
             "{{playerId}}"
           ]
+        },
+        "auth": {
+          "type": "noauth"
         }
       }
     },
@@ -401,12 +406,7 @@
       ],
       "request": {
         "method": "GET",
-        "header": [
-          {
-            "key": "Authorization",
-            "value": "Bearer {{jwt}}"
-          }
-        ],
+        "header": [],
         "url": {
           "raw": "{{baseUrl}}/api/players/{{playerId}}",
           "host": [
@@ -436,12 +436,7 @@
       ],
       "request": {
         "method": "GET",
-        "header": [
-          {
-            "key": "Authorization",
-            "value": "Bearer {{jwt}}"
-          }
-        ],
+        "header": [],
         "url": {
           "raw": "{{baseUrl}}/api/players/p_doesnotexist",
           "host": [
@@ -1202,6 +1197,90 @@
           ]
         }
       }
+    },
+    {
+      "name": "29. Get Profile With A Forged Token (401)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 401 Unauthorized\", () => pm.response.to.have.status(401));",
+              "pm.test(\"Gateway rejects with invalid_token\", () => pm.expect(pm.response.json().error).to.eql(\"invalid_token\"));",
+              "pm.test(\"Asks for a bearer token\", () => pm.expect(pm.response.headers.get(\"WWW-Authenticate\")).to.eql(\"Bearer\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJwXzQ0IiwiaXNzIjoicGxheWVyLXNlcnZpY2UiLCJhdWQiOiJrYWhvb3RzLXdpdGgtdGhlLXVuZGVhZCIsImV4cCI6NDEwMjQ0NDgwMH0.c2lnbmVkLXdpdGgtdGhlLXdyb25nLXNlY3JldA",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/players/{{playerId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "players",
+            "{{playerId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "30. Create Trade Without Token (401)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 401 Unauthorized\", () => pm.response.to.have.status(401));",
+              "pm.test(\"Gateway rejects with missing_token\", () => pm.expect(pm.response.json().error).to.eql(\"missing_token\"));",
+              "pm.test(\"Asks for a bearer token\", () => pm.expect(pm.response.headers.get(\"WWW-Authenticate\")).to.eql(\"Bearer\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/trades",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "trades"
+          ]
+        }
+      }
     }
-  ]
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{jwt}}",
+        "type": "string"
+      }
+    ]
+  }
 }

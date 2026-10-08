@@ -57,6 +57,14 @@ The full communication contract — every endpoint, its payload, and its respons
 
 The diagram illustrates the microservices architecture for the **In Kahoots with the Undead** system. Game Service acts as the central service handling the others, making synchronous calls to Player, Exam, World, Zombie, Resource, and Base Service to run a gameplay cycle. Resource Service and Zombie Service never call outward to other microservices. Exam Service and World Service are loosely coupled via asynchronous events — `AchievementUnlocked` (consumed by World Service, Player Service, and Crafting Service) and `ZoneUnlocked` (consumed by Game Service, Base Service, and Crafting Service) — so grading a player's exam doesn't block on procedural map generation. Base Service and Crafting Service each additionally read from and coordinate sagas across several other services to validate and apply their own effects — see the dependency diagram below for the full picture. Crafting Service specifically coordinates a saga across Resource Service and Player Service to atomically consume ingredients and deliver crafted items, and reads from Player, Exam, and World Service to evaluate recipe unlock conditions.
 
+## Authorization at the Gateway
+
+Every request to the Gateway (`http://localhost:8000`) needs `Authorization: Bearer <jwt>`, except `GET /health`, `POST /api/auth/register` and `POST /api/auth/login`, which return the token. The Gateway validates the token (HS256, signed by Player Service, issuer `player-service`, audience `kahoots-with-the-undead`, not expired) and never forwards the `Authorization` header; for a player token it forwards `X-Player-Id` and `X-Username` instead. A missing, invalid or expired token is answered by the Gateway with `401` and `{ "error": "missing_token" | "invalid_token" | "token_expired", "message": "..." }`.
+
+Services calling through the Gateway present a service token signed with the same secret (`"kind": "service"`); the Gateway forwards its subject as `X-Service-Name` instead of player headers. The secret is `JWT_SECRET` on the Gateway and `Jwt__Secret` on Player and Game Service; all three must match.
+
+Service-to-service calls through the Gateway: Game Service to World, Exam, Zombie, Resource and Base Service. The Postman collections get a token first and send it on every request.
+
 ---
 ## **1. Player Service**
 
@@ -1461,8 +1469,8 @@ The microservices are containerized and published on DockerHub:
 | **Gateway Service** | [`mariaelenabotnari/gateway-service`](https://hub.docker.com/r/mariaelenabotnari/gateway-service) | `mariaelenabotnari/gateway-service:2.3.0` | `8000` | System entry point, async request routing layer |
 | **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:2.0.0` | `Internal (3000)` | Academic progression, exams, and achievements |
 | **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:2.0.0` | `Internal (3001)` | Physical campus layout, rooms, zones, and spawn points |
-| **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:2.1.0` | `Internal (8080)` | Player identity, progression, inventory, and trades |
-| **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:2.5.0` | `Internal (8080), WebSocket 3003` | Game sessions, day/night cycle, and timed player actions |
+| **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:2.2.0` | `Internal (8080)` | Player identity, progression, inventory, and trades |
+| **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:2.6.0` | `Internal (8080), WebSocket 3003` | Game sessions, day/night cycle, and timed player actions |
 | **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:2.0.0` | `Internal (4001)` | Zombie type definitions, spawned instances, and special actions |
 | **Resource Service** | [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service) | `costinloredana/resource-service:2.0.0` | `Internal (4002)` | Resource types, player balances, nodes, and idempotent transactions |
 | **Base Service** | [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service) | `cristi150404/base-service:2.0.0` | `Internal (5003)` | Player bases, barricades, facilities, and decorations |
@@ -1587,44 +1595,39 @@ docker compose exec resource-service npm run db:seed
 #### 3. Verify Endpoints
 Once seeded, you can verify the persistent data via HTTP requests (Postman, browser, or curl):
 
+Every request except register and login needs the token the Gateway hands out, so get one first:
+
 ```bash
-# Verify Exam Service
-curl -s http://localhost:8000/exams
+# Register a throwaway account through the Gateway and keep its token (password must be 8+ characters)
+TOKEN=$(curl -s -X POST http://localhost:8000/api/auth/register -H "Content-Type: application/json" -d "{\"username\":\"verify_$RANDOM\",\"password\":\"hunter2pass\",\"email\":\"verify@faf.md\"}" | sed -E 's/.*"jwt":"([^"]+)".*/\1/')
+AUTH="Authorization: Bearer $TOKEN"
 
-# Verify World Service Zones
-curl -s http://localhost:8000/world/zones
+# Exam Service
+curl -s http://localhost:8000/exams -H "$AUTH"
 
-# Verify World Service Rooms
-curl -s http://localhost:8000/world/rooms
+# World Service zones, rooms and spawn points
+curl -s http://localhost:8000/world/zones -H "$AUTH"
+curl -s http://localhost:8000/world/rooms -H "$AUTH"
+curl -s http://localhost:8000/world/spawnPoints -H "$AUTH"
 
-# Verify Player Service through the Gateway (registers a throwaway account; password must be 8+ characters)
-curl -s -X POST http://localhost:8000/api/auth/register -H "Content-Type: application/json" -d "{\"username\":\"verify_$RANDOM\",\"password\":\"hunter2pass\",\"email\":\"verify@faf.md\"}"
+# Game Service
+curl -s http://localhost:8000/api/sessions -H "$AUTH"
 
-# Verify Game Service through the Gateway
+# Base Service and Crafting Service
+curl -s http://localhost:8000/api/base -H "$AUTH"
+curl -s http://localhost:8000/api/recipes/definitions -H "$AUTH"
+
+# Zombie Service types, then spawn instances for a cycle
+curl -s http://localhost:8000/api/zombie-types -H "$AUTH"
+curl -s -X POST http://localhost:8000/api/zombies/spawn -H "$AUTH" -H "Content-Type: application/json" -d '{"cycleId":"cyc_1","worldZoneId":"zoneZero","spawnCount":3,"typeWeights":{"professor":0.5,"tourist":0.5}}'
+
+# Resource Service types, nodes and an idempotent gather (run it twice: the second returns "already_applied")
+curl -s http://localhost:8000/api/resource-types -H "$AUTH"
+curl -s http://localhost:8000/api/nodes/node_1 -H "$AUTH"
+curl -s -X POST http://localhost:8000/api/gather -H "$AUTH" -H "Content-Type: application/json" -d '{"idempotencyKey":"verify_1","playerId":"p_1","nodeId":"node_1","resourceType":"wood","amount":5}'
+
+# Without a token the Gateway answers 401 missing_token
 curl -s http://localhost:8000/api/sessions
-
-# Verify Base Service
-curl -s http://localhost:5003/api/base
-
-# Verify Crafting Service
-curl -s http://localhost:5004/api/recipes/definitions
-
-# Verify World Service Spawn Points
-curl -s http://localhost:8000/world/spawnPoints
-```
-
-# Verify Zombie Service and Resource Service through the Gateway (register a throwaway account and keep its token)
-```bash
-TOKEN=$(curl -s -X POST http://localhost:8000/api/auth/register -H "Content-Type: application/json" -d "{\"username\":\"verify_$RANDOM\",\"password\":\"hunter2pass\",\"email\":\"verify@faf.md\"}" | sed -E 's/.*"jwt":"([^"]+)".*//')
-
-# Verify Zombie Service types, then spawn instances for a cycle
-curl -s http://localhost:8000/api/zombie-types -H "Authorization: Bearer $TOKEN"
-curl -s -X POST http://localhost:8000/api/zombies/spawn -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json"   -d '{"cycleId":"cyc_1","worldZoneId":"zoneZero","spawnCount":3,"typeWeights":{"professor":0.5,"tourist":0.5}}'
-
-# Verify Resource Service types, nodes and an idempotent gather (run it twice: the second returns "already_applied")
-curl -s http://localhost:8000/api/resource-types -H "Authorization: Bearer $TOKEN"
-curl -s http://localhost:8000/api/nodes/node_1 -H "Authorization: Bearer $TOKEN"
-curl -s -X POST http://localhost:8000/api/gather -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json"   -d '{"idempotencyKey":"verify_1","playerId":"p_1","nodeId":"node_1","resourceType":"wood","amount":5}'
 ```
 
 Postman collections for every service are in [`postman/`](postman/README.md).
