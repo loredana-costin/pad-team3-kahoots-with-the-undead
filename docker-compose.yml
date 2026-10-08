@@ -336,7 +336,7 @@ services:
       - kahoots-network
 
   gateway-service:
-    image: mariaelenabotnari/gateway-service:2.3.0
+    image: mariaelenabotnari/gateway-service:2.4.0
     container_name: gateway-service
     restart: always
     environment:
