@@ -1290,6 +1290,182 @@ Response
 
 ---
 
+## **9. Service Discovery**
+
+Maintains the runtime service registry so microservices can register their reachable address and health check endpoint on startup, deregister on graceful shutdown, and be discovered dynamically by the Gateway and development team.
+
+### **Owns**
+- In-memory registry of active service instances keyed by `(serviceName, host, port)` with capacity limits (`MAX_REGISTERED_INSTANCES`, default `100`).
+- Stable instance identifiers (`instanceId`) and registration/heartbeat timestamps (`registeredAt`, `lastRegisteredAt`).
+- Grouped and per-service instance lookup endpoints for dynamic request routing.
+
+### **DockerHub Image**
+- **Repository:** [`mariaelenabotnari/service-discovery`](https://hub.docker.com/r/mariaelenabotnari/service-discovery)
+- **Image Tag:** `mariaelenabotnari/service-discovery:lab3` (`mariaelenabotnari/service-discovery:latest`)
+- **Default Port:** `Internal only (8500)`
+
+### **Exposed API Endpoints**
+
+**`POST /registry/register`** *(Consumed by every service)*
+
+Registers a service instance on startup or refreshes an existing `(serviceName, host, port)` entry. First registration returns `201 Created`; subsequent registrations of the same `(serviceName, host, port)` keep `instanceId` and `registeredAt`, update `lastRegisteredAt` and any changed fields (`healthPath`, `metadata`), and return `200 OK`.
+
+Payload
+```json
+{
+  "serviceName": "exam-service",
+  "host": "exam-service",
+  "port": 3000,
+  "healthPath": "/health",
+  "metadata": {
+    "version": "1.0.0"
+  }
+}
+```
+
+Success Response (201 Created on first registration / 200 OK on refresh)
+```json
+{
+  "instanceId": "b17f5c4e29a1481aa6e3c8010294a712",
+  "serviceName": "exam-service",
+  "host": "exam-service",
+  "port": 3000,
+  "healthPath": "/health",
+  "healthUrl": "http://exam-service:3000/health",
+  "metadata": {
+    "version": "1.0.0"
+  },
+  "registeredAt": "2026-04-20T12:00:00Z",
+  "lastRegisteredAt": "2026-04-20T12:00:00Z"
+}
+```
+
+Error Response (400 Bad Request — validation failure)
+```json
+{
+  "error": "validation_failed",
+  "details": [
+    { "field": "port", "message": "Input should be less than or equal to 65535" }
+  ],
+  "requestId": "req-991a"
+}
+```
+
+Error Response (429 Too Many Requests — registry capacity reached)
+```json
+{
+  "error": "registry_full",
+  "message": "Maximum number of registered instances (100) reached",
+  "requestId": "req-991b"
+}
+```
+
+**`DELETE /registry/instances/{instanceId}`** *(Consumed by every service)*
+
+Removes a registered instance when a service shuts down gracefully.
+
+Success Response (200 OK)
+```json
+{
+  "status": "deregistered",
+  "instanceId": "b17f5c4e29a1481aa6e3c8010294a712",
+  "serviceName": "exam-service"
+}
+```
+
+Error Response (404 Not Found)
+```json
+{
+  "error": "instance_not_found",
+  "message": "No registered instance with id b17f5c4e29a1481aa6e3c8010294a712",
+  "requestId": "req-991c"
+}
+```
+
+**`GET /registry/services`** *(Consumed by development team, Gateway)*
+
+Returns all currently registered instances grouped by `serviceName`, sorted alphabetically by `serviceName` and by `registeredAt` ascending within each service.
+
+Success Response (200 OK)
+```json
+{
+  "totalServices": 2,
+  "totalInstances": 3,
+  "services": [
+    {
+      "serviceName": "exam-service",
+      "instanceCount": 2,
+      "instances": [
+        {
+          "instanceId": "b17f5c4e29a1481aa6e3c8010294a712",
+          "serviceName": "exam-service",
+          "host": "exam-service-1",
+          "port": 3000,
+          "healthPath": "/health",
+          "healthUrl": "http://exam-service-1:3000/health",
+          "metadata": { "version": "1.0.0" },
+          "registeredAt": "2026-04-20T12:00:00Z",
+          "lastRegisteredAt": "2026-04-20T12:05:00Z"
+        }
+      ]
+    }
+  ]
+}
+```
+
+**`GET /registry/services/{serviceName}`** *(Consumed by Gateway)*
+
+Returns all registered instances for a single service, sorted by `registeredAt` ascending.
+
+Success Response (200 OK)
+```json
+{
+  "serviceName": "exam-service",
+  "instanceCount": 1,
+  "instances": [
+    {
+      "instanceId": "b17f5c4e29a1481aa6e3c8010294a712",
+      "serviceName": "exam-service",
+      "host": "exam-service",
+      "port": 3000,
+      "healthPath": "/health",
+      "healthUrl": "http://exam-service:3000/health",
+      "metadata": { "version": "1.0.0" },
+      "registeredAt": "2026-04-20T12:00:00Z",
+      "lastRegisteredAt": "2026-04-20T12:00:00Z"
+    }
+  ]
+}
+```
+
+Error Response (404 Not Found — unknown service or zero instances)
+```json
+{
+  "error": "service_not_found",
+  "message": "No registered instances for service exam-service",
+  "requestId": "req-991d"
+}
+```
+
+**`GET /health`** *(Consumed by Docker healthcheck, development team)*
+
+Returns the health status, uptime, and live registry counters (`registeredServices`, `registeredInstances`) for the Service Discovery service.
+
+Success Response (200 OK)
+```json
+{
+  "status": "healthy",
+  "service": "discovery-service",
+  "version": "1.0.0",
+  "uptimeSeconds": 42,
+  "timestamp": "2026-04-20T12:00:42Z",
+  "registeredServices": 2,
+  "registeredInstances": 3
+}
+```
+
+---
+
 ## Branch Structure
 
 ### Main Branches
