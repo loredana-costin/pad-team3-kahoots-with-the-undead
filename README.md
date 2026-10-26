@@ -1110,20 +1110,30 @@ Responsible for the player's survival base, initially represented by the FAF Cab
 
 ### **DockerHub Image**
 - **Repository:** [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service)
-- **Image Tag:** `cristi150404/base-service:2.0.0`
+- **Image Tag:** `cristi150404/base-service:3.0.0`
 - **Default Port:** `Internal only (5003), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
 
+- `POST /registry/register`, `DELETE /registry/instances/{instanceId}` *(Service Discovery)* — registers each instance on startup, refreshes the registration every 30 s, and deregisters on shutdown. Run several replicas without `container_name` or a fixed host port so each one registers its own address.
 - `GET /world/rooms/{roomId}` *(World Service)* — confirms a room exists and finds its zone.
 - `GET /world/zones` *(World Service)* — confirms the room's zone is unlocked.
 - `POST /api/spend` *(Resource Service)* — deducts resources before applying a barricade, facility upgrade, decoration, or Kiki feeding.
 - `POST /api/refund` *(Resource Service)* — returns the resources if the effect cannot be applied.
 - `POST /api/players/{player_id}/inventory/items` *(Player Service)* — delivers a Kiki reward to the player's inventory.
 
-Base Service calls them through the Gateway with a service token (`kind: service`, forwarded as `X-Service-Name: base-service`). Every state-changing endpoint spends first, then applies the effect in one database transaction. If that fails, Base Service refunds the resources rather than leaving the player having paid for nothing.
+Base Service calls them through the Gateway with a service token (`kind: service`, forwarded as `X-Service-Name: base-service`). Each called service has a circuit breaker shared by all its endpoints: 3 failures (`5xx`, timeout, unreachable; a `4xx` is not a failure) within Task Timeout × 3.5 (28 s) trip it, the trip is logged, and calls to that service fail at once until a trial call after the window succeeds. Every state-changing endpoint spends first, then applies the effect in one database transaction. If that fails, Base Service refunds the resources rather than leaving the player having paid for nothing.
 
 ### **Exposed API Endpoints**
+
+**`GET /status`** *(Consumed by development team)*
+
+Describes the running instance: version, uptime, its Service Discovery registration, the database connection, the circuit breaker of each called service and the task limits. `200 OK` while the database answers, `503` with `"status": "degraded"` when it does not. It needs no identity header and is exempt from the task limits.
+
+Response
+```json
+{ "status": "ok", "service": "base-service", "version": "3.0.0", "instanceId": "d79591b64fdd4e12ba70c2d94355a46e", "hostname": "ea93129ca3f1", "registeredWithDiscovery": true, "lastRegisteredAt": "2026-10-26T12:00:30Z", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z", "database": "up", "integrations": "http", "circuitBreakers": { "resource-service": "closed", "world-service": "closed", "player-service": "closed" }, "taskLimits": { "timeoutSeconds": 8, "maxConcurrentTasks": 50 } }
+```
 
 **`GET /api/base/{player_id}`** *(Consumed by Gateway, Game Service)*
 
@@ -1259,11 +1269,12 @@ Allows players to combine resources into useful survival equipment.
 
 ### **DockerHub Image**
 - **Repository:** [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service)
-- **Image Tag:** `cristi150404/crafting-service:2.0.0`
+- **Image Tag:** `cristi150404/crafting-service:3.0.0`
 - **Default Port:** `Internal only (5004), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
 
+- `POST /registry/register`, `DELETE /registry/instances/{instanceId}` *(Service Discovery)* — registers each instance on startup, refreshes the registration every 30 s, and deregisters on shutdown. Run several replicas without `container_name` or a fixed host port so each one registers its own address.
 - `POST /api/spend` *(Resource Service)* — consumes recipe ingredients.
 - `POST /api/refund` *(Resource Service)* — returns the ingredients if delivery fails.
 - `POST /api/players/{player_id}/inventory/items` *(Player Service)* — delivers the crafted item.
@@ -1271,9 +1282,18 @@ Allows players to combine resources into useful survival equipment.
 - `GET /players/{playerId}/progress` *(Exam Service)* — reads passed exams.
 - `GET /world/zones` *(World Service)* — reads unlocked zones.
 
-Crafting Service calls them through the Gateway with a service token (`kind: service`, forwarded as `X-Service-Name: crafting-service`). A recipe can be gated on a player level, a passed exam, an unlocked zone, or a discovered resource, which is why this service reads from four others. If delivery fails after the ingredients were consumed, Crafting Service refunds them — this is the saga's rollback path.
+Crafting Service calls them through the Gateway with a service token (`kind: service`, forwarded as `X-Service-Name: crafting-service`). Each called service has a circuit breaker shared by all its endpoints: 3 failures (`5xx`, timeout, unreachable; a `4xx` is not a failure) within Task Timeout × 3.5 (28 s) trip it, the trip is logged, and calls to that service fail at once until a trial call after the window succeeds. A recipe can be gated on a player level, a passed exam, an unlocked zone, or a discovered resource, which is why this service reads from four others. If delivery fails after the ingredients were consumed, Crafting Service refunds them — this is the saga's rollback path.
 
 ### **Exposed API Endpoints**
+
+**`GET /status`** *(Consumed by development team)*
+
+Describes the running instance: version, uptime, its Service Discovery registration, the database connection, the circuit breaker of each called service and the task limits. `200 OK` while the database answers, `503` with `"status": "degraded"` when it does not. It needs no identity header and is exempt from the task limits.
+
+Response
+```json
+{ "status": "ok", "service": "crafting-service", "version": "3.0.0", "instanceId": "d79591b64fdd4e12ba70c2d94355a46e", "hostname": "ea93129ca3f1", "registeredWithDiscovery": true, "lastRegisteredAt": "2026-10-26T12:00:30Z", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z", "database": "up", "integrations": "http", "circuitBreakers": { "resource-service": "closed", "player-service": "closed", "exam-service": "closed", "world-service": "closed" }, "taskLimits": { "timeoutSeconds": 8, "maxConcurrentTasks": 50 } }
+```
 
 **`GET /api/recipes`** *(Consumed by Gateway)*
 
@@ -1730,8 +1750,8 @@ The microservices are containerized and published on DockerHub:
 | **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:2.6.1` | `Internal (8080), WebSocket 3003` | Game sessions, day/night cycle, and timed player actions |
 | **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:2.0.0` | `Internal (4001)` | Zombie type definitions, spawned instances, and special actions |
 | **Resource Service** | [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service) | `costinloredana/resource-service:2.0.0` | `Internal (4002)` | Resource types, player balances, nodes, and idempotent transactions |
-| **Base Service** | [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service) | `cristi150404/base-service:2.0.0` | `Internal (5003)` | Player bases, barricades, facilities, and decorations |
-| **Crafting Service** | [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service) | `cristi150404/crafting-service:2.0.0` | `Internal (5004)` | Recipes, unlock conditions, and crafting sagas |
+| **Base Service** | [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service) | `cristi150404/base-service:3.0.0` | `Internal (5003)` | Player bases, barricades, facilities, and decorations |
+| **Crafting Service** | [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service) | `cristi150404/crafting-service:3.0.0` | `Internal (5004)` | Recipes, unlock conditions, and crafting sagas |
 
 ---
 
