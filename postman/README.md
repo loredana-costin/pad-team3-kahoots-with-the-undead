@@ -6,8 +6,8 @@ Collections for testing each service. One file per service, Postman schema v2.1.
 |---|---|---|
 | `player-service.postman_collection.json` | Player Service | `http://localhost:8000` |
 | `game-service.postman_collection.json` | Game Service | `http://localhost:8000` |
-| `exam-service.postman_collection.json` | Exam Service | `http://localhost:3000` |
-| `world-service.postman_collection.json` | World Service | `http://localhost:3001` |
+| `exam-service.postman_collection.json` | Exam Service | `http://localhost:8000` |
+| `world-service.postman_collection.json` | World Service | `http://localhost:8000/world` |
 | `zombie-service.postman_collection.json` | Zombie Service | `http://localhost:8000` |
 | `resource-service.postman_collection.json` | Resource Service | `http://localhost:8000` |
 | `base-service.postman_collection.json` | Base Service | `http://localhost:8000` |
@@ -21,6 +21,19 @@ Collections for testing each service. One file per service, Postman schema v2.1.
 3. Open the collection, then **Run** to execute every request in order.
 
 The default `baseUrl` values match the host ports in the team `docker-compose.yml`.
+
+The Exam and World collections also exercise endpoints that only a service may call
+(`POST /exams/start`, `/exams/{attemptId}/submit`, `/exams/{attemptId}/abandon`,
+`GET /exams/{examId}/retryEligibility`, `POST /world/zones/unlock`). They mint a service
+token in the "Service token (Game Service)" request, signed with the collection variable
+`jwtSecret`. It defaults to the team compose development secret and must equal the Gateway's
+`JWT_SECRET`; change it if your stack uses another one.
+
+Two World requests go straight to a World Service instance instead of the Gateway,
+`GET /health` and `POST /events/exam-passed`, using the variable `worldDirectUrl`
+(`http://localhost:3001`). The team compose does not publish that port, so publish it
+temporarily or those two requests will fail to connect. `POST /events/exam-passed` answers
+`404` until the World team implements it, which the collection accepts.
 
 The Zombie and Resource collections read seeded records (`prof_calc`, `infected_student`,
 `wood`, `node_1`), so they fail on an unseeded database. Seed first.

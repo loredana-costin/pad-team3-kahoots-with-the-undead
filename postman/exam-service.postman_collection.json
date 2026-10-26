@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d",
     "name": "Exam Service",
-    "description": "Postman Collection for testing Exam Service CRUD endpoints, queries, and validation rules.",
+    "description": "Postman Collection for testing Exam Service through the Gateway: exam CRUD, queries and validation rules, attempts (start, submit, abandon, retry eligibility), the ExamPassed notification result (unlockPending) and the player endpoints (exams, courses, progress, achievements).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -15,6 +15,34 @@
       "key": "id",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "jwtSecret",
+      "value": "team-compose-development-secret-at-least-32-chars"
+    },
+    {
+      "key": "serviceJwt",
+      "value": ""
+    },
+    {
+      "key": "attemptExamId",
+      "value": ""
+    },
+    {
+      "key": "attemptCourseName",
+      "value": ""
+    },
+    {
+      "key": "attemptId",
+      "value": ""
+    },
+    {
+      "key": "failAttemptId",
+      "value": ""
+    },
+    {
+      "key": "abandonAttemptId",
+      "value": ""
     }
   ],
   "item": [
@@ -517,6 +545,1057 @@
         "description": "Tries to delete the already deleted exam, confirming 404."
       },
       "response": []
+    },
+    {
+      "name": "Attempts, ExamPassed notification and player progress",
+      "description": "Game Service flow through the Gateway. Needs the seeded stack and runs after the CRUD requests above. Each run creates its own exam, so it can be repeated. A pass notifies World Service (POST /events/exam-passed); until World Service implements it, or when no World Service instance is registered in Service Discovery, the submit response carries unlockPending: true, which this collection accepts.",
+      "item": [
+        {
+          "name": "Service token (Game Service)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token the Gateway accepts: HS256, issuer player-service, audience kahoots-with-the-undead, kind service.",
+                  "// The Gateway forwards its subject as X-Service-Name, which the service-only endpoints require.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'game-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Service token minted', () => {",
+                  "    pm.expect(pm.collectionVariables.get('serviceJwt')).to.be.a('string');",
+                  "    pm.expect(pm.collectionVariables.get('serviceJwt').split('.')).to.have.length(3);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Mints the service token used by the requests below that only a service (Game Service) may call. Uses the collection variable jwtSecret, which must equal the Gateway's JWT_SECRET (the team compose development secret by default).",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Player exams - none yet (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('A player without attempts gets an empty list', () => pm.expect(pm.response.json()).to.eql([]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/players/{{playerId}}/exams",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "players",
+                "{{playerId}}",
+                "exams"
+              ]
+            },
+            "description": "New. Lists the exams the player has attempted, with status and best grade."
+          },
+          "response": []
+        },
+        {
+          "name": "Player courses - none yet (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('A player without attempts gets an empty list', () => pm.expect(pm.response.json()).to.eql([]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/players/{{playerId}}/courses",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "players",
+                "{{playerId}}",
+                "courses"
+              ]
+            },
+            "description": "New. Lists the course categories the player has attempted and whether each is complete."
+          },
+          "response": []
+        },
+        {
+          "name": "Create exam for attempts (201)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Exam id saved', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json).to.have.property('id');",
+                  "    pm.collectionVariables.set('attemptExamId', json.id);",
+                  "    pm.collectionVariables.set('attemptCourseName', json.courseName);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/exams",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exams"
+              ]
+            },
+            "description": "Creates an exam with two questions (correct answers q1 = 1, q2 = 2) used by the requests below.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"courseCategory\": \"mathematics\",\n  \"courseName\": \"Postman Attempts {{runId}}\",\n  \"passingThreshold\": 60,\n  \"questions\": [\n    {\n      \"id\": \"q1\",\n      \"text\": \"Which of the following is a valid proposition?\",\n      \"options\": [\n        \"2 plus 2\",\n        \"It is raining today\",\n        \"Close the door\",\n        \"Blue\"\n      ],\n      \"correctOptionId\": 1\n    },\n    {\n      \"id\": \"q2\",\n      \"text\": \"What is the cardinality of the power set of a set with 3 elements?\",\n      \"options\": [\n        \"3\",\n        \"6\",\n        \"8\",\n        \"9\"\n      ],\n      \"correctOptionId\": 2\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Start exam - player token, no service identity (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Service identity is required', () => pm.expect(pm.response.json().message).to.eql('Missing X-Service-Name header'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/exams/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exams",
+                "start"
+              ]
+            },
+            "description": "Starting an attempt is service-only (Game Service). A player token carries no X-Service-Name.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"playerId\": \"{{playerId}}\",\n  \"examId\": \"{{attemptExamId}}\",\n  \"zombieEncounterId\": \"enc_{{runId}}_pass\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Start exam - Success (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Attempt id and questions without answers', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.attemptId).to.be.a('number');",
+                  "    pm.expect(json.questions).to.have.length(2);",
+                  "    pm.expect(json.questions[0]).to.not.have.property('correctOptionId');",
+                  "    pm.collectionVariables.set('attemptId', json.attemptId);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/exams/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exams",
+                "start"
+              ]
+            },
+            "description": "Begins an attempt for the registered player, called as Game Service.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"playerId\": \"{{playerId}}\",\n  \"examId\": \"{{attemptExamId}}\",\n  \"zombieEncounterId\": \"enc_{{runId}}_pass\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Start exam - attempt already in progress (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Rejected while an attempt is in progress', () => pm.expect(pm.response.json().message).to.include('already in progress'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/exams/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exams",
+                "start"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"playerId\": \"{{playerId}}\",\n  \"examId\": \"{{attemptExamId}}\",\n  \"zombieEncounterId\": \"enc_{{runId}}_pass\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Submit exam - pass (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Graded as a pass', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.passed).to.eql(true);",
+                  "    pm.expect(json.score).to.eql(100);",
+                  "});",
+                  "pm.test('unlockPending is absent or true, never false', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.unlockPending === undefined || json.unlockPending === true).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/exams/{{attemptId}}/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exams",
+                "{{attemptId}}",
+                "submit"
+              ]
+            },
+            "description": "Changed. The attempt is saved first, then World Service is notified. The status is always 200; unlockPending: true appears only when the ExamPassed notification could not be delivered.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"playerId\": \"{{playerId}}\",\n  \"examId\": \"{{attemptExamId}}\",\n  \"answers\": {\n    \"q1\": 1,\n    \"q2\": 2\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Submit exam - same attempt again (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('A graded attempt cannot be submitted twice, so no second event is sent', () => pm.expect(pm.response.json().message).to.eql('Attempt is not in progress'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/exams/{{attemptId}}/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exams",
+                "{{attemptId}}",
+                "submit"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"playerId\": \"{{playerId}}\",\n  \"examId\": \"{{attemptExamId}}\",\n  \"answers\": {\n    \"q1\": 1,\n    \"q2\": 2\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Retry eligibility after a pass (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('A pass does not block a retry', () => pm.expect(pm.response.json().canRetry).to.eql(true));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/exams/{{attemptExamId}}/retryEligibility?playerId={{playerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exams",
+                "{{attemptExamId}}",
+                "retryEligibility"
+              ],
+              "query": [
+                {
+                  "key": "playerId",
+                  "value": "{{playerId}}"
+                }
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Retry eligibility - missing playerId (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/exams/{{attemptExamId}}/retryEligibility",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exams",
+                "{{attemptExamId}}",
+                "retryEligibility"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Start exam - fail flow (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Attempt id saved', () => pm.collectionVariables.set('failAttemptId', pm.response.json().attemptId));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/exams/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exams",
+                "start"
+              ]
+            },
+            "description": "Uses a synthetic player id: service endpoints take the player id in the body.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"playerId\": \"{{ghostPlayerId}}\",\n  \"examId\": \"{{attemptExamId}}\",\n  \"zombieEncounterId\": \"enc_{{runId}}_fail\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Submit exam - fail (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Graded as a fail, no unlockPending', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.passed).to.eql(false);",
+                  "    pm.expect(json.score).to.eql(0);",
+                  "    pm.expect(json).to.not.have.property('unlockPending');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/exams/{{failAttemptId}}/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exams",
+                "{{failAttemptId}}",
+                "submit"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"playerId\": \"{{ghostPlayerId}}\",\n  \"examId\": \"{{attemptExamId}}\",\n  \"answers\": {\n    \"q1\": 0,\n    \"q2\": 0\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Retry eligibility after a fail (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('A fail starts the retry cooldown', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.canRetry).to.eql(false);",
+                  "    pm.expect(json.availableAt).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/exams/{{attemptExamId}}/retryEligibility?playerId={{ghostPlayerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exams",
+                "{{attemptExamId}}",
+                "retryEligibility"
+              ],
+              "query": [
+                {
+                  "key": "playerId",
+                  "value": "{{ghostPlayerId}}"
+                }
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Start exam - retry cooldown (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Rejected during the cooldown', () => pm.expect(pm.response.json().message).to.include('Retry cooldown active'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/exams/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exams",
+                "start"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"playerId\": \"{{ghostPlayerId}}\",\n  \"examId\": \"{{attemptExamId}}\",\n  \"zombieEncounterId\": \"enc_{{runId}}_fail\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Start exam - abandon flow (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Attempt id saved', () => pm.collectionVariables.set('abandonAttemptId', pm.response.json().attemptId));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/exams/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exams",
+                "start"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"playerId\": \"{{ghostPlayerId}}_b\",\n  \"examId\": \"{{attemptExamId}}\",\n  \"zombieEncounterId\": \"enc_{{runId}}_abandon\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Abandon exam (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Abandoned', () => pm.expect(pm.response.json().message).to.eql('Exam abandoned successfully'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/exams/{{abandonAttemptId}}/abandon",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exams",
+                "{{abandonAttemptId}}",
+                "abandon"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Player exams - after the attempts (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('The passed exam is listed with its best grade', () => {",
+                  "    const item = pm.response.json().find((e) => e.examId === pm.collectionVariables.get('attemptExamId'));",
+                  "    pm.expect(item).to.be.an('object');",
+                  "    pm.expect(item.status).to.eql('passed');",
+                  "    pm.expect(item.bestGrade).to.eql(100);",
+                  "    pm.expect(item.attempts).to.eql(1);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/players/{{playerId}}/exams",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "players",
+                "{{playerId}}",
+                "exams"
+              ]
+            },
+            "description": "New. Status is passed, failed, in_progress or abandoned; bestGrade is null until an attempt is graded."
+          },
+          "response": []
+        },
+        {
+          "name": "Player courses (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('The category is listed with its completion', () => {",
+                  "    const item = pm.response.json().find((c) => c.courseCategory === 'mathematics');",
+                  "    pm.expect(item).to.be.an('object');",
+                  "    pm.expect(item.examsPassed).to.be.at.least(1);",
+                  "    pm.expect(item.examsTotal).to.be.at.least(item.examsPassed);",
+                  "    pm.expect(item.complete).to.be.a('boolean');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/players/{{playerId}}/courses",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "players",
+                "{{playerId}}",
+                "courses"
+              ]
+            },
+            "description": "New. A course is complete when all of its exams are passed."
+          },
+          "response": []
+        },
+        {
+          "name": "Player progress (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('The exam is reported as passed', () => pm.expect(pm.response.json()[pm.collectionVariables.get('attemptCourseName')]).to.eql('passed'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/players/{{playerId}}/progress",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "players",
+                "{{playerId}}",
+                "progress"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Player achievements (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Response is an array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/players/{{playerId}}/achievements",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "players",
+                "{{playerId}}",
+                "achievements"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Player exams - another player's id (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Error shape is { error, requestId }', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.error).to.eql('player_mismatch');",
+                  "    pm.expect(json.requestId).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/players/{{ghostPlayerId}}/exams",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "players",
+                "{{ghostPlayerId}}",
+                "exams"
+              ]
+            },
+            "description": "The path player id must match X-Player-Id, which the Gateway sets from the token."
+          },
+          "response": []
+        }
+      ]
     }
   ],
   "auth": {
