@@ -280,8 +280,15 @@ Owns the definitions of all courses, questions, and the logic to grade them.
 
 ### **DockerHub Image**
 - **Repository:** [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service)
-- **Image Tag:** `mariaelenabotnari/exam-service:2.1.1`
+- **Image Tag:** `mariaelenabotnari/exam-service:lab3` (`mariaelenabotnari/exam-service:latest`)
 - **Default Port:** `Internal only (3000), accessible via Gateway (8000)`
+
+### **Consumed API Endpoints**
+
+- `POST /registry/register`, `DELETE /registry/instances/{instanceId}` *(Service Discovery)* — registers this instance on startup, refreshes the registration periodically, and deregisters on shutdown.
+- `GET /registry/services/world-service` *(Service Discovery)* — finds the World Service instances for every `ExamPassed` notification. The list is never cached, and one instance is picked per call in round robin order.
+- `POST /events/exam-passed` *(World Service)* — tells World Service that a player passed an exam, so it can unlock the next section of the university. It is sent once per passed attempt, with no retry.
+- `DELETE /registry/instances/{instanceId}` *(Service Discovery)* — removes a World Service instance after it failed 3 times inside the window (`OUTGOING_CALL_TIMEOUT_SECONDS` × `CIRCUIT_BREAKER_WINDOW_MULTIPLIER`, `3 × 3.5 = 10.5` seconds by default). A failure is a connection error, a timeout, or a response with status `500` or higher; a `4xx` is not a failure. An instance that is removed but still running registers again at its next refresh, with a new `instanceId`.
 
 ### **Exposed API Endpoints**
 
@@ -368,6 +375,11 @@ Response
 { "passed": true, "score": 70 }
 ```
 
+On a pass, the attempt is saved first and then the `ExamPassed` notification is sent to World Service. The status stays `200` whatever happens to that notification. When it could not be delivered (no World Service instance in Service Discovery, a timeout, a connection error, or a `404` or `5xx` from the instance), the response also carries `unlockPending: true`; the field is absent when the notification was delivered or the attempt failed.
+```json
+{ "passed": true, "score": 70, "unlockPending": true }
+```
+
 **`POST /exams/{attemptId}/abandon`** *(Consumed by Game Service)*
 
 Marks an attempt as abandoned, called when a player disconnects or leaves the encounter before submitting.
@@ -409,7 +421,29 @@ Response
 [ { "achievementId": "achievementSurvivedMathematics", "fullAchievementName": "Achievement, Survived Mathematics", "unlockedAt": "2026-09-08T10:30:00.000Z" } ]
 ```
 
+**`GET /players/{playerId}/exams`** *(Consumed by Gateway)*
+
+Lists the exams the player has attempted, with the status (`passed`, `in_progress`, `failed` or `abandoned`), the best grade and the number of attempts. A player with no attempts gets `[]`. Requires `X-Player-Id` matching the path.
+
+Response
+```json
+[ { "examId": 1, "courseName": "Discrete Mathematics", "courseCategory": "mathematics", "status": "passed", "bestGrade": 100, "attempts": 2 } ]
+```
+
+**`GET /players/{playerId}/courses`** *(Consumed by Gateway)*
+
+Lists the course categories the player has attempted and whether each is complete (all of the category's exams passed). A player with no attempts gets `[]`. Requires `X-Player-Id` matching the path.
+
+Response
+```json
+[ { "courseCategory": "mathematics", "examsTotal": 6, "examsPassed": 2, "complete": false } ]
+```
+
+Both endpoints answer errors in the `{ "error", "details", "requestId" }` shape: `400 invalid_player_id`, `401 missing_player_identity`, `403 player_mismatch`.
+
 ### **Message Queue Events**
+
+> The `ExamPassed` notification to World Service is now a direct HTTP call (see Consumed API Endpoints), so `ExamPassedEvent` is no longer logged by Exam Service. The other events below are still only written to its log; no message queue is connected yet.
 
 **PUBLISH `ExamPassedEvent`** *(Consumed by Player Service)*
 ```json
@@ -445,10 +479,23 @@ Owns the persistent physical state of the university.
 
 ### **DockerHub Image**
 - **Repository:** [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service)
-- **Image Tag:** `mariaelenabotnari/world-service:2.1.1`
+- **Image Tag:** `mariaelenabotnari/world-service:lab3` (`mariaelenabotnari/world-service:latest`)
 - **Default Port:** `Internal only (3001), accessible via Gateway (8000)`
 
+### **Consumed API Endpoints**
+
+- `POST /registry/register`, `DELETE /registry/instances/{instanceId}` *(Service Discovery)* — registers each instance on startup, refreshes the registration periodically, and deregisters on shutdown. Run several World Service replicas without `container_name` or a fixed host port so each one gets its own address.
+
 ### **Exposed API Endpoints**
+
+**`GET /health`** *(Consumed by Docker healthcheck, Service Discovery, development team)*
+
+Returns service health, database connectivity, uptime and concurrency counters: `200 OK` when healthy, `503` when the database check fails or times out. It needs no identity header.
+
+Response
+```json
+{ "status": "ok", "service": "world-service", "version": "1.0.0", "instanceId": "70d47addd4e645a9bbae9f14a5383798", "hostname": "ea93129ca3f1", "registeredWithDiscovery": true, "uptimeSeconds": 123, "timestamp": "2026-10-25T16:00:00.000Z", "database": "up", "concurrency": { "current": 3, "max": 50 } }
+```
 
 **`POST /world/zones`** *(Consumed by development team)*
 
@@ -667,6 +714,39 @@ Response
   "deleted": true
 }
 ```
+
+**`POST /world/zones/unlock`** *(Internal handler, triggered by the `AchievementUnlockedEvent`; also usable by development team for testing)*
+
+Triggers the unlock of the zone that matches an achievement. It requires the `X-Service-Name` header (`403 { "message": "Forbidden" }` without it).
+
+Payload
+```json
+{ "achievementId": "achievementSurvivedMathematics", "playerId": "player_123" }
+```
+
+Response
+```json
+{ "message": "Unlock triggered" }
+```
+
+**`POST /events/exam-passed`** *(Consumed by Exam Service)*
+
+Tells World Service that a player passed an exam, so it can unlock the next section of the university. Exam Service calls this path on the instance's own `baseUrl` found in Service Discovery, inside the Docker network and **not through the Gateway**, so there is no `/world` prefix. Headers: `X-Service-Name: exam-service` and `X-Request-Id`.
+
+**World Service must treat `eventId` as idempotent:** a repeated `eventId` must answer `2xx` without unlocking twice. Any `2xx` counts as delivered. A `5xx`, a timeout or a connection error counts as a failure of that instance, and 3 failures inside the window remove the instance from Service Discovery. A `4xx` (including `404`) is not counted as a failure, but Exam Service reports it as `unlockPending: true`.
+
+Payload
+```json
+{ "eventId": "3f0c9a52b7d14e6fa1c8d2e45b9a7f10", "playerId": "player_123", "examId": "1", "course": "Discrete Mathematics", "gradedAt": "2026-09-08T10:30:00.000Z" }
+```
+`eventId` is a UUID v4 in hex (32 characters), `examId` is the exam's id, `course` is its course name, and `gradedAt` is ISO 8601 UTC.
+
+Response *(proposed)*
+```json
+{ "eventId": "3f0c9a52b7d14e6fa1c8d2e45b9a7f10", "duplicate": false }
+```
+
+> **Status: not implemented in World Service yet, and not confirmed by the World team.** Until it exists, World Service answers `404`, which Exam Service logs as a `WARN` and reports as `unlockPending: true` on the exam submit response.
 
 ### **Message Queue Events**
 
@@ -1360,7 +1440,7 @@ Error Response (429 Too Many Requests — registry capacity reached)
 }
 ```
 
-**`DELETE /registry/instances/{instanceId}`** *(Consumed by every service)*
+**`DELETE /registry/instances/{instanceId}`** *(Consumed by every service on shutdown, and by Exam Service to remove a failing World Service instance)*
 
 Removes a registered instance when a service shuts down gracefully.
 
@@ -1413,7 +1493,7 @@ Success Response (200 OK)
 }
 ```
 
-**`GET /registry/services/{serviceName}`** *(Consumed by Gateway)*
+**`GET /registry/services/{serviceName}`** *(Consumed by Gateway, Exam Service)*
 
 Returns all registered instances for a single service, sorted by `registeredAt` ascending.
 
@@ -1643,8 +1723,9 @@ The microservices are containerized and published on DockerHub:
 | Service | DockerHub Repository | Image Tag | Default Port | Description |
 |---|---|---|---|---|
 | **Gateway Service** | [`mariaelenabotnari/gateway-service`](https://hub.docker.com/r/mariaelenabotnari/gateway-service) | `mariaelenabotnari/gateway-service:2.4.0` | `8000` | System entry point, async request routing layer |
-| **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:2.1.1` | `Internal (3000)` | Academic progression, exams, and achievements |
-| **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:2.1.1` | `Internal (3001)` | Physical campus layout, rooms, zones, and spawn points |
+| **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:lab3` | `Internal (3000)` | Academic progression, exams, and achievements |
+| **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:lab3` | `Internal (3001)` | Physical campus layout, rooms, zones, and spawn points |
+| **Service Discovery** | [`mariaelenabotnari/service-discovery`](https://hub.docker.com/r/mariaelenabotnari/service-discovery) | `mariaelenabotnari/service-discovery:lab3` | `Internal (8500)` | Service registry: instances register, deregister and are looked up by name |
 | **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:2.2.0` | `Internal (8080)` | Player identity, progression, inventory, and trades |
 | **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:2.6.1` | `Internal (8080), WebSocket 3003` | Game sessions, day/night cycle, and timed player actions |
 | **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:2.0.0` | `Internal (4001)` | Zombie type definitions, spawned instances, and special actions |
@@ -1675,7 +1756,7 @@ To run these services locally via Docker Compose, ensure the host machine meets 
    - `5438` — Base PostgreSQL Database (`base-db`)
    - `5439` — Crafting PostgreSQL Database (`crafting-db`)
 3. **Resource Allocations**:
-   - At least 3 GB of RAM available for Docker (sixteen containers, including one MongoDB instance)
+   - At least 3 GB of RAM available for Docker (eighteen containers, including one MongoDB instance)
    - 3 GB free disk space for Docker images and the PostgreSQL/MongoDB data volumes
 4. **Environment Configuration**:
    - Self-contained in `docker-compose.yml`; no manual `.env` file setup is required to start up the stack.
@@ -1713,7 +1794,7 @@ If a container exits right away, the database probably wasn't ready yet. Wait a 
 ### Step-by-Step Execution Guide
 
 #### 1. Start the Microservices & Databases
-From the repository root, start all seventeen containers in detached mode:
+From the repository root, start all eighteen containers in detached mode:
 ```bash
 docker compose up -d
 ```

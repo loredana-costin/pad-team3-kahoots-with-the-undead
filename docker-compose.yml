@@ -158,8 +158,19 @@ services:
       - kahoots-network
 
   # --- Microservices (using uploaded DockerHub images) ---
+  discovery-service:
+    image: mariaelenabotnari/service-discovery:lab3
+    container_name: discovery-service
+    restart: always
+    environment:
+      PORT: 8500
+    expose:
+      - "8500"
+    networks:
+      - kahoots-network
+
   exam-service:
-    image: mariaelenabotnari/exam-service:2.1.1
+    image: mariaelenabotnari/exam-service:lab3
     container_name: exam-service
     restart: always
     environment:
@@ -171,16 +182,19 @@ services:
       DB_PASSWORD: postgres
       DB_NAME: exam_db
       DATABASE_URL: "postgresql://postgres:postgres@exam-db:5432/exam_db?schema=public"
+      DISCOVERY_URL: http://discovery-service:8500
     expose:
       - "3000"
     depends_on:
       exam-db:
         condition: service_healthy
+      discovery-service:
+        condition: service_healthy
     networks:
       - kahoots-network
 
   world-service:
-    image: mariaelenabotnari/world-service:2.1.1
+    image: mariaelenabotnari/world-service:lab3
     container_name: world-service
     restart: always
     environment:
@@ -192,10 +206,13 @@ services:
       DB_PASSWORD: postgres
       DB_NAME: world_db
       DATABASE_URL: "postgresql://postgres:postgres@world-db:5432/world_db?schema=public"
+      DISCOVERY_URL: http://discovery-service:8500
     expose:
       - "3001"
     depends_on:
       world-db:
+        condition: service_healthy
+      discovery-service:
         condition: service_healthy
     networks:
       - kahoots-network
