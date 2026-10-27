@@ -1640,7 +1640,10 @@ type/short-description-issueID
 
 ## Merging Strategy
 
-**Strategy**: Squash and Merge
+| Pull Request | Strategy |
+|---|---|
+| Feature branch → `development` | **Squash and Merge** |
+| `development` → `main` (release) | **Create a merge commit** (simple merge) |
 
 ### Benefits
 - Clean, linear commit history
@@ -1653,6 +1656,9 @@ type/short-description-issueID
 2. Make commits with clear, descriptive messages
 3. Open Pull Request to `development`
 4. After approval, squash and merge
+
+### Releases: `development` → `main`
+Release Pull Requests from `development` to `main` must use **Create a merge commit**, never Squash and Merge. A squash creates a new commit on `main` that `development` does not contain, so the two branches lose their shared history and the next release reports conflicts in every file changed since. A merge commit keeps `main` and `development` connected, so every release merges cleanly.
 
 ## Pull Request Requirements
 
@@ -1754,7 +1760,7 @@ We follow **Semantic Versioning (SemVer)**: `MAJOR.MINOR.PATCH`
 5. **Create PR**: Follow template and provide complete information
 6. **Review**: Address feedback and get required approvals
 7. **Merge**: Squash and merge to `development`
-8. **Deploy**: Regular releases from `development` to `main`
+8. **Deploy**: Regular releases from `development` to `main`, merged with **Create a merge commit**
 
 ## Tools & Resources
 
