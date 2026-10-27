@@ -164,6 +164,10 @@ services:
     restart: always
     environment:
       PORT: 8500
+      # Health alerts go to the developers' Discord and/or Telegram when these are set in .env (secrets, never committed).
+      ALERT_DISCORD_WEBHOOK_URL: ${ALERT_DISCORD_WEBHOOK_URL:-}
+      ALERT_TELEGRAM_BOT_TOKEN: ${ALERT_TELEGRAM_BOT_TOKEN:-}
+      ALERT_TELEGRAM_CHAT_ID: ${ALERT_TELEGRAM_CHAT_ID:-}
     expose:
       - "8500"
     networks:
@@ -315,8 +319,11 @@ services:
       - kahoots-network
 
   base-service:
-    image: cristi150404/base-service:2.0.0
-    container_name: base-service
+    image: cristi150404/base-service:3.0.0
+    # No container_name: 3 replicas share the base-db database, and each registers its own address
+    # with Service Discovery, which the Gateway reads to spread requests over them (round robin).
+    deploy:
+      replicas: 3
     restart: always
     environment:
       POSTGRES_HOST: base-db
@@ -331,17 +338,23 @@ services:
       # Signs the service token the Gateway accepts; same value as the Gateway's JWT_SECRET.
       Jwt__Secret: team-compose-development-secret-at-least-32-chars
       ASPNETCORE_ENVIRONMENT: Development
+      Discovery__Url: http://discovery-service:8500
     expose:
       - "5003"
     depends_on:
       base-db:
         condition: service_healthy
+      discovery-service:
+        condition: service_healthy
     networks:
       - kahoots-network
 
   crafting-service:
-    image: cristi150404/crafting-service:2.0.0
-    container_name: crafting-service
+    image: cristi150404/crafting-service:3.0.0
+    # No container_name: 3 replicas share the crafting-db database, and each registers its own address
+    # with Service Discovery, which the Gateway reads to spread requests over them (round robin).
+    deploy:
+      replicas: 3
     restart: always
     environment:
       POSTGRES_HOST: crafting-db
@@ -357,10 +370,13 @@ services:
       # Signs the service token the Gateway accepts; same value as the Gateway's JWT_SECRET.
       Jwt__Secret: team-compose-development-secret-at-least-32-chars
       ASPNETCORE_ENVIRONMENT: Development
+      Discovery__Url: http://discovery-service:8500
     expose:
       - "5004"
     depends_on:
       crafting-db:
+        condition: service_healthy
+      discovery-service:
         condition: service_healthy
     networks:
       - kahoots-network
