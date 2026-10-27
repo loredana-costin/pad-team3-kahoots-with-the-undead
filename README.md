@@ -1776,7 +1776,7 @@ To run these services locally via Docker Compose, ensure the host machine meets 
    - `5438` — Base PostgreSQL Database (`base-db`)
    - `5439` — Crafting PostgreSQL Database (`crafting-db`)
 3. **Resource Allocations**:
-   - At least 3 GB of RAM available for Docker (eighteen containers, including one MongoDB instance)
+   - At least 3 GB of RAM available for Docker (thirty containers, including one MongoDB instance)
    - 3 GB free disk space for Docker images and the PostgreSQL/MongoDB data volumes
 4. **Environment Configuration**:
    - Self-contained in `docker-compose.yml`; no manual `.env` file setup is required to start up the stack.
@@ -1814,13 +1814,13 @@ If a container exits right away, the database probably wasn't ready yet. Wait a 
 ### Step-by-Step Execution Guide
 
 #### 1. Start the Microservices & Databases
-From the repository root, start the stack in detached mode (Player, Game, Base and Crafting Service run three replicas each):
+From the repository root, start the stack in detached mode (Player, Game, Base, Crafting, Exam and World Service run three replicas each):
 ```bash
 docker compose up -d
 ```
 Docker Compose will automatically pull the images from DockerHub, initialize the database containers (`exam-db` on 5433, `world-db` on 5434, `player-db` on 5435, `game-db` on 5436, `resource-db` on 5437, `zombie-db` on 27017, `base-db` on 5438, `crafting-db` on 5439), perform healthchecks, and launch `gateway-service`, `exam-service`, `world-service`, `player-service`, `game-service`, `zombie-service`, `resource-service`, `base-service` and `crafting-service`.
 
-Each replica of these four services registers itself with Discovery Service on startup and deregisters on shutdown; the Gateway looks them up there and sends requests to them in turn. To see the registered instances, or to scale a service while the stack runs:
+Each replica of these six services registers itself with Discovery Service on startup and deregisters on shutdown; the Gateway looks them up there and sends requests to them in turn. To see the registered instances, or to scale a service while the stack runs:
 ```bash
 docker compose exec discovery-service python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8500/registry/services').read().decode())"
 docker compose up -d --scale game-service=2
