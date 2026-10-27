@@ -159,7 +159,7 @@ services:
 
   # --- Microservices (using uploaded DockerHub images) ---
   discovery-service:
-    image: mariaelenabotnari/service-discovery:lab3
+    image: mariaelenabotnari/service-discovery:3.0.0
     container_name: discovery-service
     restart: always
     environment:
@@ -177,7 +177,7 @@ services:
   # serve any request. Each registers its own address with Service Discovery; the Gateway reads it
   # to spread requests over them, and each replica looks up World Service there for its ExamPassed events.
   exam-service:
-    image: mariaelenabotnari/exam-service:lab3
+    image: mariaelenabotnari/exam-service:3.0.0
     restart: always
     deploy:
       replicas: 3
@@ -204,7 +204,7 @@ services:
   # No container_name: 3 replicas share world-db, where zones and rooms live, so any replica can serve
   # any request. Each registers its own address with Service Discovery, which the Gateway and Exam Service read.
   world-service:
-    image: mariaelenabotnari/world-service:lab3
+    image: mariaelenabotnari/world-service:3.0.0
     restart: always
     deploy:
       replicas: 3
@@ -389,7 +389,7 @@ services:
       - kahoots-network
 
   gateway-service:
-    image: mariaelenabotnari/gateway-service:2.4.0
+    image: mariaelenabotnari/gateway-service:3.0.0
     container_name: gateway-service
     restart: always
     environment:
