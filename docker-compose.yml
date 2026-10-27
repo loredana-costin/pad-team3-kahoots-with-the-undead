@@ -173,10 +173,14 @@ services:
     networks:
       - kahoots-network
 
+  # No container_name: 3 replicas share exam-db, where exams and attempts live, so any replica can
+  # serve any request. Each registers its own address with Service Discovery; the Gateway reads it
+  # to spread requests over them, and each replica looks up World Service there for its ExamPassed events.
   exam-service:
     image: mariaelenabotnari/exam-service:lab3
-    container_name: exam-service
     restart: always
+    deploy:
+      replicas: 3
     environment:
       PORT: 3000
       NODE_ENV: production
@@ -197,10 +201,13 @@ services:
     networks:
       - kahoots-network
 
+  # No container_name: 3 replicas share world-db, where zones and rooms live, so any replica can serve
+  # any request. Each registers its own address with Service Discovery, which the Gateway and Exam Service read.
   world-service:
     image: mariaelenabotnari/world-service:lab3
-    container_name: world-service
     restart: always
+    deploy:
+      replicas: 3
     environment:
       PORT: 3001
       NODE_ENV: production
@@ -399,7 +406,7 @@ services:
       # The services listed here are looked up in Service Discovery and get requests in turn;
       # a service with no registered instance falls back to its *_SERVICE_URL above.
       DISCOVERY_URL: http://discovery-service:8500
-      DISCOVERY_SERVICES: zombie-service,resource-service,base-service,crafting-service,player-service,game-service
+      DISCOVERY_SERVICES: zombie-service,resource-service,base-service,crafting-service,player-service,game-service,exam-service,world-service
     ports:
       - "8000:8000"
     networks:
