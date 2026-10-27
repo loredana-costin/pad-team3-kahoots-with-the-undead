@@ -77,8 +77,28 @@ Handles global player identity, progression, and inventory.
 - The player's inventory: consumables (Coffee, Energy Drinks, Davidan sandwiches) and cosmetics.
 - Player-to-player trades, including verifying ownership and transferring items atomically.
 
+### **DockerHub Image**
+- **Repository:** [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service)
+- **Image Tag:** `andrei045/player-service:3.1.0`
+- **Default Port:** `Internal only (8080), accessible via Gateway (8000)`
+
+### **Consumed API Endpoints**
+
+- `POST /registry/register`, `DELETE /registry/instances/{instanceId}` *(Service Discovery)* — registers each instance on startup (in the background, retried every 5 s while Service Discovery is unreachable), refreshes the registration every 30 s, and deregisters on shutdown. Run several replicas without `container_name` so each one registers its own container hostname.
+
+Every call to Service Discovery goes through a circuit breaker: 3 failures (`5xx`, timeout, unreachable; a `4xx` is not a failure) within Task Timeout × 3.5 (28 s) trip it, the trip is logged, and registration attempts fail at once until a trial call after the window succeeds. Every request is logged as one JSON line with its status and duration, and every line of a request carries its `X-Request-ID` as `CorrelationId`.
+
 
 ### **Exposed API Endpoints**
+
+**`GET /status`** *(Consumed by development team)*
+
+Describes the running instance: version, when it started and how long it has been up. It needs no token and is exempt from the task limits, like `GET /health`.
+
+Response
+```json
+{ "status": "ok", "service": "player-service", "version": "3.1.0", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z" }
+```
 
 **`POST /api/auth/register`** *(Consumed by Gateway)*
 
@@ -215,8 +235,14 @@ The central real-time gameplay service. Manages sessions, the day/night cycle, t
 - Timed actions in progress: chopping, scavenging, clearing rooms, barricading, upgrading.
 - Live WebSocket delivery of action progress and cycle events to clients.
 
+### **DockerHub Image**
+- **Repository:** [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service)
+- **Image Tag:** `andrei045/game-service:3.1.0`
+- **Default Port:** `Internal only (8080), accessible via Gateway (8000); WebSocket on 3003-3005`
+
 ### **Consumed API Endpoints**
 
+- `POST /registry/register`, `DELETE /registry/instances/{instanceId}` *(Service Discovery)* — registers each instance on startup (in the background, retried every 5 s while Service Discovery is unreachable), refreshes the registration every 30 s, and deregisters on shutdown. Sessions, actions and WebSocket tickets live in the database, so any replica can serve any request.
 - `POST /api/zombies/spawn`, `POST /api/zombies/{id}/special-action` *(Zombie Service)* — spawn encounters, trigger professor/tourist actions.
 - `GET /world/rooms`, `GET /world/rooms/{id}/spawnPoints` *(World Service)* — determine what's available in the current zone.
 - `POST /exams/start`, `POST /exams/{attemptId}/submit`, `POST /exams/{attemptId}/abandon` *(Exam Service)* — run exam encounters.
@@ -224,7 +250,18 @@ The central real-time gameplay service. Manages sessions, the day/night cycle, t
 - `POST /api/base/{playerId}/barricade`, `POST /api/base/{playerId}/facilities` *(Base Service)* — trigger base actions.
 - `PATCH /api/players/{playerId}/progression` *(Player Service)* — award XP after a cycle.
 
+Game Service calls them through the Gateway with a service token (`kind: service`, forwarded as `X-Service-Name: game-service`). Each called service, Service Discovery included, has a circuit breaker shared by all its endpoints: 3 failures (`5xx`, timeout, unreachable; a `4xx` is not a failure) within Task Timeout × 3.5 (28 s) trip it, the trip is logged, and calls to that service fail at once (`502`) until a trial call after the window succeeds. Every request and every call to another service is logged as one JSON line with its status and duration, and every line of a request carries its `X-Request-ID` as `CorrelationId`.
+
 ### **Exposed API Endpoints**
+
+**`GET /status`** *(Consumed by development team)*
+
+Describes the running instance: version, when it started and how long it has been up. It needs no token and is exempt from the task limits, like `GET /health`.
+
+Response
+```json
+{ "status": "ok", "service": "game-service", "version": "3.1.0", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z" }
+```
 
 **`POST /api/sessions/{session_id}/actions`** *(Consumed by Gateway)*
 
@@ -1746,8 +1783,8 @@ The microservices are containerized and published on DockerHub:
 | **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:3.0.0` | `Internal (3000)` | Academic progression, exams, and achievements |
 | **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:3.0.0` | `Internal (3001)` | Physical campus layout, rooms, zones, and spawn points |
 | **Service Discovery** | [`mariaelenabotnari/service-discovery`](https://hub.docker.com/r/mariaelenabotnari/service-discovery) | `mariaelenabotnari/service-discovery:3.0.0` | `Internal (8500)` | Service registry: instances register, deregister and are looked up by name |
-| **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:2.2.0` | `Internal (8080)` | Player identity, progression, inventory, and trades |
-| **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:2.6.1` | `Internal (8080), WebSocket 3003` | Game sessions, day/night cycle, and timed player actions |
+| **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:3.1.0` | `Internal (8080)` | Player identity, progression, inventory, and trades |
+| **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:3.1.0` | `Internal (8080), WebSocket 3003-3005` | Game sessions, day/night cycle, and timed player actions |
 | **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:2.0.0` | `Internal (4001)` | Zombie type definitions, spawned instances, and special actions |
 | **Resource Service** | [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service) | `costinloredana/resource-service:2.0.0` | `Internal (4002)` | Resource types, player balances, nodes, and idempotent transactions |
 | **Base Service** | [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service) | `cristi150404/base-service:3.0.0` | `Internal (5003)` | Player bases, barricades, facilities, and decorations |
