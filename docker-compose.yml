@@ -289,9 +289,13 @@ services:
     networks:
       - kahoots-network
 
+  # No container_name: 3 replicas share resource-db, and each registers its own address with
+  # Service Discovery, which the Gateway reads to spread requests over them (round robin).
+  # Idempotency keys and the table bootstrap are safe across replicas (resource-service #248, #249).
   resource-service:
-    image: costinloredana/resource-service:2.0.0
-    container_name: resource-service
+    image: costinloredana/resource-service:3.0.0
+    deploy:
+      replicas: 3
     restart: always
     environment:
       PORT: 4002
@@ -300,27 +304,36 @@ services:
       POSTGRES_USER: ${RESOURCE_DB_USER:-postgres}
       POSTGRES_PASSWORD: ${RESOURCE_DB_PASSWORD:-postgres}
       POSTGRES_DB: resource_db
+      DISCOVERY_URL: http://discovery-service:8500
     # Internal only: reachable through the gateway on :8000
     expose:
       - "4002"
     depends_on:
       resource-db:
         condition: service_healthy
+      discovery-service:
+        condition: service_healthy
     networks:
       - kahoots-network
 
+  # No container_name: 3 replicas share zombie-db, and each registers its own address with
+  # Service Discovery, which the Gateway reads to spread requests over them (round robin).
   zombie-service:
-    image: costinloredana/zombie-service:2.0.0
-    container_name: zombie-service
+    image: costinloredana/zombie-service:3.0.0
+    deploy:
+      replicas: 3
     restart: always
     environment:
       PORT: 4001
       MONGO_URI: "mongodb://zombie-db:27017/zombie_db"
+      DISCOVERY_URL: http://discovery-service:8500
     # Internal only: reachable through the gateway on :8000
     expose:
       - "4001"
     depends_on:
       zombie-db:
+        condition: service_healthy
+      discovery-service:
         condition: service_healthy
     networks:
       - kahoots-network
