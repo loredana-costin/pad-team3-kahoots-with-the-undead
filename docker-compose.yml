@@ -217,28 +217,37 @@ services:
     networks:
       - kahoots-network
 
+  # No container_name: 3 replicas share player-db, and each registers its own address with
+  # Service Discovery, which the Gateway reads to spread requests over them (round robin).
   player-service:
-    image: andrei045/player-service:2.2.0
-    container_name: player-service
+    image: andrei045/player-service:3.0.0
     restart: always
+    deploy:
+      replicas: 3
     environment:
       ConnectionStrings__Postgres: "Host=player-db;Port=5432;Database=player_db;Username=postgres;Password=postgres"
       Jwt__Secret: "team-compose-development-secret-at-least-32-chars"
       Jwt__Issuer: player-service
       Jwt__Audience: kahoots-with-the-undead
       ASPNETCORE_ENVIRONMENT: Development
+      Discovery__Url: http://discovery-service:8500
     expose:
       - "8080"
     depends_on:
       player-db:
         condition: service_healthy
+      discovery-service:
+        condition: service_healthy
     networks:
       - kahoots-network
 
+  # No container_name: 3 replicas share game-db, where sessions, actions and socket tickets live,
+  # so any replica can serve any request. Each registers its own address with Service Discovery.
   game-service:
-    image: andrei045/game-service:2.6.1
-    container_name: game-service
+    image: andrei045/game-service:3.0.0
     restart: always
+    deploy:
+      replicas: 3
     environment:
       ConnectionStrings__Postgres: "Host=game-db;Port=5432;Database=game_db;Username=postgres;Password=postgres"
       ASPNETCORE_ENVIRONMENT: Development
@@ -253,14 +262,18 @@ services:
       Jwt__Issuer: player-service
       Jwt__Audience: kahoots-with-the-undead
       # The URL clients get from POST /api/sessions/{id}/websocket; the socket port is the
-      # only one published, REST stays behind the Gateway.
+      # only one published, REST stays behind the Gateway. Each replica takes one host port of
+      # 3003-3005; tickets are shared in game-db, so the replica on 3003 accepts any of them.
       WebSocket__PublicBaseUrl: ws://localhost:3003
+      Discovery__Url: http://discovery-service:8500
     ports:
-      - "3003:8081"
+      - "3003-3005:8081"
     expose:
       - "8080"
     depends_on:
       game-db:
+        condition: service_healthy
+      discovery-service:
         condition: service_healthy
     networks:
       - kahoots-network
@@ -367,6 +380,10 @@ services:
       BASE_SERVICE_URL: http://base-service:5003
       CRAFTING_SERVICE_URL: http://crafting-service:5004
       RESOURCE_SERVICE_URL: http://resource-service:4002
+      # The services listed here are looked up in Service Discovery and get requests in turn;
+      # a service with no registered instance falls back to its *_SERVICE_URL above.
+      DISCOVERY_URL: http://discovery-service:8500
+      DISCOVERY_SERVICES: zombie-service,resource-service,base-service,crafting-service,player-service,game-service
     ports:
       - "8000:8000"
     networks:

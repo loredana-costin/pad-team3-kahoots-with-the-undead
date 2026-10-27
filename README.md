@@ -1794,11 +1794,18 @@ If a container exits right away, the database probably wasn't ready yet. Wait a 
 ### Step-by-Step Execution Guide
 
 #### 1. Start the Microservices & Databases
-From the repository root, start all eighteen containers in detached mode:
+From the repository root, start the stack in detached mode (Player Service and Game Service run three replicas each):
 ```bash
 docker compose up -d
 ```
 Docker Compose will automatically pull the images from DockerHub, initialize the database containers (`exam-db` on 5433, `world-db` on 5434, `player-db` on 5435, `game-db` on 5436, `resource-db` on 5437, `zombie-db` on 27017, `base-db` on 5438, `crafting-db` on 5439), perform healthchecks, and launch `gateway-service`, `exam-service`, `world-service`, `player-service`, `game-service`, `zombie-service`, `resource-service`, `base-service` and `crafting-service`.
+
+Each Player Service and Game Service replica registers itself with Discovery Service on startup and deregisters on shutdown; the Gateway looks them up there and sends requests to them in turn. To see the registered instances, or to scale a service while the stack runs:
+```bash
+docker compose exec discovery-service python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8500/registry/services').read().decode())"
+docker compose up -d --scale game-service=2
+```
+Game Service replicas publish their WebSocket port on host ports 3003-3005; socket tickets are shared through `game-db`, so the replica on 3003 accepts tickets issued by any of them.
 
 To check container health and status:
 ```bash
