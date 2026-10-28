@@ -231,7 +231,7 @@ services:
   # No container_name: 3 replicas share player-db, and each registers its own address with
   # Service Discovery, which the Gateway reads to spread requests over them (round robin).
   player-service:
-    image: andrei045/player-service:3.0.0
+    image: andrei045/player-service:3.1.0
     restart: always
     deploy:
       replicas: 3
@@ -255,7 +255,7 @@ services:
   # No container_name: 3 replicas share game-db, where sessions, actions and socket tickets live,
   # so any replica can serve any request. Each registers its own address with Service Discovery.
   game-service:
-    image: andrei045/game-service:3.0.0
+    image: andrei045/game-service:3.1.0
     restart: always
     deploy:
       replicas: 3
