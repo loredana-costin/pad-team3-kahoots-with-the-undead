@@ -26,3 +26,6 @@
 	path = gateway-service
 	url = https://github.com/loredana-costin/gateway-service.git
 	branch = development
+[submodule "discovery-service"]
+	path = discovery-service
+	url = https://github.com/loredana-costin/discovery-service.git

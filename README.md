@@ -77,8 +77,28 @@ Handles global player identity, progression, and inventory.
 - The player's inventory: consumables (Coffee, Energy Drinks, Davidan sandwiches) and cosmetics.
 - Player-to-player trades, including verifying ownership and transferring items atomically.
 
+### **DockerHub Image**
+- **Repository:** [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service)
+- **Image Tag:** `andrei045/player-service:3.1.0`
+- **Default Port:** `Internal only (8080), accessible via Gateway (8000)`
+
+### **Consumed API Endpoints**
+
+- `POST /registry/register`, `DELETE /registry/instances/{instanceId}` *(Service Discovery)* — registers each instance on startup (in the background, retried every 5 s while Service Discovery is unreachable), refreshes the registration every 30 s, and deregisters on shutdown. Run several replicas without `container_name` so each one registers its own container hostname.
+
+Every call to Service Discovery goes through a circuit breaker: 3 failures (`5xx`, timeout, unreachable; a `4xx` is not a failure) within Task Timeout × 3.5 (28 s) trip it, the trip is logged, and registration attempts fail at once until a trial call after the window succeeds. Every request is logged as one JSON line with its status and duration, and every line of a request carries its `X-Request-ID` as `CorrelationId`.
+
 
 ### **Exposed API Endpoints**
+
+**`GET /status`** *(Consumed by development team)*
+
+Describes the running instance: version, when it started and how long it has been up. It needs no token and is exempt from the task limits, like `GET /health`.
+
+Response
+```json
+{ "status": "ok", "service": "player-service", "version": "3.1.0", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z" }
+```
 
 **`POST /api/auth/register`** *(Consumed by Gateway)*
 
@@ -215,8 +235,14 @@ The central real-time gameplay service. Manages sessions, the day/night cycle, t
 - Timed actions in progress: chopping, scavenging, clearing rooms, barricading, upgrading.
 - Live WebSocket delivery of action progress and cycle events to clients.
 
+### **DockerHub Image**
+- **Repository:** [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service)
+- **Image Tag:** `andrei045/game-service:3.1.0`
+- **Default Port:** `Internal only (8080), accessible via Gateway (8000); WebSocket on 3003-3005`
+
 ### **Consumed API Endpoints**
 
+- `POST /registry/register`, `DELETE /registry/instances/{instanceId}` *(Service Discovery)* — registers each instance on startup (in the background, retried every 5 s while Service Discovery is unreachable), refreshes the registration every 30 s, and deregisters on shutdown. Sessions, actions and WebSocket tickets live in the database, so any replica can serve any request.
 - `POST /api/zombies/spawn`, `POST /api/zombies/{id}/special-action` *(Zombie Service)* — spawn encounters, trigger professor/tourist actions.
 - `GET /world/rooms`, `GET /world/rooms/{id}/spawnPoints` *(World Service)* — determine what's available in the current zone.
 - `POST /exams/start`, `POST /exams/{attemptId}/submit`, `POST /exams/{attemptId}/abandon` *(Exam Service)* — run exam encounters.
@@ -224,7 +250,18 @@ The central real-time gameplay service. Manages sessions, the day/night cycle, t
 - `POST /api/base/{playerId}/barricade`, `POST /api/base/{playerId}/facilities` *(Base Service)* — trigger base actions.
 - `PATCH /api/players/{playerId}/progression` *(Player Service)* — award XP after a cycle.
 
+Game Service calls them through the Gateway with a service token (`kind: service`, forwarded as `X-Service-Name: game-service`). Each called service, Service Discovery included, has a circuit breaker shared by all its endpoints: 3 failures (`5xx`, timeout, unreachable; a `4xx` is not a failure) within Task Timeout × 3.5 (28 s) trip it, the trip is logged, and calls to that service fail at once (`502`) until a trial call after the window succeeds. Every request and every call to another service is logged as one JSON line with its status and duration, and every line of a request carries its `X-Request-ID` as `CorrelationId`.
+
 ### **Exposed API Endpoints**
+
+**`GET /status`** *(Consumed by development team)*
+
+Describes the running instance: version, when it started and how long it has been up. It needs no token and is exempt from the task limits, like `GET /health`.
+
+Response
+```json
+{ "status": "ok", "service": "game-service", "version": "3.1.0", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z" }
+```
 
 **`POST /api/sessions/{session_id}/actions`** *(Consumed by Gateway)*
 
@@ -280,8 +317,15 @@ Owns the definitions of all courses, questions, and the logic to grade them.
 
 ### **DockerHub Image**
 - **Repository:** [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service)
-- **Image Tag:** `mariaelenabotnari/exam-service:2.1.1`
+- **Image Tag:** `mariaelenabotnari/exam-service:3.0.0` (also tagged `mariaelenabotnari/exam-service:lab3` and `mariaelenabotnari/exam-service:latest`)
 - **Default Port:** `Internal only (3000), accessible via Gateway (8000)`
+
+### **Consumed API Endpoints**
+
+- `POST /registry/register`, `DELETE /registry/instances/{instanceId}` *(Service Discovery)* — registers this instance on startup, refreshes the registration periodically, and deregisters on shutdown.
+- `GET /registry/services/world-service` *(Service Discovery)* — finds the World Service instances for every `ExamPassed` notification. The list is never cached, and one instance is picked per call in round robin order.
+- `POST /events/exam-passed` *(World Service)* — tells World Service that a player passed an exam, so it can unlock the next section of the university. It is sent once per passed attempt, with no retry.
+- `DELETE /registry/instances/{instanceId}` *(Service Discovery)* — removes a World Service instance after it failed 3 times inside the window (`OUTGOING_CALL_TIMEOUT_SECONDS` × `CIRCUIT_BREAKER_WINDOW_MULTIPLIER`, `3 × 3.5 = 10.5` seconds by default). A failure is a connection error, a timeout, or a response with status `500` or higher; a `4xx` is not a failure. An instance that is removed but still running registers again at its next refresh, with a new `instanceId`.
 
 ### **Exposed API Endpoints**
 
@@ -368,6 +412,11 @@ Response
 { "passed": true, "score": 70 }
 ```
 
+On a pass, the attempt is saved first and then the `ExamPassed` notification is sent to World Service. The status stays `200` whatever happens to that notification. When it could not be delivered (no World Service instance in Service Discovery, a timeout, a connection error, or a `404` or `5xx` from the instance), the response also carries `unlockPending: true`; the field is absent when the notification was delivered or the attempt failed.
+```json
+{ "passed": true, "score": 70, "unlockPending": true }
+```
+
 **`POST /exams/{attemptId}/abandon`** *(Consumed by Game Service)*
 
 Marks an attempt as abandoned, called when a player disconnects or leaves the encounter before submitting.
@@ -409,7 +458,29 @@ Response
 [ { "achievementId": "achievementSurvivedMathematics", "fullAchievementName": "Achievement, Survived Mathematics", "unlockedAt": "2026-09-08T10:30:00.000Z" } ]
 ```
 
+**`GET /players/{playerId}/exams`** *(Consumed by Gateway)*
+
+Lists the exams the player has attempted, with the status (`passed`, `in_progress`, `failed` or `abandoned`), the best grade and the number of attempts. A player with no attempts gets `[]`. Requires `X-Player-Id` matching the path.
+
+Response
+```json
+[ { "examId": 1, "courseName": "Discrete Mathematics", "courseCategory": "mathematics", "status": "passed", "bestGrade": 100, "attempts": 2 } ]
+```
+
+**`GET /players/{playerId}/courses`** *(Consumed by Gateway)*
+
+Lists the course categories the player has attempted and whether each is complete (all of the category's exams passed). A player with no attempts gets `[]`. Requires `X-Player-Id` matching the path.
+
+Response
+```json
+[ { "courseCategory": "mathematics", "examsTotal": 6, "examsPassed": 2, "complete": false } ]
+```
+
+Both endpoints answer errors in the `{ "error", "details", "requestId" }` shape: `400 invalid_player_id`, `401 missing_player_identity`, `403 player_mismatch`.
+
 ### **Message Queue Events**
+
+> The `ExamPassed` notification to World Service is now a direct HTTP call (see Consumed API Endpoints), so `ExamPassedEvent` is no longer logged by Exam Service. The other events below are still only written to its log; no message queue is connected yet.
 
 **PUBLISH `ExamPassedEvent`** *(Consumed by Player Service)*
 ```json
@@ -445,10 +516,23 @@ Owns the persistent physical state of the university.
 
 ### **DockerHub Image**
 - **Repository:** [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service)
-- **Image Tag:** `mariaelenabotnari/world-service:2.1.1`
+- **Image Tag:** `mariaelenabotnari/world-service:3.0.0` (also tagged `mariaelenabotnari/world-service:lab3` and `mariaelenabotnari/world-service:latest`)
 - **Default Port:** `Internal only (3001), accessible via Gateway (8000)`
 
+### **Consumed API Endpoints**
+
+- `POST /registry/register`, `DELETE /registry/instances/{instanceId}` *(Service Discovery)* — registers each instance on startup, refreshes the registration periodically, and deregisters on shutdown. Run several World Service replicas without `container_name` or a fixed host port so each one gets its own address.
+
 ### **Exposed API Endpoints**
+
+**`GET /health`** *(Consumed by Docker healthcheck, Service Discovery, development team)*
+
+Returns service health, database connectivity, uptime and concurrency counters: `200 OK` when healthy, `503` when the database check fails or times out. It needs no identity header.
+
+Response
+```json
+{ "status": "ok", "service": "world-service", "version": "1.0.0", "instanceId": "70d47addd4e645a9bbae9f14a5383798", "hostname": "ea93129ca3f1", "registeredWithDiscovery": true, "uptimeSeconds": 123, "timestamp": "2026-10-25T16:00:00.000Z", "database": "up", "concurrency": { "current": 3, "max": 50 } }
+```
 
 **`POST /world/zones`** *(Consumed by development team)*
 
@@ -668,6 +752,39 @@ Response
 }
 ```
 
+**`POST /world/zones/unlock`** *(Internal handler, triggered by the `AchievementUnlockedEvent`; also usable by development team for testing)*
+
+Triggers the unlock of the zone that matches an achievement. It requires the `X-Service-Name` header (`403 { "message": "Forbidden" }` without it).
+
+Payload
+```json
+{ "achievementId": "achievementSurvivedMathematics", "playerId": "player_123" }
+```
+
+Response
+```json
+{ "message": "Unlock triggered" }
+```
+
+**`POST /events/exam-passed`** *(Consumed by Exam Service)*
+
+Tells World Service that a player passed an exam, so it can unlock the next section of the university. Exam Service calls this path on the instance's own `baseUrl` found in Service Discovery, inside the Docker network and **not through the Gateway**, so there is no `/world` prefix. Headers: `X-Service-Name: exam-service` and `X-Request-Id`.
+
+**World Service must treat `eventId` as idempotent:** a repeated `eventId` must answer `2xx` without unlocking twice. Any `2xx` counts as delivered. A `5xx`, a timeout or a connection error counts as a failure of that instance, and 3 failures inside the window remove the instance from Service Discovery. A `4xx` (including `404`) is not counted as a failure, but Exam Service reports it as `unlockPending: true`.
+
+Payload
+```json
+{ "eventId": "3f0c9a52b7d14e6fa1c8d2e45b9a7f10", "playerId": "player_123", "examId": "1", "course": "Discrete Mathematics", "gradedAt": "2026-09-08T10:30:00.000Z" }
+```
+`eventId` is a UUID v4 in hex (32 characters), `examId` is the exam's id, `course` is its course name, and `gradedAt` is ISO 8601 UTC.
+
+Response *(proposed)*
+```json
+{ "eventId": "3f0c9a52b7d14e6fa1c8d2e45b9a7f10", "duplicate": false }
+```
+
+> **Status: not implemented in World Service yet, and not confirmed by the World team.** Until it exists, World Service answers `404`, which Exam Service logs as a `WARN` and reports as `unlockPending: true` on the exam submit response.
+
 ### **Message Queue Events**
 
 **SUBSCRIBE `AchievementUnlockedEvent`** *(Published by Exam Service)*
@@ -693,7 +810,7 @@ Owns the persistent definitions and short-lived instance state of zombies.
 
 ### **DockerHub Image**
 - **Repository:** [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service)
-- **Image Tag:** `costinloredana/zombie-service:2.0.0`
+- **Image Tag:** `costinloredana/zombie-service:3.0.0`
 - **Default Port:** `Internal only (4001), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
@@ -852,7 +969,7 @@ Owns the university's resource economy independently from the physical map.
 
 ### **DockerHub Image**
 - **Repository:** [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service)
-- **Image Tag:** `costinloredana/resource-service:2.0.0`
+- **Image Tag:** `costinloredana/resource-service:3.0.0`
 - **Default Port:** `Internal only (4002), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
@@ -1030,20 +1147,30 @@ Responsible for the player's survival base, initially represented by the FAF Cab
 
 ### **DockerHub Image**
 - **Repository:** [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service)
-- **Image Tag:** `cristi150404/base-service:2.0.0`
+- **Image Tag:** `cristi150404/base-service:3.0.0`
 - **Default Port:** `Internal only (5003), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
 
+- `POST /registry/register`, `DELETE /registry/instances/{instanceId}` *(Service Discovery)* — registers each instance on startup, refreshes the registration every 30 s, and deregisters on shutdown. Run several replicas without `container_name` or a fixed host port so each one registers its own address.
 - `GET /world/rooms/{roomId}` *(World Service)* — confirms a room exists and finds its zone.
 - `GET /world/zones` *(World Service)* — confirms the room's zone is unlocked.
 - `POST /api/spend` *(Resource Service)* — deducts resources before applying a barricade, facility upgrade, decoration, or Kiki feeding.
 - `POST /api/refund` *(Resource Service)* — returns the resources if the effect cannot be applied.
 - `POST /api/players/{player_id}/inventory/items` *(Player Service)* — delivers a Kiki reward to the player's inventory.
 
-Base Service calls them through the Gateway with a service token (`kind: service`, forwarded as `X-Service-Name: base-service`). Every state-changing endpoint spends first, then applies the effect in one database transaction. If that fails, Base Service refunds the resources rather than leaving the player having paid for nothing.
+Base Service calls them through the Gateway with a service token (`kind: service`, forwarded as `X-Service-Name: base-service`). Each called service has a circuit breaker shared by all its endpoints: 3 failures (`5xx`, timeout, unreachable; a `4xx` is not a failure) within Task Timeout × 3.5 (28 s) trip it, the trip is logged, and calls to that service fail at once until a trial call after the window succeeds. Every state-changing endpoint spends first, then applies the effect in one database transaction. If that fails, Base Service refunds the resources rather than leaving the player having paid for nothing.
 
 ### **Exposed API Endpoints**
+
+**`GET /status`** *(Consumed by development team)*
+
+Describes the running instance: version, uptime, its Service Discovery registration, the database connection, the circuit breaker of each called service and the task limits. `200 OK` while the database answers, `503` with `"status": "degraded"` when it does not. It needs no identity header and is exempt from the task limits.
+
+Response
+```json
+{ "status": "ok", "service": "base-service", "version": "3.0.0", "instanceId": "d79591b64fdd4e12ba70c2d94355a46e", "hostname": "ea93129ca3f1", "registeredWithDiscovery": true, "lastRegisteredAt": "2026-10-26T12:00:30Z", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z", "database": "up", "integrations": "http", "circuitBreakers": { "resource-service": "closed", "world-service": "closed", "player-service": "closed" }, "taskLimits": { "timeoutSeconds": 8, "maxConcurrentTasks": 50 } }
+```
 
 **`GET /api/base/{player_id}`** *(Consumed by Gateway, Game Service)*
 
@@ -1179,11 +1306,12 @@ Allows players to combine resources into useful survival equipment.
 
 ### **DockerHub Image**
 - **Repository:** [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service)
-- **Image Tag:** `cristi150404/crafting-service:2.0.0`
+- **Image Tag:** `cristi150404/crafting-service:3.0.0`
 - **Default Port:** `Internal only (5004), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
 
+- `POST /registry/register`, `DELETE /registry/instances/{instanceId}` *(Service Discovery)* — registers each instance on startup, refreshes the registration every 30 s, and deregisters on shutdown. Run several replicas without `container_name` or a fixed host port so each one registers its own address.
 - `POST /api/spend` *(Resource Service)* — consumes recipe ingredients.
 - `POST /api/refund` *(Resource Service)* — returns the ingredients if delivery fails.
 - `POST /api/players/{player_id}/inventory/items` *(Player Service)* — delivers the crafted item.
@@ -1191,9 +1319,18 @@ Allows players to combine resources into useful survival equipment.
 - `GET /players/{playerId}/progress` *(Exam Service)* — reads passed exams.
 - `GET /world/zones` *(World Service)* — reads unlocked zones.
 
-Crafting Service calls them through the Gateway with a service token (`kind: service`, forwarded as `X-Service-Name: crafting-service`). A recipe can be gated on a player level, a passed exam, an unlocked zone, or a discovered resource, which is why this service reads from four others. If delivery fails after the ingredients were consumed, Crafting Service refunds them — this is the saga's rollback path.
+Crafting Service calls them through the Gateway with a service token (`kind: service`, forwarded as `X-Service-Name: crafting-service`). Each called service has a circuit breaker shared by all its endpoints: 3 failures (`5xx`, timeout, unreachable; a `4xx` is not a failure) within Task Timeout × 3.5 (28 s) trip it, the trip is logged, and calls to that service fail at once until a trial call after the window succeeds. A recipe can be gated on a player level, a passed exam, an unlocked zone, or a discovered resource, which is why this service reads from four others. If delivery fails after the ingredients were consumed, Crafting Service refunds them — this is the saga's rollback path.
 
 ### **Exposed API Endpoints**
+
+**`GET /status`** *(Consumed by development team)*
+
+Describes the running instance: version, uptime, its Service Discovery registration, the database connection, the circuit breaker of each called service and the task limits. `200 OK` while the database answers, `503` with `"status": "degraded"` when it does not. It needs no identity header and is exempt from the task limits.
+
+Response
+```json
+{ "status": "ok", "service": "crafting-service", "version": "3.0.0", "instanceId": "d79591b64fdd4e12ba70c2d94355a46e", "hostname": "ea93129ca3f1", "registeredWithDiscovery": true, "lastRegisteredAt": "2026-10-26T12:00:30Z", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z", "database": "up", "integrations": "http", "circuitBreakers": { "resource-service": "closed", "player-service": "closed", "exam-service": "closed", "world-service": "closed" }, "taskLimits": { "timeoutSeconds": 8, "maxConcurrentTasks": 50 } }
+```
 
 **`GET /api/recipes`** *(Consumed by Gateway)*
 
@@ -1290,6 +1427,182 @@ Response
 
 ---
 
+## **9. Service Discovery**
+
+Maintains the runtime service registry so microservices can register their reachable address and health check endpoint on startup, deregister on graceful shutdown, and be discovered dynamically by the Gateway and development team.
+
+### **Owns**
+- In-memory registry of active service instances keyed by `(serviceName, host, port)` with capacity limits (`MAX_REGISTERED_INSTANCES`, default `100`).
+- Stable instance identifiers (`instanceId`) and registration/heartbeat timestamps (`registeredAt`, `lastRegisteredAt`).
+- Grouped and per-service instance lookup endpoints for dynamic request routing.
+
+### **DockerHub Image**
+- **Repository:** [`mariaelenabotnari/service-discovery`](https://hub.docker.com/r/mariaelenabotnari/service-discovery)
+- **Image Tag:** `mariaelenabotnari/service-discovery:3.0.0` (also tagged `mariaelenabotnari/service-discovery:lab3` and `mariaelenabotnari/service-discovery:latest`)
+- **Default Port:** `Internal only (8500)`
+
+### **Exposed API Endpoints**
+
+**`POST /registry/register`** *(Consumed by every service)*
+
+Registers a service instance on startup or refreshes an existing `(serviceName, host, port)` entry. First registration returns `201 Created`; subsequent registrations of the same `(serviceName, host, port)` keep `instanceId` and `registeredAt`, update `lastRegisteredAt` and any changed fields (`healthPath`, `metadata`), and return `200 OK`.
+
+Payload
+```json
+{
+  "serviceName": "exam-service",
+  "host": "exam-service",
+  "port": 3000,
+  "healthPath": "/health",
+  "metadata": {
+    "version": "1.0.0"
+  }
+}
+```
+
+Success Response (201 Created on first registration / 200 OK on refresh)
+```json
+{
+  "instanceId": "b17f5c4e29a1481aa6e3c8010294a712",
+  "serviceName": "exam-service",
+  "host": "exam-service",
+  "port": 3000,
+  "healthPath": "/health",
+  "healthUrl": "http://exam-service:3000/health",
+  "metadata": {
+    "version": "1.0.0"
+  },
+  "registeredAt": "2026-04-20T12:00:00Z",
+  "lastRegisteredAt": "2026-04-20T12:00:00Z"
+}
+```
+
+Error Response (400 Bad Request — validation failure)
+```json
+{
+  "error": "validation_failed",
+  "details": [
+    { "field": "port", "message": "Input should be less than or equal to 65535" }
+  ],
+  "requestId": "req-991a"
+}
+```
+
+Error Response (429 Too Many Requests — registry capacity reached)
+```json
+{
+  "error": "registry_full",
+  "message": "Maximum number of registered instances (100) reached",
+  "requestId": "req-991b"
+}
+```
+
+**`DELETE /registry/instances/{instanceId}`** *(Consumed by every service on shutdown, and by Exam Service to remove a failing World Service instance)*
+
+Removes a registered instance when a service shuts down gracefully.
+
+Success Response (200 OK)
+```json
+{
+  "status": "deregistered",
+  "instanceId": "b17f5c4e29a1481aa6e3c8010294a712",
+  "serviceName": "exam-service"
+}
+```
+
+Error Response (404 Not Found)
+```json
+{
+  "error": "instance_not_found",
+  "message": "No registered instance with id b17f5c4e29a1481aa6e3c8010294a712",
+  "requestId": "req-991c"
+}
+```
+
+**`GET /registry/services`** *(Consumed by development team, Gateway)*
+
+Returns all currently registered instances grouped by `serviceName`, sorted alphabetically by `serviceName` and by `registeredAt` ascending within each service.
+
+Success Response (200 OK)
+```json
+{
+  "totalServices": 2,
+  "totalInstances": 3,
+  "services": [
+    {
+      "serviceName": "exam-service",
+      "instanceCount": 2,
+      "instances": [
+        {
+          "instanceId": "b17f5c4e29a1481aa6e3c8010294a712",
+          "serviceName": "exam-service",
+          "host": "exam-service-1",
+          "port": 3000,
+          "healthPath": "/health",
+          "healthUrl": "http://exam-service-1:3000/health",
+          "metadata": { "version": "1.0.0" },
+          "registeredAt": "2026-04-20T12:00:00Z",
+          "lastRegisteredAt": "2026-04-20T12:05:00Z"
+        }
+      ]
+    }
+  ]
+}
+```
+
+**`GET /registry/services/{serviceName}`** *(Consumed by Gateway, Exam Service)*
+
+Returns all registered instances for a single service, sorted by `registeredAt` ascending.
+
+Success Response (200 OK)
+```json
+{
+  "serviceName": "exam-service",
+  "instanceCount": 1,
+  "instances": [
+    {
+      "instanceId": "b17f5c4e29a1481aa6e3c8010294a712",
+      "serviceName": "exam-service",
+      "host": "exam-service",
+      "port": 3000,
+      "healthPath": "/health",
+      "healthUrl": "http://exam-service:3000/health",
+      "metadata": { "version": "1.0.0" },
+      "registeredAt": "2026-04-20T12:00:00Z",
+      "lastRegisteredAt": "2026-04-20T12:00:00Z"
+    }
+  ]
+}
+```
+
+Error Response (404 Not Found — unknown service or zero instances)
+```json
+{
+  "error": "service_not_found",
+  "message": "No registered instances for service exam-service",
+  "requestId": "req-991d"
+}
+```
+
+**`GET /health`** *(Consumed by Docker healthcheck, development team)*
+
+Returns the health status, uptime, and live registry counters (`registeredServices`, `registeredInstances`) for the Service Discovery service.
+
+Success Response (200 OK)
+```json
+{
+  "status": "healthy",
+  "service": "discovery-service",
+  "version": "1.0.0",
+  "uptimeSeconds": 42,
+  "timestamp": "2026-04-20T12:00:42Z",
+  "registeredServices": 2,
+  "registeredInstances": 3
+}
+```
+
+---
+
 ## Branch Structure
 
 ### Main Branches
@@ -1327,7 +1640,10 @@ type/short-description-issueID
 
 ## Merging Strategy
 
-**Strategy**: Squash and Merge
+| Pull Request | Strategy |
+|---|---|
+| Feature branch → `development` | **Squash and Merge** |
+| `development` → `main` (release) | **Create a merge commit** (simple merge) |
 
 ### Benefits
 - Clean, linear commit history
@@ -1340,6 +1656,9 @@ type/short-description-issueID
 2. Make commits with clear, descriptive messages
 3. Open Pull Request to `development`
 4. After approval, squash and merge
+
+### Releases: `development` → `main`
+Release Pull Requests from `development` to `main` must use **Create a merge commit**, never Squash and Merge. A squash creates a new commit on `main` that `development` does not contain, so the two branches lose their shared history and the next release reports conflicts in every file changed since. A merge commit keeps `main` and `development` connected, so every release merges cleanly.
 
 ## Pull Request Requirements
 
@@ -1441,7 +1760,7 @@ We follow **Semantic Versioning (SemVer)**: `MAJOR.MINOR.PATCH`
 5. **Create PR**: Follow template and provide complete information
 6. **Review**: Address feedback and get required approvals
 7. **Merge**: Squash and merge to `development`
-8. **Deploy**: Regular releases from `development` to `main`
+8. **Deploy**: Regular releases from `development` to `main`, merged with **Create a merge commit**
 
 ## Tools & Resources
 
@@ -1466,15 +1785,16 @@ The microservices are containerized and published on DockerHub:
 
 | Service | DockerHub Repository | Image Tag | Default Port | Description |
 |---|---|---|---|---|
-| **Gateway Service** | [`mariaelenabotnari/gateway-service`](https://hub.docker.com/r/mariaelenabotnari/gateway-service) | `mariaelenabotnari/gateway-service:2.4.0` | `8000` | System entry point, async request routing layer |
-| **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:2.1.1` | `Internal (3000)` | Academic progression, exams, and achievements |
-| **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:2.1.1` | `Internal (3001)` | Physical campus layout, rooms, zones, and spawn points |
-| **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:2.2.0` | `Internal (8080)` | Player identity, progression, inventory, and trades |
-| **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:2.6.1` | `Internal (8080), WebSocket 3003` | Game sessions, day/night cycle, and timed player actions |
-| **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:2.0.0` | `Internal (4001)` | Zombie type definitions, spawned instances, and special actions |
-| **Resource Service** | [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service) | `costinloredana/resource-service:2.0.0` | `Internal (4002)` | Resource types, player balances, nodes, and idempotent transactions |
-| **Base Service** | [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service) | `cristi150404/base-service:2.0.0` | `Internal (5003)` | Player bases, barricades, facilities, and decorations |
-| **Crafting Service** | [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service) | `cristi150404/crafting-service:2.0.0` | `Internal (5004)` | Recipes, unlock conditions, and crafting sagas |
+| **Gateway Service** | [`mariaelenabotnari/gateway-service`](https://hub.docker.com/r/mariaelenabotnari/gateway-service) | `mariaelenabotnari/gateway-service:3.0.0` | `8000` | System entry point, async request routing layer |
+| **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:3.0.0` | `Internal (3000)` | Academic progression, exams, and achievements |
+| **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:3.0.0` | `Internal (3001)` | Physical campus layout, rooms, zones, and spawn points |
+| **Service Discovery** | [`mariaelenabotnari/service-discovery`](https://hub.docker.com/r/mariaelenabotnari/service-discovery) | `mariaelenabotnari/service-discovery:3.0.0` | `Internal (8500)` | Service registry: instances register, deregister and are looked up by name |
+| **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:3.1.0` | `Internal (8080)` | Player identity, progression, inventory, and trades |
+| **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:3.1.0` | `Internal (8080), WebSocket 3003-3005` | Game sessions, day/night cycle, and timed player actions |
+| **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:3.0.0` | `Internal (4001)` | Zombie type definitions, spawned instances, and special actions |
+| **Resource Service** | [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service) | `costinloredana/resource-service:3.0.0` | `Internal (4002)` | Resource types, player balances, nodes, and idempotent transactions |
+| **Base Service** | [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service) | `cristi150404/base-service:3.0.0` | `Internal (5003)` | Player bases, barricades, facilities, and decorations |
+| **Crafting Service** | [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service) | `cristi150404/crafting-service:3.0.0` | `Internal (5004)` | Recipes, unlock conditions, and crafting sagas |
 
 ---
 
@@ -1499,7 +1819,7 @@ To run these services locally via Docker Compose, ensure the host machine meets 
    - `5438` — Base PostgreSQL Database (`base-db`)
    - `5439` — Crafting PostgreSQL Database (`crafting-db`)
 3. **Resource Allocations**:
-   - At least 3 GB of RAM available for Docker (sixteen containers, including one MongoDB instance)
+   - At least 3 GB of RAM available for Docker (thirty containers, including one MongoDB instance)
    - 3 GB free disk space for Docker images and the PostgreSQL/MongoDB data volumes
 4. **Environment Configuration**:
    - Self-contained in `docker-compose.yml`; no manual `.env` file setup is required to start up the stack.
@@ -1510,7 +1830,7 @@ Both images are multi-stage Node.js 20 builds that run as the non-root `node` us
 
 | | Zombie Service | Resource Service |
 |---|---|---|
-| **Image** | `costinloredana/zombie-service:2.0.0` (`node:20-alpine`) | `costinloredana/resource-service:2.0.0` (`node:20-slim` + OpenSSL for Prisma) |
+| **Image** | `costinloredana/zombie-service:3.0.0` (`node:20-alpine`) | `costinloredana/resource-service:3.0.0` (`node:20-slim` + OpenSSL for Prisma) |
 | **Database** | MongoDB 8 (`mongo:8`) | PostgreSQL 17 (`postgres:17-alpine`) |
 | **Required env** | `MONGO_URI`, e.g. `mongodb://zombie-db:27017/zombie_db` | `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, or a single `DATABASE_URL` that takes precedence over them |
 | **Optional env** | `PORT` (default `4001`) | `PORT` (default `4002`) |
@@ -1523,11 +1843,11 @@ The service exits on startup if its database is unreachable, so start it only af
 
 # Zombie Service
 docker run -d --name zombie-db --network kahoots-net mongo:8
-docker run -d --name zombie-service --network kahoots-net -p 4001:4001   -e MONGO_URI=mongodb://zombie-db:27017/zombie_db   costinloredana/zombie-service:2.0.0
+docker run -d --name zombie-service --network kahoots-net -p 4001:4001   -e MONGO_URI=mongodb://zombie-db:27017/zombie_db   costinloredana/zombie-service:3.0.0
 
 # Resource Service
 docker run -d --name resource-db --network kahoots-net   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=resource_db postgres:17-alpine
-docker run -d --name resource-service --network kahoots-net -p 4002:4002   -e POSTGRES_HOST=resource-db -e POSTGRES_PORT=5432 -e POSTGRES_USER=postgres   -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=resource_db   costinloredana/resource-service:2.0.0
+docker run -d --name resource-service --network kahoots-net -p 4002:4002   -e POSTGRES_HOST=resource-db -e POSTGRES_PORT=5432 -e POSTGRES_USER=postgres   -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=resource_db   costinloredana/resource-service:3.0.0
 ```
 
 If a container exits right away, the database probably wasn't ready yet. Wait a few seconds and run `docker start zombie-service` or `docker start resource-service`.
@@ -1537,11 +1857,18 @@ If a container exits right away, the database probably wasn't ready yet. Wait a 
 ### Step-by-Step Execution Guide
 
 #### 1. Start the Microservices & Databases
-From the repository root, start all seventeen containers in detached mode:
+From the repository root, start the stack in detached mode (Player, Game, Base, Crafting, Exam, World, Zombie and Resource Service run three replicas each):
 ```bash
 docker compose up -d
 ```
 Docker Compose will automatically pull the images from DockerHub, initialize the database containers (`exam-db` on 5433, `world-db` on 5434, `player-db` on 5435, `game-db` on 5436, `resource-db` on 5437, `zombie-db` on 27017, `base-db` on 5438, `crafting-db` on 5439), perform healthchecks, and launch `gateway-service`, `exam-service`, `world-service`, `player-service`, `game-service`, `zombie-service`, `resource-service`, `base-service` and `crafting-service`.
+
+Each replica of these six services registers itself with Discovery Service on startup and deregisters on shutdown; the Gateway looks them up there and sends requests to them in turn. To see the registered instances, or to scale a service while the stack runs:
+```bash
+docker compose exec discovery-service python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8500/registry/services').read().decode())"
+docker compose up -d --scale game-service=2
+```
+Game Service replicas publish their WebSocket port on host ports 3003-3005; socket tickets are shared through `game-db`, so the replica on 3003 accepts tickets issued by any of them.
 
 To check container health and status:
 ```bash
