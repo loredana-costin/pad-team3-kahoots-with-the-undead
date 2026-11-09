@@ -79,7 +79,7 @@ Handles global player identity, progression, and inventory.
 
 ### **DockerHub Image**
 - **Repository:** [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service)
-- **Image Tag:** `andrei045/player-service:3.1.0`
+- **Image Tag:** `andrei045/player-service:4.0.0`
 - **Default Port:** `Internal only (8080), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
@@ -97,7 +97,7 @@ Describes the running instance: version, when it started and how long it has bee
 
 Response
 ```json
-{ "status": "ok", "service": "player-service", "version": "3.1.0", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z" }
+{ "status": "ok", "service": "player-service", "version": "4.0.0", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z" }
 ```
 
 **`POST /api/auth/register`** *(Consumed by Gateway)*
@@ -257,7 +257,7 @@ The central real-time gameplay service. Manages sessions, the day/night cycle, t
 
 ### **DockerHub Image**
 - **Repository:** [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service)
-- **Image Tag:** `andrei045/game-service:3.1.0`
+- **Image Tag:** `andrei045/game-service:4.0.0`
 - **Default Port:** `Internal only (8080), accessible via Gateway (8000); WebSocket on 3003-3005`
 
 ### **Consumed API Endpoints**
@@ -280,7 +280,7 @@ Describes the running instance: version, when it started and how long it has bee
 
 Response
 ```json
-{ "status": "ok", "service": "game-service", "version": "3.1.0", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z" }
+{ "status": "ok", "service": "game-service", "version": "4.0.0", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z" }
 ```
 
 **`POST /api/sessions/{session_id}/actions`** *(Consumed by Gateway)*
@@ -1829,8 +1829,8 @@ The microservices are containerized and published on DockerHub:
 | **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:3.0.0` | `Internal (3000)` | Academic progression, exams, and achievements |
 | **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:3.0.0` | `Internal (3001)` | Physical campus layout, rooms, zones, and spawn points |
 | **Service Discovery** | [`mariaelenabotnari/service-discovery`](https://hub.docker.com/r/mariaelenabotnari/service-discovery) | `mariaelenabotnari/service-discovery:3.0.0` | `Internal (8500)` | Service registry: instances register, deregister and are looked up by name |
-| **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:3.1.0` | `Internal (8080)` | Player identity, progression, inventory, and trades |
-| **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:3.1.0` | `Internal (8080), WebSocket 3003-3005` | Game sessions, day/night cycle, and timed player actions |
+| **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:4.0.0` | `Internal (8080)` | Player identity, progression, inventory, and trades |
+| **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:4.0.0` | `Internal (8080), WebSocket 3003-3005` | Game sessions, day/night cycle, and timed player actions |
 | **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:3.0.0` | `Internal (4001)` | Zombie type definitions, spawned instances, and special actions |
 | **Resource Service** | [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service) | `costinloredana/resource-service:3.0.0` | `Internal (4002)` | Resource types, player balances, nodes, and idempotent transactions |
 | **Base Service** | [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service) | `cristi150404/base-service:3.0.0` | `Internal (5003)` | Player bases, barricades, facilities, and decorations |
