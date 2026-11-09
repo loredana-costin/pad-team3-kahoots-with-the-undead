@@ -43,6 +43,15 @@ the broker delivers the event to the subscribed service, and the next request re
 back through the Gateway. `brokerUrl` defaults to `http://localhost:8600`, which the team compose
 publishes.
 
+The Base and Crafting collections use the broker the same way. Their setup credits the test player
+through Resource Service's `POST /api/refund`, which the Gateway refuses, so it goes to the broker's
+queue instead (`POST {{brokerUrl}}/queues/resource-service/api/refund`) with a service token minted
+from `jwtSecret`. Both publish `ZoneUnlocked` on the broker and check that their service is among the
+subscribers; the Base collection then claims the room the event opened. Their last request downloads
+the service's logs through the Gateway (`/api/base/logs/download`, `/api/crafts/logs/download`) with
+`X-Admin-Key: {{logsAdminKey}}`: set `logsAdminKey` to the stack's `LOGS_ADMIN_KEY` to get the file,
+or leave it empty to check that the download is refused.
+
 The Zombie and Resource collections read seeded records (`prof_calc`, `infected_student`,
 `wood`, `node_1`), so they fail on an unseeded database. Seed first.
 

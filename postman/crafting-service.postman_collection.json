@@ -40,6 +40,26 @@
       "key": "craftId",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "brokerUrl",
+      "value": "http://localhost:8600",
+      "type": "string"
+    },
+    {
+      "key": "jwtSecret",
+      "value": "team-compose-development-secret-at-least-32-chars",
+      "type": "string"
+    },
+    {
+      "key": "serviceJwt",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "logsAdminKey",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
@@ -385,6 +405,23 @@
           "name": "Grant test resources to the player",
           "event": [
             {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for crafting-service, which the message broker requires.",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'crafting-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+                ]
+              }
+            },
+            {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
@@ -397,6 +434,16 @@
             }
           ],
           "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
             "method": "POST",
             "header": [
               {
@@ -405,16 +452,18 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/refund",
+              "raw": "{{brokerUrl}}/queues/resource-service/api/refund",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "resource-service",
                 "api",
                 "refund"
               ]
             },
-            "description": "",
+            "description": "The Gateway refuses POST /api/refund, which only services may call, so the collection sends it to Resource Service through the message broker's queue with a service token, the way crafting-service does.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"idempotencyKey\": \"seed_{{runId}}_playerId\",\n  \"playerId\": \"{{playerId}}\",\n  \"reason\": \"postman_test_seed\",\n  \"costs\": [\n    {\n      \"resourceType\": \"wood\",\n      \"amount\": 10\n    },\n    {\n      \"resourceType\": \"metal\",\n      \"amount\": 5\n    }\n  ]\n}",
@@ -431,6 +480,23 @@
           "name": "Grant test resources to a player Player Service does not know",
           "event": [
             {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for crafting-service, which the message broker requires.",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'crafting-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+                ]
+              }
+            },
+            {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
@@ -443,6 +509,16 @@
             }
           ],
           "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
             "method": "POST",
             "header": [
               {
@@ -451,16 +527,18 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/refund",
+              "raw": "{{brokerUrl}}/queues/resource-service/api/refund",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "resource-service",
                 "api",
                 "refund"
               ]
             },
-            "description": "",
+            "description": "The Gateway refuses POST /api/refund, which only services may call, so the collection sends it to Resource Service through the message broker's queue with a service token, the way crafting-service does.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"idempotencyKey\": \"seed_{{runId}}_ghostPlayerId\",\n  \"playerId\": \"{{ghostPlayerId}}\",\n  \"reason\": \"postman_test_seed\",\n  \"costs\": [\n    {\n      \"resourceType\": \"wood\",\n      \"amount\": 10\n    },\n    {\n      \"resourceType\": \"metal\",\n      \"amount\": 5\n    }\n  ]\n}",
@@ -1443,6 +1521,136 @@
                 }
               }
             }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5. Message Broker",
+      "item": [
+        {
+          "name": "Publish ZoneUnlocked Through The Message Broker (202)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint the service token the message broker requires; its subject (world-service) is recorded as the publisher.",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'world-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 202 Accepted\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"The broker queued the event for crafting-service\", () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.topic).to.eql(\"ZoneUnlocked\");",
+                  "    pm.expect(body.publisher).to.eql(\"world-service\");",
+                  "    pm.expect(body.subscribers).to.include(\"crafting-service\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/topics/ZoneUnlocked/publish",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "topics",
+                "ZoneUnlocked",
+                "publish"
+              ]
+            },
+            "description": "Publishes the event World Service publishes when a zone opens. crafting-service registered the topic with Service Discovery, so the broker lists it among the subscribers and delivers the event to POST /events/ZoneUnlocked on one of its instances (retried on a 5xx, dead-lettered after the last attempt).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"zoneId\": \"mathematicsWing\",\n  \"roomsAdded\": [\n    \"mathematicsWingLibrary\"\n  ],\n  \"timestamp\": \"2026-11-09T10:00:00Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Download Crafting Service logs",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const key = pm.collectionVariables.get(\"logsAdminKey\");",
+                  "if (!key) {",
+                  "    // No key in the collection: the instance answers 503 while its own key is empty, 401 when it has one.",
+                  "    pm.test(\"Without logsAdminKey the download is refused\", () => pm.expect(pm.response.code).to.be.oneOf([401, 503]));",
+                  "} else {",
+                  "    pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));",
+                  "    pm.test(\"The logs come back as a file of JSON lines\", () => {",
+                  "        pm.expect(pm.response.headers.get(\"Content-Disposition\")).to.include(\"attachment\");",
+                  "        pm.expect(pm.response.headers.get(\"X-Log-Lines\")).to.exist;",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Admin-Key",
+                "value": "{{logsAdminKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/crafts/logs/download",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "crafts",
+                "logs",
+                "download"
+              ]
+            },
+            "description": "This instance's recent log lines (one JSON object per line), oldest first. Set logsAdminKey to the LOGS_ADMIN_KEY of the stack; without it the request checks that the download is refused. Add ?tail=100 or ?since=2026-11-09T10:00:00Z to narrow it."
           },
           "response": []
         }

@@ -1,4 +1,4 @@
-# Prometheus for the team compose: scrapes the message broker and every replica of Player and Game Service.
+# Prometheus for the team compose: scrapes the message broker and every replica of Player, Game, Base and Crafting Service.
 # A replicated service is found through Docker's DNS: its compose name resolves to one A record per replica,
 # so each replica is its own target (instance = ip:port).
 global:
@@ -25,3 +25,15 @@ scrape_configs:
       - names: ["game-service"]
         type: A
         port: 8080
+
+  - job_name: base-service
+    dns_sd_configs:
+      - names: ["base-service"]
+        type: A
+        port: 5003
+
+  - job_name: crafting-service
+    dns_sd_configs:
+      - names: ["crafting-service"]
+        type: A
+        port: 5004

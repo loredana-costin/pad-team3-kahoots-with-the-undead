@@ -368,7 +368,7 @@ services:
       - kahoots-network
 
   base-service:
-    image: cristi150404/base-service:3.0.0
+    image: cristi150404/base-service:4.0.0
     # No container_name: 3 replicas share the base-db database, and each registers its own address
     # with Service Discovery, which the Gateway reads to spread requests over them (round robin).
     deploy:
@@ -384,10 +384,15 @@ services:
       Services__Resource: http://gateway-service:8000
       Services__Player: http://gateway-service:8000
       Services__World: http://gateway-service:8000
-      # Signs the service token the Gateway accepts; same value as the Gateway's JWT_SECRET.
+      # Calls to the other services go to the message broker over gRPC (Broker.Relay), and events are
+      # published on its topics; the Services__* URLs above are the fallback when Broker__Url is empty.
+      Broker__Url: http://message-broker:8601
+      # Signs the service token the broker accepts; same value as the Gateway's and the broker's JWT_SECRET.
       Jwt__Secret: team-compose-development-secret-at-least-32-chars
       ASPNETCORE_ENVIRONMENT: Development
       Discovery__Url: http://discovery-service:8500
+      # Key for GET /logs/download; the download is off while it is empty (set it in .env, never commit it).
+      Logs__AdminKey: ${LOGS_ADMIN_KEY:-}
     expose:
       - "5003"
     depends_on:
@@ -395,11 +400,13 @@ services:
         condition: service_healthy
       discovery-service:
         condition: service_healthy
+      message-broker:
+        condition: service_healthy
     networks:
       - kahoots-network
 
   crafting-service:
-    image: cristi150404/crafting-service:3.0.0
+    image: cristi150404/crafting-service:4.0.0
     # No container_name: 3 replicas share the crafting-db database, and each registers its own address
     # with Service Discovery, which the Gateway reads to spread requests over them (round robin).
     deploy:
@@ -416,16 +423,23 @@ services:
       Services__Player: http://gateway-service:8000
       Services__Exam: http://gateway-service:8000
       Services__World: http://gateway-service:8000
-      # Signs the service token the Gateway accepts; same value as the Gateway's JWT_SECRET.
+      # Calls to the other services go to the message broker over gRPC (Broker.Relay), and events are
+      # published on its topics; the Services__* URLs above are the fallback when Broker__Url is empty.
+      Broker__Url: http://message-broker:8601
+      # Signs the service token the broker accepts; same value as the Gateway's and the broker's JWT_SECRET.
       Jwt__Secret: team-compose-development-secret-at-least-32-chars
       ASPNETCORE_ENVIRONMENT: Development
       Discovery__Url: http://discovery-service:8500
+      # Key for GET /logs/download; the download is off while it is empty (set it in .env, never commit it).
+      Logs__AdminKey: ${LOGS_ADMIN_KEY:-}
     expose:
       - "5004"
     depends_on:
       crafting-db:
         condition: service_healthy
       discovery-service:
+        condition: service_healthy
+      message-broker:
         condition: service_healthy
     networks:
       - kahoots-network

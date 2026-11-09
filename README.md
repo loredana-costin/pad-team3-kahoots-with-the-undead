@@ -48,7 +48,7 @@ The full communication contract — every endpoint, its payload, and its respons
 | Ceaetchii Andrei | Player Service, Game Service | C# / ASP.NET Core | PostgreSQL (both services) | REST/HTTP for clients, gRPC to the Message Broker for calls to other services, WebSockets, broker topic events | C# provides strong typing and asynchronous programming. PostgreSQL ensures data integrity and transactions for player identity, inventory and trades. Game Service uses it as well so both services share one architecture: the same generic repository, migration runner and base entity. Its state is short-lived but still relational (sessions, rosters, timed actions), and one DBMS keeps deployment and the shared compose file simpler. REST is used for request/response communication with clients, gRPC through the Message Broker (`Broker.Relay`, a binary protobuf call over one multiplexed HTTP/2 connection) for Game Service's calls to the other services, WebSockets for real-time updates, and the broker's topic queues for asynchronous cross-service events. Trade-off: Redis would fit ephemeral session state better and was the original choice, but running a single database across both services is simpler to operate at this scale. |
 | Botnari Maria-Elena | Exam Service, World Service | Node.js/TypeScript (Express) | PostgreSQL | REST + RabbitMQ events | Both services store structured, relational data (exams and attempts for one, rooms and connections for the other), so one language and one database keeps things simple and easy to maintain across both. Trade-off: without EF Core's built-in migration tooling, schema changes to the room graph require more manual discipline to keep consistent. |
 | Costin Loredana | Gateway Service, Zombie Service, Resource Service | Gateway: Python (FastAPI); Others: Node.js/TypeScript (Express) | Gateway: None; Zombie: MongoDB; Resource: PostgreSQL | Gateway: REST routing; Zombie: REST; Resource: REST, idempotency-key-gated | Gateway uses FastAPI to provide an async entry point and routing layer. Node's non-blocking I/O fits the other two I/O-bound services. MongoDB's flexible schema enables rapid Zombie Service iteration without migrations as ability types expand. The correctness-critical Resource Service uses TypeScript and DB transactions to enforce atomic, idempotent balance updates. Trade-off: Node is weaker at CPU-heavy work, but neither service does any, so this cost doesn't apply here. |
-| Bulat Cristian | Base Service, Crafting Service | C#/.NET (ASP.NET Core) | PostgreSQL | REST for Base and Crafting Services; RabbitMQ publisher and consumer for both | Both services perform "spend and apply" operations that must not partially succeed. C#'s explicit exception handling and EF Core transactions make atomic, saga-style operations across service calls easier to reason about than a dynamically-typed alternative. Trade-off: more boilerplate than Node for simple CRUD, accepted for the correctness guarantee. |
+| Bulat Cristian | Base Service, Crafting Service | C#/.NET (ASP.NET Core) | PostgreSQL | REST for Base and Crafting Services, gRPC to the Message Broker for calls to other services, broker topic events published and consumed by both | Both services perform "spend and apply" operations that must not partially succeed. C#'s explicit exception handling and EF Core transactions make atomic, saga-style operations across service calls easier to reason about than a dynamically-typed alternative. Trade-off: more boilerplate than Node for simple CRUD, accepted for the correctness guarantee. |
 
 ---
 # Architectural Diagram of Microservices Operation
@@ -1187,7 +1187,7 @@ Responsible for the player's survival base, initially represented by the FAF Cab
 
 ### **DockerHub Image**
 - **Repository:** [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service)
-- **Image Tag:** `cristi150404/base-service:3.0.0`
+- **Image Tag:** `cristi150404/base-service:4.0.0`
 - **Default Port:** `Internal only (5003), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
@@ -1199,7 +1199,7 @@ Responsible for the player's survival base, initially represented by the FAF Cab
 - `POST /api/refund` *(Resource Service)* — returns the resources if the effect cannot be applied.
 - `POST /api/players/{player_id}/inventory/items` *(Player Service)* — delivers a Kiki reward to the player's inventory.
 
-Base Service calls them through the Gateway with a service token (`kind: service`, forwarded as `X-Service-Name: base-service`). Each called service has a circuit breaker shared by all its endpoints: 3 failures (`5xx`, timeout, unreachable; a `4xx` is not a failure) within Task Timeout × 3.5 (28 s) trip it, the trip is logged, and calls to that service fail at once until a trial call after the window succeeds. Every state-changing endpoint spends first, then applies the effect in one database transaction. If that fails, Base Service refunds the resources rather than leaving the player having paid for nothing.
+Base Service calls them through the Message Broker over gRPC (`Broker.Relay` on `message-broker:8601`, set with `Broker__Url`), signed with a service token in the call metadata (`kind: service`; the broker forwards its subject as `X-Service-Name: base-service`), and the broker picks the instance (load balancing, circuit breakers, rerouting). Without `Broker__Url` it calls them through the Gateway as before. Each called service has a circuit breaker shared by all its endpoints: 3 failures (`5xx`, timeout, unreachable; a `4xx` is not a failure) within Task Timeout × 3.5 (28 s) trip it, the trip is logged, and calls to that service fail at once until a trial call after the window succeeds. Every state-changing endpoint spends first, then applies the effect in one database transaction. If that fails, Base Service refunds the resources rather than leaving the player having paid for nothing.
 
 ### **Exposed API Endpoints**
 
@@ -1209,7 +1209,7 @@ Describes the running instance: version, uptime, its Service Discovery registrat
 
 Response
 ```json
-{ "status": "ok", "service": "base-service", "version": "3.0.0", "instanceId": "d79591b64fdd4e12ba70c2d94355a46e", "hostname": "ea93129ca3f1", "registeredWithDiscovery": true, "lastRegisteredAt": "2026-10-26T12:00:30Z", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z", "database": "up", "integrations": "http", "circuitBreakers": { "resource-service": "closed", "world-service": "closed", "player-service": "closed" }, "taskLimits": { "timeoutSeconds": 8, "maxConcurrentTasks": 50 } }
+{ "status": "ok", "service": "base-service", "version": "4.0.0", "instanceId": "d79591b64fdd4e12ba70c2d94355a46e", "hostname": "ea93129ca3f1", "registeredWithDiscovery": true, "lastRegisteredAt": "2026-10-26T12:00:30Z", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z", "database": "up", "integrations": "broker", "circuitBreakers": { "resource-service": "closed", "world-service": "closed", "player-service": "closed" }, "taskLimits": { "timeoutSeconds": 8, "maxConcurrentTasks": 50 } }
 ```
 
 **`GET /api/base/{player_id}`** *(Consumed by Gateway, Game Service)*
@@ -1324,7 +1324,31 @@ Response
 { "idempotencyKey": "barricade_p44_faf_cab_001", "action": "barricade", "status": "completed" }
 ```
 
+**`POST /events/{topic}`** *(Consumed by Message Broker)*
+
+Delivery of an event published on a topic Base Service subscribes to (see Message Queue Events below). The broker posts its envelope, with the publisher's event as `payload`, and sends it again later on a `5xx` or a timeout; a `400` (unknown topic or malformed event) tells it not to. A repeated delivery is harmless.
+
+Payload
+```json
+{ "messageId": "ddaa98928d344993bc584176e696fbee", "topic": "ZoneUnlocked", "publisher": "world-service", "publishedAt": "2026-11-09T10:00:00Z", "payload": { "zoneId": "mathematicsWing", "roomsAdded": ["mathematicsWingLibrary"], "timestamp": "2026-11-09T10:00:00Z" } }
+```
+
+Success Response (200 OK)
+```json
+{ "eventName": "ZoneUnlocked", "status": "applied", "roomsNowClaimable": 1 }
+```
+
+**`GET /metrics`** *(Consumed by Prometheus)*
+
+Request counts and durations per route and status in the Prometheus text format (`http_requests_received_total`, `http_request_duration_seconds`), plus `kahoots_events_published_total` and `kahoots_events_received_total` by topic and outcome, `kahoots_saga_compensations_total` and `kahoots_circuit_breaker_open` per called service. Exempt from the task limits like `GET /health`. Not available through the Gateway.
+
+**`GET /logs/download`** *(Consumed by development team; also `GET /api/base/logs/download` through the Gateway)*
+
+Downloads the instance's recent log lines (up to 10,000, one JSON object per line, oldest first) as a file. The `X-Admin-Key` header must match `Logs__AdminKey` (`LOGS_ADMIN_KEY` in the team `.env`); the download answers `503` while the key is empty, `401` without the header and `403` with a wrong one. `since` (ISO 8601) and `tail` (last N lines) narrow it. The logs of every replica together are in Loki (Grafana, Explore).
+
 ### **Message Queue Events**
+
+Base Service registers with Service Discovery with `"topics": ["ZoneUnlocked", "ZoneUnlockedEvent"]` (both spellings, until every publisher uses the same one), and the Message Broker delivers the events published on them to `POST /events/{topic}`. It publishes with `Broker.Publish` after the change is saved; a failed publish is logged and counted, never undoes the action.
 
 **PUBLISH `BaseDefenseChanged`** *(Consumed by Game Service)* — reports the new defense rating whenever a barricade or facility changes it.
 ```json
@@ -1346,7 +1370,7 @@ Allows players to combine resources into useful survival equipment.
 
 ### **DockerHub Image**
 - **Repository:** [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service)
-- **Image Tag:** `cristi150404/crafting-service:3.0.0`
+- **Image Tag:** `cristi150404/crafting-service:4.0.0`
 - **Default Port:** `Internal only (5004), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
@@ -1359,7 +1383,7 @@ Allows players to combine resources into useful survival equipment.
 - `GET /players/{playerId}/progress` *(Exam Service)* — reads passed exams.
 - `GET /world/zones` *(World Service)* — reads unlocked zones.
 
-Crafting Service calls them through the Gateway with a service token (`kind: service`, forwarded as `X-Service-Name: crafting-service`). Each called service has a circuit breaker shared by all its endpoints: 3 failures (`5xx`, timeout, unreachable; a `4xx` is not a failure) within Task Timeout × 3.5 (28 s) trip it, the trip is logged, and calls to that service fail at once until a trial call after the window succeeds. A recipe can be gated on a player level, a passed exam, an unlocked zone, or a discovered resource, which is why this service reads from four others. If delivery fails after the ingredients were consumed, Crafting Service refunds them — this is the saga's rollback path.
+Crafting Service calls them through the Message Broker over gRPC (`Broker.Relay` on `message-broker:8601`, set with `Broker__Url`), signed with a service token in the call metadata (`kind: service`; the broker forwards its subject as `X-Service-Name: crafting-service`), and the broker picks the instance (load balancing, circuit breakers, rerouting). Without `Broker__Url` it calls them through the Gateway as before. Each called service has a circuit breaker shared by all its endpoints: 3 failures (`5xx`, timeout, unreachable; a `4xx` is not a failure) within Task Timeout × 3.5 (28 s) trip it, the trip is logged, and calls to that service fail at once until a trial call after the window succeeds. A recipe can be gated on a player level, a passed exam, an unlocked zone, or a discovered resource, which is why this service reads from four others. If delivery fails after the ingredients were consumed, Crafting Service refunds them — this is the saga's rollback path.
 
 ### **Exposed API Endpoints**
 
@@ -1369,7 +1393,7 @@ Describes the running instance: version, uptime, its Service Discovery registrat
 
 Response
 ```json
-{ "status": "ok", "service": "crafting-service", "version": "3.0.0", "instanceId": "d79591b64fdd4e12ba70c2d94355a46e", "hostname": "ea93129ca3f1", "registeredWithDiscovery": true, "lastRegisteredAt": "2026-10-26T12:00:30Z", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z", "database": "up", "integrations": "http", "circuitBreakers": { "resource-service": "closed", "player-service": "closed", "exam-service": "closed", "world-service": "closed" }, "taskLimits": { "timeoutSeconds": 8, "maxConcurrentTasks": 50 } }
+{ "status": "ok", "service": "crafting-service", "version": "4.0.0", "instanceId": "d79591b64fdd4e12ba70c2d94355a46e", "hostname": "ea93129ca3f1", "registeredWithDiscovery": true, "lastRegisteredAt": "2026-10-26T12:00:30Z", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z", "database": "up", "integrations": "broker", "circuitBreakers": { "resource-service": "closed", "player-service": "closed", "exam-service": "closed", "world-service": "closed" }, "taskLimits": { "timeoutSeconds": 8, "maxConcurrentTasks": 50 } }
 ```
 
 **`GET /api/recipes`** *(Consumed by Gateway)*
@@ -1454,7 +1478,31 @@ Response
 { "craftId": "craft_881", "playerId": "p_44", "recipeId": "recipe_wood_metal", "status": "completed" }
 ```
 
+**`POST /events/{topic}`** *(Consumed by Message Broker)*
+
+Delivery of an event published on a topic Crafting Service subscribes to (see Message Queue Events below). The broker posts its envelope, with the publisher's event as `payload`, and sends it again later on a `5xx` or a timeout; a `400` (unknown topic or malformed event) tells it not to. A repeated delivery is harmless.
+
+Payload
+```json
+{ "messageId": "ddaa98928d344993bc584176e696fbee", "topic": "AchievementUnlocked", "publisher": "exam-service", "publishedAt": "2026-11-09T10:00:00Z", "payload": { "playerId": "p_44", "achievementId": "ach_discrete_math", "xpAwarded": 50, "timestamp": "2026-11-09T10:00:00Z" } }
+```
+
+Success Response (200 OK)
+```json
+{ "eventName": "AchievementUnlocked", "status": "applied", "recipesUnlocked": ["recipe_paper_metal"] }
+```
+
+**`GET /metrics`** *(Consumed by Prometheus)*
+
+Request counts and durations per route and status in the Prometheus text format (`http_requests_received_total`, `http_request_duration_seconds`), plus `kahoots_events_published_total` and `kahoots_events_received_total` by topic and outcome, `kahoots_saga_compensations_total` and `kahoots_circuit_breaker_open` per called service. Exempt from the task limits like `GET /health`. Not available through the Gateway.
+
+**`GET /logs/download`** *(Consumed by development team; also `GET /api/crafts/logs/download` through the Gateway)*
+
+Downloads the instance's recent log lines (up to 10,000, one JSON object per line, oldest first) as a file. The `X-Admin-Key` header must match `Logs__AdminKey` (`LOGS_ADMIN_KEY` in the team `.env`); the download answers `503` while the key is empty, `401` without the header and `403` with a wrong one. `since` (ISO 8601) and `tail` (last N lines) narrow it. The logs of every replica together are in Loki (Grafana, Explore).
+
 ### **Message Queue Events**
+
+Crafting Service registers with Service Discovery with `"topics": ["AchievementUnlocked", "AchievementUnlockedEvent", "ZoneUnlocked", "ZoneUnlockedEvent"]` (both spellings, until every publisher uses the same one), and the Message Broker delivers the events published on them to `POST /events/{topic}`. It publishes with `Broker.Publish` after the recipe is unlocked; a failed publish is logged and counted, never undoes the unlock.
 
 **SUBSCRIBE `AchievementUnlocked`** *(Published by Exam Service)* — re-evaluates the player's locked recipes.
 
@@ -1833,8 +1881,8 @@ The microservices are containerized and published on DockerHub:
 | **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:4.0.0` | `Internal (8080), WebSocket 3003-3005` | Game sessions, day/night cycle, and timed player actions |
 | **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:3.0.0` | `Internal (4001)` | Zombie type definitions, spawned instances, and special actions |
 | **Resource Service** | [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service) | `costinloredana/resource-service:3.0.0` | `Internal (4002)` | Resource types, player balances, nodes, and idempotent transactions |
-| **Base Service** | [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service) | `cristi150404/base-service:3.0.0` | `Internal (5003)` | Player bases, barricades, facilities, and decorations |
-| **Crafting Service** | [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service) | `cristi150404/crafting-service:3.0.0` | `Internal (5004)` | Recipes, unlock conditions, and crafting sagas |
+| **Base Service** | [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service) | `cristi150404/base-service:4.0.0` | `Internal (5003)` | Player bases, barricades, facilities, and decorations |
+| **Crafting Service** | [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service) | `cristi150404/crafting-service:4.0.0` | `Internal (5004)` | Recipes, unlock conditions, and crafting sagas |
 
 ### Monitoring
 
