@@ -121,6 +121,26 @@
     {
       "key": "brokeActionId",
       "value": ""
+    },
+    {
+      "key": "brokerUrl",
+      "value": "http://localhost:8600",
+      "type": "string"
+    },
+    {
+      "key": "jwtSecret",
+      "value": "team-compose-development-secret-at-least-32-chars",
+      "type": "string"
+    },
+    {
+      "key": "serviceJwt",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "messageId",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
@@ -1470,25 +1490,53 @@
       }
     },
     {
-      "name": "34. Deliver ZoneUnlockedEvent (200)",
+      "name": "34. Publish ZoneUnlocked Through The Message Broker (202)",
       "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Mint the service token the message broker requires: HS256, issuer player-service, audience kahoots-with-the-undead, kind service.",
+              "// The broker records the token's subject (world-service) as the publisher of the event.",
+              "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+              "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+              "const now = Math.floor(Date.now() / 1000);",
+              "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+              "const payload = encode({ sub: 'world-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+              "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+              "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+            ]
+          }
+        },
         {
           "listen": "test",
           "script": {
             "type": "text/javascript",
             "exec": [
-              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
-              "pm.test(\"Event applied and the active session in that zone was notified\", () => {",
+              "pm.test(\"Status code is 202 Accepted\", () => pm.response.to.have.status(202));",
+              "pm.test(\"The broker queued the event for game-service\", () => {",
               "    const body = pm.response.json();",
-              "    pm.expect(body.eventName).to.eql(\"ZoneUnlockedEvent\");",
-              "    pm.expect(body.status).to.eql(\"applied\");",
-              "    pm.expect(body.notificationsCreated).to.eql(1);",
+              "    pm.expect(body.topic).to.eql(\"ZoneUnlocked\");",
+              "    pm.expect(body.publisher).to.eql(\"world-service\");",
+              "    pm.expect(body.subscribers).to.include(\"game-service\");",
+              "    pm.collectionVariables.set(\"messageId\", body.messageId);",
               "});"
             ]
           }
         }
       ],
       "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{serviceJwt}}",
+              "type": "string"
+            }
+          ]
+        },
         "method": "POST",
         "header": [
           {
@@ -1498,17 +1546,17 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"eventName\": \"ZoneUnlockedEvent\",\n  \"payload\": {\n    \"zoneId\": \"{{eventZoneId}}\",\n    \"roomsAdded\": [\"room_evt_1\", \"room_evt_2\"],\n    \"timestamp\": \"2026-10-05T12:00:00Z\"\n  }\n}"
+          "raw": "{\n  \"zoneId\": \"{{eventZoneId}}\",\n  \"roomsAdded\": [\"room_evt_1\", \"room_evt_2\"],\n  \"timestamp\": \"2026-10-05T12:00:00Z\"\n}"
         },
         "url": {
-          "raw": "{{baseUrl}}/api/sessions/events",
+          "raw": "{{brokerUrl}}/topics/ZoneUnlocked/publish",
           "host": [
-            "{{baseUrl}}"
+            "{{brokerUrl}}"
           ],
           "path": [
-            "api",
-            "sessions",
-            "events"
+            "topics",
+            "ZoneUnlocked",
+            "publish"
           ]
         }
       }
@@ -1516,6 +1564,16 @@
     {
       "name": "35. Pending Notifications Include zone_unlocked (200)",
       "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// The broker delivers the event from its topic queue in the background; give it a moment.",
+              "setTimeout(() => {}, 700);"
+            ]
+          }
+        },
         {
           "listen": "test",
           "script": {
@@ -1550,24 +1608,53 @@
       }
     },
     {
-      "name": "36. Deliver Same Event Again Is Idempotent (200)",
+      "name": "36. Publish The Same Event Again (202)",
       "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Mint the service token the message broker requires: HS256, issuer player-service, audience kahoots-with-the-undead, kind service.",
+              "// The broker records the token's subject (world-service) as the publisher of the event.",
+              "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+              "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+              "const now = Math.floor(Date.now() / 1000);",
+              "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+              "const payload = encode({ sub: 'world-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+              "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+              "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+            ]
+          }
+        },
         {
           "listen": "test",
           "script": {
             "type": "text/javascript",
             "exec": [
-              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
-              "pm.test(\"Replay is reported as already_processed and notifies nobody\", () => {",
+              "pm.test(\"Status code is 202 Accepted\", () => pm.response.to.have.status(202));",
+              "pm.test(\"The broker queued the event for game-service\", () => {",
               "    const body = pm.response.json();",
-              "    pm.expect(body.status).to.eql(\"already_processed\");",
-              "    pm.expect(body.notificationsCreated).to.eql(0);",
+              "    pm.expect(body.topic).to.eql(\"ZoneUnlocked\");",
+              "    pm.expect(body.publisher).to.eql(\"world-service\");",
+              "    pm.expect(body.subscribers).to.include(\"game-service\");",
+              "    pm.collectionVariables.set(\"messageId\", body.messageId);",
               "});"
             ]
           }
         }
       ],
       "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{serviceJwt}}",
+              "type": "string"
+            }
+          ]
+        },
         "method": "POST",
         "header": [
           {
@@ -1577,56 +1664,68 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"eventName\": \"ZoneUnlockedEvent\",\n  \"payload\": {\n    \"zoneId\": \"{{eventZoneId}}\",\n    \"roomsAdded\": [\"room_evt_1\", \"room_evt_2\"],\n    \"timestamp\": \"2026-10-05T12:00:00Z\"\n  }\n}"
+          "raw": "{\n  \"zoneId\": \"{{eventZoneId}}\",\n  \"roomsAdded\": [\"room_evt_1\", \"room_evt_2\"],\n  \"timestamp\": \"2026-10-05T12:00:00Z\"\n}"
         },
         "url": {
-          "raw": "{{baseUrl}}/api/sessions/events",
+          "raw": "{{brokerUrl}}/topics/ZoneUnlocked/publish",
           "host": [
-            "{{baseUrl}}"
+            "{{brokerUrl}}"
           ],
           "path": [
-            "api",
-            "sessions",
-            "events"
+            "topics",
+            "ZoneUnlocked",
+            "publish"
           ]
         }
       }
     },
     {
-      "name": "37. Deliver Unknown Event (400)",
+      "name": "37. The Repeated Event Notified The Session Only Once (200)",
       "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// The broker delivers the event from its topic queue in the background; give it a moment.",
+              "setTimeout(() => {}, 700);"
+            ]
+          }
+        },
         {
           "listen": "test",
           "script": {
             "type": "text/javascript",
             "exec": [
-              "pm.test(\"Status code is 400 Bad Request\", () => pm.response.to.have.status(400));",
-              "pm.test(\"Rejected with unknown_event\", () => pm.expect(pm.response.json().reason).to.eql(\"unknown_event\"));"
+              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Game Service applied the event once: the second delivery was already_processed\", () => {",
+              "    const zone = pm.collectionVariables.get(\"eventZoneId\");",
+              "    const hits = pm.response.json().filter(n => n.type === \"zone_unlocked\" && n.payload.zone === zone);",
+              "    pm.expect(hits).to.have.length(1);",
+              "});"
             ]
           }
         }
       ],
       "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"eventName\": \"SomethingNobodyPublishes\",\n  \"payload\": {}\n}"
-        },
+        "method": "GET",
+        "header": [],
         "url": {
-          "raw": "{{baseUrl}}/api/sessions/events",
+          "raw": "{{baseUrl}}/api/sessions/{{eventSessionId}}/notifications?undeliveredOnly=false",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "api",
             "sessions",
-            "events"
+            "{{eventSessionId}}",
+            "notifications"
+          ],
+          "query": [
+            {
+              "key": "undeliveredOnly",
+              "value": "false"
+            }
           ]
         }
       }

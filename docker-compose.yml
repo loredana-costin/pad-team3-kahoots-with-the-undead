@@ -173,6 +173,30 @@ services:
     networks:
       - kahoots-network
 
+  # The Gateway sends every request to the broker's service queues over HTTP (8600) and the services call
+  # each other through it over gRPC (8601); it looks the instances up in Service Discovery. 8600 is published
+  # for the demo: the log download (X-Admin-Key) and the Postman event requests, which publish on a topic.
+  message-broker:
+    image: mariaelenabotnari/message-broker:4.0.0
+    container_name: message-broker
+    restart: always
+    environment:
+      PORT: 8600
+      GRPC_PORT: 8601
+      SERVICE_DISCOVERY_URL: http://discovery-service:8500
+      JWT_SECRET: team-compose-development-secret-at-least-32-chars
+      # Key for GET /logs/download; the download is off while it is empty (set it in .env, never commit it).
+      LOGS_ADMIN_KEY: ${LOGS_ADMIN_KEY:-}
+    ports:
+      - "8600:8600"
+    expose:
+      - "8601"
+    depends_on:
+      discovery-service:
+        condition: service_healthy
+    networks:
+      - kahoots-network
+
   # No container_name: 3 replicas share exam-db, where exams and attempts live, so any replica can
   # serve any request. Each registers its own address with Service Discovery; the Gateway reads it
   # to spread requests over them, and each replica looks up World Service there for its ExamPassed events.
@@ -268,7 +292,10 @@ services:
       Services__Resource: http://gateway-service:8000
       Services__Base: http://gateway-service:8000
       Services__Exam: http://gateway-service:8000
-      # Signs Game Service's own calls through the Gateway; same secret as Player Service and the Gateway.
+      # Calls to the other services go to the message broker over gRPC (Broker.Relay); the Services__* URLs
+      # above are the fallback of an image without broker support.
+      Broker__Url: http://message-broker:8601
+      # Signs Game Service's own calls through the broker; same secret as Player Service, the Gateway and the broker.
       Jwt__Secret: "team-compose-development-secret-at-least-32-chars"
       Jwt__Issuer: player-service
       Jwt__Audience: kahoots-with-the-undead
@@ -285,6 +312,8 @@ services:
       game-db:
         condition: service_healthy
       discovery-service:
+        condition: service_healthy
+      message-broker:
         condition: service_healthy
     networks:
       - kahoots-network
@@ -420,8 +449,78 @@ services:
       # a service with no registered instance falls back to its *_SERVICE_URL above.
       DISCOVERY_URL: http://discovery-service:8500
       DISCOVERY_SERVICES: zombie-service,resource-service,base-service,crafting-service,player-service,game-service,exam-service,world-service
+      # Every request goes to the broker's queue of the target service; the broker balances and breaks circuits.
+      BROKER_URL: http://message-broker:8600
     ports:
       - "8000:8000"
+    depends_on:
+      message-broker:
+        condition: service_healthy
+    networks:
+      - kahoots-network
+
+  # --- Monitoring: Prometheus scrapes the metrics, Alloy ships the container logs to Loki, Grafana shows both ---
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    container_name: prometheus
+    restart: always
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=2d
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - kahoots-network
+
+  loki:
+    image: grafana/loki:3.4.2
+    container_name: loki
+    restart: always
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki_data:/loki
+    expose:
+      - "3100"
+    networks:
+      - kahoots-network
+
+  alloy:
+    image: grafana/alloy:v1.8.1
+    container_name: alloy
+    restart: always
+    command:
+      - run
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./monitoring/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      # Read-only access to the Docker socket, to find the containers and read their logs.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+    networks:
+      - kahoots-network
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    container_name: grafana
+    restart: always
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - loki
     networks:
       - kahoots-network
 
@@ -441,6 +540,12 @@ volumes:
   resource_postgres_data:
     driver: local
   zombie_mongo_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  loki_data:
+    driver: local
+  grafana_data:
     driver: local
 
 networks:
