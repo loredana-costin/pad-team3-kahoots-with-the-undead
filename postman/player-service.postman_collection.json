@@ -50,6 +50,31 @@
       "key": "attemptId",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "brokerUrl",
+      "value": "http://localhost:8600",
+      "type": "string"
+    },
+    {
+      "key": "jwtSecret",
+      "value": "team-compose-development-secret-at-least-32-chars",
+      "type": "string"
+    },
+    {
+      "key": "serviceJwt",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "messageId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "xpBefore",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
@@ -1064,14 +1089,166 @@
       }
     },
     {
-      "name": "26. Deliver ExamPassedEvent (200)",
+      "name": "26. Publish ExamPassed Through The Message Broker (202)",
       "event": [
         {
           "listen": "prerequest",
           "script": {
             "type": "text/javascript",
             "exec": [
-              "pm.collectionVariables.set(\"attemptId\", \"attempt_\" + Date.now());"
+              "pm.collectionVariables.set(\"attemptId\", \"attempt_\" + Date.now());",
+              "// Remember the player's XP, to check afterwards that the event awarded it exactly once.",
+              "pm.sendRequest({",
+              "    url: pm.collectionVariables.get('baseUrl') + '/api/players/' + pm.collectionVariables.get('playerId'),",
+              "    method: 'GET',",
+              "    header: { Authorization: 'Bearer ' + pm.collectionVariables.get('jwt') }",
+              "}, (err, res) => pm.collectionVariables.set('xpBefore', err ? 0 : res.json().xp));",
+              "// Mint the service token the message broker requires: HS256, issuer player-service, audience kahoots-with-the-undead, kind service.",
+              "// The broker records the token's subject (exam-service) as the publisher of the event.",
+              "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+              "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+              "const now = Math.floor(Date.now() / 1000);",
+              "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+              "const payload = encode({ sub: 'exam-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+              "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+              "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 202 Accepted\", () => pm.response.to.have.status(202));",
+              "pm.test(\"The broker queued the event for player-service\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.topic).to.eql(\"ExamPassed\");",
+              "    pm.expect(body.publisher).to.eql(\"exam-service\");",
+              "    pm.expect(body.subscribers).to.include(\"player-service\");",
+              "    pm.collectionVariables.set(\"messageId\", body.messageId);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{serviceJwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"{{playerId}}\",\n  \"courseCategory\": \"mathematics\",\n  \"examId\": \"exam_math_1\",\n  \"attemptId\": \"{{attemptId}}\",\n  \"grade\": 9,\n  \"xpAwarded\": 100,\n  \"timestamp\": \"2026-10-05T12:00:00Z\"\n}"
+        },
+        "url": {
+          "raw": "{{brokerUrl}}/topics/ExamPassed/publish",
+          "host": [
+            "{{brokerUrl}}"
+          ],
+          "path": [
+            "topics",
+            "ExamPassed",
+            "publish"
+          ]
+        }
+      }
+    },
+    {
+      "name": "27. Publish The Same Event Again (202)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Mint the service token the message broker requires: HS256, issuer player-service, audience kahoots-with-the-undead, kind service.",
+              "// The broker records the token's subject (exam-service) as the publisher of the event.",
+              "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+              "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+              "const now = Math.floor(Date.now() / 1000);",
+              "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+              "const payload = encode({ sub: 'exam-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+              "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+              "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 202 Accepted\", () => pm.response.to.have.status(202));",
+              "pm.test(\"The broker queued the event for player-service\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.topic).to.eql(\"ExamPassed\");",
+              "    pm.expect(body.publisher).to.eql(\"exam-service\");",
+              "    pm.expect(body.subscribers).to.include(\"player-service\");",
+              "    pm.collectionVariables.set(\"messageId\", body.messageId);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{serviceJwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"{{playerId}}\",\n  \"courseCategory\": \"mathematics\",\n  \"examId\": \"exam_math_1\",\n  \"attemptId\": \"{{attemptId}}\",\n  \"grade\": 9,\n  \"xpAwarded\": 100,\n  \"timestamp\": \"2026-10-05T12:00:00Z\"\n}"
+        },
+        "url": {
+          "raw": "{{brokerUrl}}/topics/ExamPassed/publish",
+          "host": [
+            "{{brokerUrl}}"
+          ],
+          "path": [
+            "topics",
+            "ExamPassed",
+            "publish"
+          ]
+        }
+      }
+    },
+    {
+      "name": "28. Profile Shows The XP Awarded Exactly Once (200)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// The broker delivers the event from its topic queue in the background; give it a moment.",
+              "setTimeout(() => {}, 700);"
             ]
           }
         },
@@ -1081,119 +1258,25 @@
             "type": "text/javascript",
             "exec": [
               "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
-              "pm.test(\"Event applied and XP awarded\", () => {",
-              "    const body = pm.response.json();",
-              "    pm.expect(body.eventName).to.eql(\"ExamPassedEvent\");",
-              "    pm.expect(body.status).to.eql(\"applied\");",
-              "    pm.expect(body.xp).to.be.a(\"number\").that.is.at.least(100);",
+              "pm.test(\"Player Service applied the event once: +100 XP, the second delivery was already_processed\", () => {",
+              "    pm.expect(pm.response.json().xp).to.eql(Number(pm.collectionVariables.get(\"xpBefore\")) + 100);",
               "});"
             ]
           }
         }
       ],
       "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"eventName\": \"ExamPassedEvent\",\n  \"payload\": {\n    \"playerId\": \"{{playerId}}\",\n    \"courseCategory\": \"mathematics\",\n    \"examId\": \"exam_math_1\",\n    \"attemptId\": \"{{attemptId}}\",\n    \"grade\": 9,\n    \"xpAwarded\": 100,\n    \"timestamp\": \"2026-10-05T12:00:00Z\"\n  }\n}"
-        },
+        "method": "GET",
+        "header": [],
         "url": {
-          "raw": "{{baseUrl}}/api/players/events",
+          "raw": "{{baseUrl}}/api/players/{{playerId}}",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "api",
             "players",
-            "events"
-          ]
-        }
-      }
-    },
-    {
-      "name": "27. Deliver Same Event Again Is Idempotent (200)",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test(\"Status code is 200 OK\", () => pm.response.to.have.status(200));",
-              "pm.test(\"Replay is reported as already_processed with no XP change\", () => {",
-              "    const body = pm.response.json();",
-              "    pm.expect(body.status).to.eql(\"already_processed\");",
-              "    pm.expect(body.xp).to.be.null;",
-              "});"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"eventName\": \"ExamPassedEvent\",\n  \"payload\": {\n    \"playerId\": \"{{playerId}}\",\n    \"courseCategory\": \"mathematics\",\n    \"examId\": \"exam_math_1\",\n    \"attemptId\": \"{{attemptId}}\",\n    \"grade\": 9,\n    \"xpAwarded\": 100,\n    \"timestamp\": \"2026-10-05T12:00:00Z\"\n  }\n}"
-        },
-        "url": {
-          "raw": "{{baseUrl}}/api/players/events",
-          "host": [
-            "{{baseUrl}}"
-          ],
-          "path": [
-            "api",
-            "players",
-            "events"
-          ]
-        }
-      }
-    },
-    {
-      "name": "28. Deliver Unknown Event (400)",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test(\"Status code is 400 Bad Request\", () => pm.response.to.have.status(400));",
-              "pm.test(\"Rejected with unknown_event\", () => pm.expect(pm.response.json().reason).to.eql(\"unknown_event\"));"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"eventName\": \"SomethingNobodyPublishes\",\n  \"payload\": {}\n}"
-        },
-        "url": {
-          "raw": "{{baseUrl}}/api/players/events",
-          "host": [
-            "{{baseUrl}}"
-          ],
-          "path": [
-            "api",
-            "players",
-            "events"
+            "{{playerId}}"
           ]
         }
       }

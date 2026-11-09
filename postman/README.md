@@ -35,6 +35,14 @@ Two World requests go straight to a World Service instance instead of the Gatewa
 temporarily or those two requests will fail to connect. `POST /events/exam-passed` answers
 `404` until the World team implements it, which the collection accepts.
 
+The Player and Game collections deliver their events through the message broker, since the
+Gateway no longer forwards the service-only `/api/players/events` and `/api/sessions/events`
+routes: they publish on a topic (`POST {{brokerUrl}}/topics/ExamPassed/publish`,
+`POST {{brokerUrl}}/topics/ZoneUnlocked/publish`) with a service token minted from `jwtSecret`,
+the broker delivers the event to the subscribed service, and the next request reads the effect
+back through the Gateway. `brokerUrl` defaults to `http://localhost:8600`, which the team compose
+publishes.
+
 The Zombie and Resource collections read seeded records (`prof_calc`, `infected_student`,
 `wood`, `node_1`), so they fail on an unseeded database. Seed first.
 
