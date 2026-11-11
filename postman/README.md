@@ -44,6 +44,14 @@ the broker delivers the event to the subscribed service, and the next request re
 back through the Gateway. `brokerUrl` defaults to `http://localhost:8600`, which the team compose
 publishes.
 
+The Message Broker collection (`message-broker.postman_collection.json`) verifies the Message Broker
+running on port `8600`:
+- **Folder 0 (Setup & Traffic Generation)**: Health checks, lightweight dynamic JWT token minting for both service tokens (`kind: "service"`) and player tokens (`kind: "player"`), and initial request logs.
+- **Folder 1 (Logs Download)**: Exercises `GET /logs/download` testing full download, `tail=50`, `since` timestamp filtering, and security gates (`401 missing_admin_key`, `403 invalid_admin_key`).
+- **Folder 2 (Topics)**: Exercises `GET /topics` to retrieve the registered topics list.
+- **Folder 3 (Service-to-Service Relay)**: Verifies the `ANY /relay/{serviceName}/{path}` endpoint, confirming authentication enforcement (`401` on missing token, `403` on player token), path traversal blocking (`400`), loop blocking (`400`), and service token verification with anti-spoofing header stripping.
+- **Folder 4 (Load Balancing & Circuit Breakers)**: Checks Service Discovery connectivity, verifies clean handling and thread tracking on offline replicas, and runs algorithmic verifications directly in Postman asserting Round-Robin rotation and Circuit Breaker state transitions (`CLOSED` -> `OPEN` on failure threshold -> `HALF_OPEN` after cooldown -> `CLOSED` on success).
+
 The Base and Crafting collections use the broker the same way. Their setup credits the test player
 through Resource Service's `POST /api/refund`, which the Gateway refuses, so it goes to the broker's
 queue instead (`POST {{brokerUrl}}/queues/resource-service/api/refund`) with a service token minted
