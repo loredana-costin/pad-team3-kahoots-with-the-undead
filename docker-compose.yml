@@ -186,7 +186,7 @@ services:
       SERVICE_DISCOVERY_URL: http://discovery-service:8500
       JWT_SECRET: team-compose-development-secret-at-least-32-chars
       # Key for GET /logs/download; the download is off while it is empty (set it in .env, never commit it).
-      LOGS_ADMIN_KEY: ${LOGS_ADMIN_KEY:-}
+      LOGS_ADMIN_KEY: ${LOGS_ADMIN_KEY:-team-logs-admin-secret-key-16chars}
     ports:
       - "8600:8600"
     expose:

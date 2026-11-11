@@ -12,6 +12,7 @@ Collections for testing each service. One file per service, Postman schema v2.1.
 | `resource-service.postman_collection.json` | Resource Service | `http://localhost:8000` |
 | `base-service.postman_collection.json` | Base Service | `http://localhost:8000` |
 | `crafting-service.postman_collection.json` | Crafting Service | `http://localhost:8000` |
+| `message-broker.postman_collection.json` | Message Broker | `http://localhost:8600` |
 
 ## Running in Postman
 

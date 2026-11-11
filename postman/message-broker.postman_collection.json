@@ -1,0 +1,356 @@
+{
+  "info": {
+    "_postman_id": "b3e0c4a1-7d2e-4890-a5cf-8e9f01234567",
+    "name": "Message Broker",
+    "description": "Collection for testing the Message Broker (Team 3), including health checks, log downloading with filters, service-to-service relaying, and topic listing.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "brokerUrl",
+      "value": "http://localhost:8600",
+      "type": "string"
+    },
+    {
+      "key": "logsAdminKey",
+      "value": "team-logs-admin-secret-key-16chars",
+      "type": "string"
+    },
+    {
+      "key": "jwtSecret",
+      "value": "team-compose-development-secret-at-least-32-chars",
+      "type": "string"
+    },
+    {
+      "key": "serviceToken",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "0. Setup & Traffic Generation",
+      "description": "Requests to generate active logs on the broker before testing the download endpoint.",
+      "item": [
+        {
+          "name": "Health Check (generates log line)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Broker is ok\", () => pm.expect(pm.response.json().status).to.eql('ok'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/health",
+              "host": ["{{brokerUrl}}"],
+              "path": ["health"]
+            }
+          }
+        },
+        {
+          "name": "Mint Service Token (Player Service)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Lightweight JWT minting for service token",
+                  "const header = { alg: 'HS256', typ: 'JWT' };",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const payload = {",
+                  "    sub: 'player-service',",
+                  "    kind: 'service',",
+                  "    iss: 'player-service',",
+                  "    aud: 'kahoots-with-the-undead',",
+                  "    iat: now,",
+                  "    exp: now + 3600",
+                  "};",
+                  "function b64url(obj) {",
+                  "    return CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)))",
+                  "        .replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "}",
+                  "const encodedHeader = b64url(header);",
+                  "const encodedPayload = b64url(payload);",
+                  "const signature = CryptoJS.HmacSHA256(encodedHeader + '.' + encodedPayload, pm.collectionVariables.get('jwtSecret'));",
+                  "const encodedSignature = CryptoJS.enc.Base64.stringify(signature)",
+                  "    .replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "pm.collectionVariables.set('serviceToken', encodedHeader + '.' + encodedPayload + '.' + encodedSignature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Service token generated\", () => pm.expect(pm.collectionVariables.get('serviceToken')).to.be.a('string'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/health",
+              "host": ["{{brokerUrl}}"],
+              "path": ["health"]
+            }
+          }
+        },
+        {
+          "name": "Status (creates worker thread log)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Has thread header\", () => pm.expect(pm.response.headers.get('X-Broker-Thread')).to.match(/^req-/));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/status",
+              "host": ["{{brokerUrl}}"],
+              "path": ["status"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "1. Logs Download (GET /logs/download)",
+      "description": "Endpoints verifying log downloading, parameters, and authentication gates.",
+      "item": [
+        {
+          "name": "Download All Logs",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Content-Type is text/plain\", () => pm.expect(pm.response.headers.get('Content-Type')).to.include('text/plain'));",
+                  "pm.test(\"Content-Disposition is attachment\", () => {",
+                  "    const disp = pm.response.headers.get('Content-Disposition');",
+                  "    pm.expect(disp).to.include('attachment');",
+                  "    pm.expect(disp).to.include('message-broker-logs-');",
+                  "});",
+                  "pm.test(\"X-Log-Lines header present\", () => pm.expect(pm.response.headers.get('X-Log-Lines')).to.exist);",
+                  "pm.test(\"X-Broker-Thread header present\", () => pm.expect(pm.response.headers.get('X-Broker-Thread')).to.match(/^req-/));",
+                  "pm.test(\"Body contains JSON log entries\", () => {",
+                  "    const text = pm.response.text();",
+                  "    pm.expect(text).to.include('\"service\": \"message-broker\"');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Admin-Key",
+                "value": "{{logsAdminKey}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/logs/download",
+              "host": ["{{brokerUrl}}"],
+              "path": ["logs", "download"]
+            }
+          }
+        },
+        {
+          "name": "Download Logs with tail=50",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Lines count is at most 50\", () => {",
+                  "    const count = parseInt(pm.response.headers.get('X-Log-Lines'), 10);",
+                  "    pm.expect(count).to.be.at.most(50);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Admin-Key",
+                "value": "{{logsAdminKey}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/logs/download?tail=50",
+              "host": ["{{brokerUrl}}"],
+              "path": ["logs", "download"],
+              "query": [
+                {
+                  "key": "tail",
+                  "value": "50"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Download Logs with since filter",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"X-Log-Lines header present\", () => pm.expect(pm.response.headers.get('X-Log-Lines')).to.exist);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Admin-Key",
+                "value": "{{logsAdminKey}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/logs/download?since=2026-11-01T00:00:00Z",
+              "host": ["{{brokerUrl}}"],
+              "path": ["logs", "download"],
+              "query": [
+                {
+                  "key": "since",
+                  "value": "2026-11-01T00:00:00Z"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Error: Missing X-Admin-Key (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"Error is missing_admin_key\", () => pm.expect(pm.response.json().error).to.eql('missing_admin_key'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/logs/download",
+              "host": ["{{brokerUrl}}"],
+              "path": ["logs", "download"]
+            }
+          }
+        },
+        {
+          "name": "Error: Invalid X-Admin-Key (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"Error is invalid_admin_key\", () => pm.expect(pm.response.json().error).to.eql('invalid_admin_key'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Admin-Key",
+                "value": "invalid-admin-key-0000",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/logs/download",
+              "host": ["{{brokerUrl}}"],
+              "path": ["logs", "download"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Topics (GET /topics)",
+      "description": "Endpoints testing the broker's topic registry.",
+      "item": [
+        {
+          "name": "List Topics",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Topics array exists\", () => pm.expect(pm.response.json().topics).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/topics",
+              "host": ["{{brokerUrl}}"],
+              "path": ["topics"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
