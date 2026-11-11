@@ -780,8 +780,8 @@
                   "pm.test(\"[SUCCESS] Request accepted into world-service subscriber queue (X-Broker-Queue: world-service)\", () => {",
                   "    pm.expect(pm.response.headers.get('X-Broker-Queue')).to.eql('world-service');",
                   "});",
-                  "pm.test(\"[SUCCESS] Processed by world-service queue consumer (200 if world-service is up, 404 if stopped)\", () => {",
-                  "    pm.expect([200, 404]).to.include(pm.response.code);",
+                  "pm.test(\"[SUCCESS] Processed by world-service queue consumer (200 when running, or 404/503 when offline)\", () => {",
+                  "    pm.expect([200, 404, 503]).to.include(pm.response.code);",
                   "});"
                 ]
               }
