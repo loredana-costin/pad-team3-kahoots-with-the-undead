@@ -30,6 +30,16 @@
       "key": "playerToken",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "firstThread",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "rrSeen",
+      "value": "[]",
+      "type": "string"
     }
   ],
   "item": [
@@ -57,8 +67,12 @@
             "header": [],
             "url": {
               "raw": "{{brokerUrl}}/health",
-              "host": ["{{brokerUrl}}"],
-              "path": ["health"]
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
             }
           }
         },
@@ -109,8 +123,12 @@
             "header": [],
             "url": {
               "raw": "{{brokerUrl}}/health",
-              "host": ["{{brokerUrl}}"],
-              "path": ["health"]
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
             }
           }
         },
@@ -161,8 +179,12 @@
             "header": [],
             "url": {
               "raw": "{{brokerUrl}}/health",
-              "host": ["{{brokerUrl}}"],
-              "path": ["health"]
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
             }
           }
         },
@@ -191,8 +213,12 @@
             ],
             "url": {
               "raw": "{{brokerUrl}}/status",
-              "host": ["{{brokerUrl}}"],
-              "path": ["status"]
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "status"
+              ]
             }
           }
         }
@@ -238,8 +264,13 @@
             ],
             "url": {
               "raw": "{{brokerUrl}}/logs/download",
-              "host": ["{{brokerUrl}}"],
-              "path": ["logs", "download"]
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "logs",
+                "download"
+              ]
             }
           }
         },
@@ -271,8 +302,13 @@
             ],
             "url": {
               "raw": "{{brokerUrl}}/logs/download?tail=50",
-              "host": ["{{brokerUrl}}"],
-              "path": ["logs", "download"],
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "logs",
+                "download"
+              ],
               "query": [
                 {
                   "key": "tail",
@@ -307,8 +343,13 @@
             ],
             "url": {
               "raw": "{{brokerUrl}}/logs/download?since=2026-11-01T00:00:00Z",
-              "host": ["{{brokerUrl}}"],
-              "path": ["logs", "download"],
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "logs",
+                "download"
+              ],
               "query": [
                 {
                   "key": "since",
@@ -337,8 +378,13 @@
             "header": [],
             "url": {
               "raw": "{{brokerUrl}}/logs/download",
-              "host": ["{{brokerUrl}}"],
-              "path": ["logs", "download"]
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "logs",
+                "download"
+              ]
             }
           }
         },
@@ -367,8 +413,13 @@
             ],
             "url": {
               "raw": "{{brokerUrl}}/logs/download",
-              "host": ["{{brokerUrl}}"],
-              "path": ["logs", "download"]
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "logs",
+                "download"
+              ]
             }
           }
         }
@@ -403,8 +454,12 @@
             ],
             "url": {
               "raw": "{{brokerUrl}}/topics",
-              "host": ["{{brokerUrl}}"],
-              "path": ["topics"]
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "topics"
+              ]
             }
           }
         }
@@ -433,8 +488,14 @@
             "header": [],
             "url": {
               "raw": "{{brokerUrl}}/relay/exam-service/health",
-              "host": ["{{brokerUrl}}"],
-              "path": ["relay", "exam-service", "health"]
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "relay",
+                "exam-service",
+                "health"
+              ]
             }
           }
         },
@@ -463,8 +524,14 @@
             ],
             "url": {
               "raw": "{{brokerUrl}}/relay/exam-service/health",
-              "host": ["{{brokerUrl}}"],
-              "path": ["relay", "exam-service", "health"]
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "relay",
+                "exam-service",
+                "health"
+              ]
             }
           }
         },
@@ -493,8 +560,14 @@
             ],
             "url": {
               "raw": "{{brokerUrl}}/relay/exam-service/..%2f..%2fetc%2fpasswd",
-              "host": ["{{brokerUrl}}"],
-              "path": ["relay", "exam-service", "..%2f..%2fetc%2fpasswd"]
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "relay",
+                "exam-service",
+                "..%2f..%2fetc%2fpasswd"
+              ]
             }
           }
         },
@@ -523,8 +596,14 @@
             ],
             "url": {
               "raw": "{{brokerUrl}}/relay/message-broker/health",
-              "host": ["{{brokerUrl}}"],
-              "path": ["relay", "message-broker", "health"]
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "relay",
+                "message-broker",
+                "health"
+              ]
             }
           }
         },
@@ -571,8 +650,52 @@
             ],
             "url": {
               "raw": "{{brokerUrl}}/relay/exam-service/health",
-              "host": ["{{brokerUrl}}"],
-              "path": ["relay", "exam-service", "health"]
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "relay",
+                "exam-service",
+                "health"
+              ]
+            }
+          }
+        },
+        {
+          "name": "3.6 Relay: real call to world-service  [needs world-service running]",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 200 OK - world-service reached THROUGH the broker\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"[SUCCESS] Response comes from service 'world-service'\", () => pm.expect(pm.response.json().service).to.eql('world-service'));",
+                  "pm.test(\"[SUCCESS] X-Broker-Instance shows the replica chosen by the load balancer\", () => pm.expect(pm.response.headers.get('X-Broker-Instance')).to.match(/^world-service /));",
+                  "pm.test(\"[SUCCESS] Handled on its own request thread\", () => pm.expect(pm.response.headers.get('X-Broker-Thread')).to.match(/^req-/));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/relay/world-service/health",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "relay",
+                "world-service",
+                "health"
+              ]
             }
           }
         }
@@ -610,8 +733,12 @@
             "header": [],
             "url": {
               "raw": "{{brokerUrl}}/health",
-              "host": ["{{brokerUrl}}"],
-              "path": ["health"]
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
             }
           }
         },
@@ -650,8 +777,15 @@
             ],
             "url": {
               "raw": "{{brokerUrl}}/relay/zombie-service/api/zombie-types",
-              "host": ["{{brokerUrl}}"],
-              "path": ["relay", "zombie-service", "api", "zombie-types"]
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "relay",
+                "zombie-service",
+                "api",
+                "zombie-types"
+              ]
             }
           }
         },
@@ -700,8 +834,12 @@
             "header": [],
             "url": {
               "raw": "{{brokerUrl}}/health",
-              "host": ["{{brokerUrl}}"],
-              "path": ["health"]
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
             }
           }
         },
@@ -788,8 +926,817 @@
             "header": [],
             "url": {
               "raw": "{{brokerUrl}}/health",
-              "host": ["{{brokerUrl}}"],
-              "path": ["health"]
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          }
+        },
+        {
+          "name": "4.5 Real load balancing: call 1 of 3 to world-service",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('rrSeen', '[]');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 200 OK\", () => pm.response.to.have.status(200));",
+                  "const inst = pm.response.headers.get('X-Broker-Instance');",
+                  "const seen = JSON.parse(pm.collectionVariables.get('rrSeen') || '[]'); seen.push(inst); pm.collectionVariables.set('rrSeen', JSON.stringify(seen));",
+                  "pm.test('[SUCCESS] Call 1 was served by ' + inst, () => pm.expect(inst).to.exist);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/relay/world-service/health",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "relay",
+                "world-service",
+                "health"
+              ]
+            }
+          }
+        },
+        {
+          "name": "4.6 Real load balancing: call 2 of 3 to world-service",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 200 OK\", () => pm.response.to.have.status(200));",
+                  "const inst = pm.response.headers.get('X-Broker-Instance');",
+                  "const seen = JSON.parse(pm.collectionVariables.get('rrSeen') || '[]'); seen.push(inst); pm.collectionVariables.set('rrSeen', JSON.stringify(seen));",
+                  "pm.test('[SUCCESS] Call 2 was served by ' + inst, () => pm.expect(inst).to.exist);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/relay/world-service/health",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "relay",
+                "world-service",
+                "health"
+              ]
+            }
+          }
+        },
+        {
+          "name": "4.7 Real load balancing: call 3 of 3 to world-service",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 200 OK\", () => pm.response.to.have.status(200));",
+                  "const inst = pm.response.headers.get('X-Broker-Instance');",
+                  "const seen = JSON.parse(pm.collectionVariables.get('rrSeen') || '[]'); seen.push(inst); pm.collectionVariables.set('rrSeen', JSON.stringify(seen));",
+                  "pm.test('[SUCCESS] Call 3 was served by ' + inst, () => pm.expect(inst).to.exist);",
+                  "pm.test(\"[SUCCESS] Load balancing: 3 consecutive calls were spread over 3 DIFFERENT replicas\", () => pm.expect(new Set(seen).size).to.eql(3));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/relay/world-service/health",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "relay",
+                "world-service",
+                "health"
+              ]
+            }
+          }
+        },
+        {
+          "name": "4.8 Circuit breaker state is exported per instance",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const m = pm.response.text();",
+                  "pm.test(\"[SUCCESS] world-service replicas are tracked: broker_circuit_breaker_open{service=\\\"world-service\\\"...} 0.0 (CLOSED = healthy)\", () => pm.expect(m).to.match(/broker_circuit_breaker_open\\{[^}]*service=\"world-service\"[^}]*\\} 0\\.0/));",
+                  "pm.test(\"[SUCCESS] No world-service breaker is OPEN\", () => pm.expect(m).to.not.match(/broker_circuit_breaker_open\\{[^}]*service=\"world-service\"[^}]*\\} 1\\.0/));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/metrics",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "metrics"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Task 3 - Subscriber Queues (Gateway -> Service)  [needs world-service running]",
+      "description": "POST/GET /queues/{service}/{path}: the request joins the queue of the target service; a consumer thread hands it to an instance. Start the target first: docker compose up -d world-service",
+      "item": [
+        {
+          "name": "5.1 Queue: request is served through the world-service queue",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 200 OK - world-service answered through the broker queue\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"[SUCCESS] X-Broker-Queue = 'world-service' (it really went through that service's queue)\", () => pm.expect(pm.response.headers.get('X-Broker-Queue')).to.eql('world-service'));",
+                  "pm.test(\"[SUCCESS] X-Queue-Wait-Ms present (time spent waiting in the queue is measured)\", () => pm.expect(pm.response.headers.get('X-Queue-Wait-Ms')).to.exist);",
+                  "pm.test(\"[SUCCESS] Handled by a queue consumer thread 'queue-world-service-N'\", () => pm.expect(pm.response.headers.get('X-Broker-Thread')).to.match(/^queue-world-service-/));",
+                  "pm.test(\"[SUCCESS] X-Broker-Instance shows which replica served it\", () => pm.expect(pm.response.headers.get('X-Broker-Instance')).to.include('world-service'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/world-service/health",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "world-service",
+                "health"
+              ]
+            }
+          }
+        },
+        {
+          "name": "5.2 Queue: /health shows the world-service queue",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] Broker /health reports queues.services as an object\", () => pm.expect(pm.response.json().queues.services).to.be.an('object'));",
+                  "pm.test(\"[SUCCESS] A queue named 'world-service' exists after the first queued request\", () => pm.expect(pm.response.json().queues.services).to.have.property('world-service'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/health",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          }
+        },
+        {
+          "name": "5.3 Queue: no token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[EXPECTED REJECTION] 401 - queue refuses callers without a token\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/world-service/health",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "world-service",
+                "health"
+              ]
+            }
+          }
+        },
+        {
+          "name": "5.4 Queue: unknown service",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[EXPECTED REJECTION] 404 - no instance of ghost-service is registered\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"[EXPECTED REJECTION] error = 'service_not_found'\", () => pm.expect(pm.response.json().error).to.eql('service_not_found'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/ghost-service/health",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "ghost-service",
+                "health"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Task 3/4 - Topic Queues & GET /topics",
+      "description": "Services fire events on a topic without knowing the subscribers; the broker looks the subscribers up in Service Discovery. 6.2 needs a Service Discovery that supports topics and a service subscribed to ExamPassed.",
+      "item": [
+        {
+          "name": "6.1 Topics: list available topics",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"[SUCCESS] Body is { topics: [...] }\", () => pm.expect(pm.response.json().topics).to.be.an('array'));",
+                  "pm.test(\"[SUCCESS] Served on its own request thread (req-xxxx)\", () => pm.expect(pm.response.headers.get('X-Broker-Thread')).to.match(/^req-/));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/topics",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "topics"
+              ]
+            }
+          }
+        },
+        {
+          "name": "6.2 Topics: publish ExamPassed (fire-and-forget event)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 202 Accepted - event queued by the broker\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"[SUCCESS] Response has a messageId\", () => pm.expect(pm.response.json().messageId).to.be.a('string'));",
+                  "pm.test(\"[SUCCESS] publisher = 'player-service' (taken from the token, not from the caller)\", () => pm.expect(pm.response.json().publisher).to.eql('player-service'));",
+                  "pm.test(\"[SUCCESS] subscribers is the list of services that registered interest in the topic\", () => pm.expect(pm.response.json().subscribers).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/topics/ExamPassed/publish",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "topics",
+                "ExamPassed",
+                "publish"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"playerId\":\"player-1\",\"examId\":\"exam-1\",\"score\":95}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "6.3 Topics: invalid topic name",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[EXPECTED REJECTION] 400 - topic must start with a letter\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"[EXPECTED REJECTION] error = 'invalid_topic'\", () => pm.expect(pm.response.json().error).to.eql('invalid_topic'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/topics/1bad/publish",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "topics",
+                "1bad",
+                "publish"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"a\":1}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "6.4 Topics: event body is not JSON",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[EXPECTED REJECTION] 400 - event body must be JSON\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"[EXPECTED REJECTION] error = 'invalid_payload'\", () => pm.expect(pm.response.json().error).to.eql('invalid_payload'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "text/plain",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/topics/ExamPassed/publish",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "topics",
+                "ExamPassed",
+                "publish"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "this is not json",
+              "options": {
+                "raw": {
+                  "language": "text"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "6.5 Topics: publish without token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[EXPECTED REJECTION] 401 - only authenticated services may publish\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/topics/ExamPassed/publish",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "topics",
+                "ExamPassed",
+                "publish"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"a\":1}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "6.6 Topics: /health reports topic queues",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] queues.topics is reported (one durable-in-memory queue per subscribed service)\", () => pm.expect(pm.response.json().queues.topics).to.be.an('object'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/health",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Task 4 - Thread-per-Request",
+      "item": [
+        {
+          "name": "7.1 Request A (remember its thread)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 200 OK\", () => pm.response.to.have.status(200));",
+                  "const t = pm.response.headers.get('X-Broker-Thread');",
+                  "pm.test(\"[SUCCESS] Request ran on its own thread named 'req-<id>'\", () => pm.expect(t).to.match(/^req-/));",
+                  "pm.collectionVariables.set('firstThread', t);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/status",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "status"
+              ]
+            }
+          }
+        },
+        {
+          "name": "7.2 Request B (must run on another thread)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 200 OK\", () => pm.response.to.have.status(200));",
+                  "const t = pm.response.headers.get('X-Broker-Thread');",
+                  "pm.test(\"[SUCCESS] Request ran on its own thread named 'req-<id>'\", () => pm.expect(t).to.match(/^req-/));",
+                  "pm.test(\"[SUCCESS] A different request got a DIFFERENT thread (thread-per-request)\", () => pm.expect(t).to.not.eql(pm.collectionVariables.get('firstThread')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/status",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "status"
+              ]
+            }
+          }
+        },
+        {
+          "name": "7.3 Thread pool statistics",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const th = pm.response.json().threads;",
+                  "pm.test(\"[SUCCESS] totalStarted > 0 (a thread was started for requests)\", () => pm.expect(th.totalStarted).to.be.above(0));",
+                  "pm.test(\"[SUCCESS] max = configured thread limit\", () => pm.expect(th.max).to.be.above(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/health",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Task 5 - gRPC for Service-to-Service",
+      "description": "Services call each other through the broker over gRPC (port 8601). Postman here only proves the gRPC server is up and advertised; the calls themselves are covered by message-broker/tests/test_grpc.py.",
+      "item": [
+        {
+          "name": "8.1 gRPC server is running on 8601",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] Broker advertises grpcPort = 8601\", () => pm.expect(pm.response.json().grpcPort).to.eql(8601));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/health",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          }
+        },
+        {
+          "name": "8.2 gRPC call counter exposed for monitoring",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] /metrics exposes broker_grpc_calls_total\", () => pm.expect(pm.response.text()).to.include('broker_grpc_calls_total'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/metrics",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "metrics"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Task 7 - Monitoring (Prometheus metrics & logs)",
+      "description": "GET /metrics is what Prometheus scrapes (Grafana reads Prometheus + Loki).",
+      "item": [
+        {
+          "name": "9.1 Prometheus /metrics endpoint",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const m = pm.response.text();",
+                  "pm.test(\"[SUCCESS] 200 OK without authentication (Prometheus can scrape it)\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"[SUCCESS] Prometheus text format\", () => pm.expect(pm.response.headers.get('Content-Type')).to.include('text/plain'));",
+                  "pm.test(\"[SUCCESS] broker_http_requests_total (traffic per route / service / status)\", () => pm.expect(m).to.include('broker_http_requests_total'));",
+                  "pm.test(\"[SUCCESS] broker_dispatch_total + broker_dispatch_duration_seconds (delivery outcome and latency per service)\", () => { pm.expect(m).to.include('broker_dispatch_total'); pm.expect(m).to.include('broker_dispatch_duration_seconds'); });",
+                  "pm.test(\"[SUCCESS] broker_circuit_breaker_open (breaker state per instance)\", () => pm.expect(m).to.include('broker_circuit_breaker_open'));",
+                  "pm.test(\"[SUCCESS] broker_reroutes_total (high-availability reroutes)\", () => pm.expect(m).to.include('broker_reroutes_total'));",
+                  "pm.test(\"[SUCCESS] broker_inflight_requests (load per instance, used by the load-aware balancer)\", () => pm.expect(m).to.include('broker_inflight_requests'));",
+                  "pm.test(\"[SUCCESS] broker_queue_pending + broker_request_threads gauges\", () => { pm.expect(m).to.include('broker_queue_pending'); pm.expect(m).to.include('broker_request_threads'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/metrics",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "metrics"
+              ]
+            }
+          }
+        },
+        {
+          "name": "9.2 Logs contain the relayed requests",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const t = pm.response.text();",
+                  "pm.test(\"[SUCCESS] 200 OK - log file downloaded\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"[SUCCESS] Logs record relayed calls ('Relayed request completed') - run 3.6 first\", () => pm.expect(t).to.include('Relayed request completed'));",
+                  "pm.test(\"[SUCCESS] Logs are structured JSON with a requestId for tracing\", () => pm.expect(t).to.include('requestId'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Admin-Key",
+                "value": "{{logsAdminKey}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/logs/download?tail=500",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "logs",
+                "download"
+              ],
+              "query": [
+                {
+                  "key": "tail",
+                  "value": "500"
+                }
+              ]
             }
           }
         }

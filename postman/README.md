@@ -52,6 +52,8 @@ running on port `8600`:
 - **Folder 3 (Service-to-Service Relay)**: Verifies the `ANY /relay/{serviceName}/{path}` endpoint, confirming authentication enforcement (`401` on missing token, `403` on player token), path traversal blocking (`400`), loop blocking (`400`), and service token verification with anti-spoofing header stripping.
 - **Folder 4 (Load Balancing & Circuit Breakers)**: Checks Service Discovery connectivity, verifies clean handling and thread tracking on offline replicas, and runs algorithmic verifications directly in Postman asserting Round-Robin rotation and Circuit Breaker state transitions (`CLOSED` -> `OPEN` on failure threshold -> `HALF_OPEN` after cooldown -> `CLOSED` on success).
 
+- **Folders 5-9** cover the later tasks: subscriber queues (`/queues/...`), topic queues (`POST /topics/{topic}/publish`, `GET /topics`), thread-per-request, gRPC (port advertised + metric), and monitoring (`GET /metrics`, logs). Every assertion is named `[SUCCESS] ...` or `[EXPECTED REJECTION] ...` so the Test Results tab reads as a story. Requests marked *needs world-service running* require `docker compose up -d world-service` (3 replicas, also proves real round-robin in 4.5-4.7). Request 6.2 (publish) needs a Service Discovery image that supports topic subscriptions (`/registry/topics/{topic}`); the pinned `service-discovery:3.0.0` does not, so it answers 503 until the image is updated.
+
 The Base and Crafting collections use the broker the same way. Their setup credits the test player
 through Resource Service's `POST /api/refund`, which the Gateway refuses, so it goes to the broker's
 queue instead (`POST {{brokerUrl}}/queues/resource-service/api/refund`) with a service token minted
