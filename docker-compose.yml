@@ -187,6 +187,10 @@ services:
       JWT_SECRET: team-compose-development-secret-at-least-32-chars
       # Key for GET /logs/download; the download is off while it is empty (set it in .env, never commit it).
       LOGS_ADMIN_KEY: ${LOGS_ADMIN_KEY:-team-logs-admin-secret-key-16chars}
+      # Durable queues: undelivered events and dead letters survive restarts in this volume.
+      MESSAGE_DB_PATH: /app/data/messages.db
+    volumes:
+      - broker_data:/app/data
     ports:
       - "8600:8600"
     expose:
@@ -539,6 +543,8 @@ services:
       - kahoots-network
 
 volumes:
+  broker_data:
+    driver: local
   base_postgres_data:
     driver: local
   crafting_postgres_data:

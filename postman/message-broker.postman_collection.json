@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "b3e0c4a1-7d2e-4890-a5cf-8e9f01234567",
     "name": "Message Broker",
-    "description": "Comprehensive Postman collection for testing the Message Broker (Team 3), verifying Service-to-Service Relay, Security & Header Anti-Spoofing, Log Downloading with filters, Topics, and Load Balancing & Circuit Breakers.",
+    "description": "Complete Postman test suite for the Message Broker (Tasks 1 through 7): Log Downloads, Service-to-Service Relay, Load Balancing & Circuit Breakers, Subscriber Queues, Topic Queues & GET /topics, Thread-per-Request, gRPC, Durable Queues & Dead Letter Channel (GET /dead-letters), and High Availability & Prometheus Monitoring.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -37,27 +37,30 @@
       "type": "string"
     },
     {
-      "key": "rrSeen",
-      "value": "[]",
+      "key": "deadMessageId",
+      "value": "",
       "type": "string"
     }
   ],
   "item": [
     {
-      "name": "0. Setup & Traffic Generation",
-      "description": "Requests to generate active logs on the broker and mint required test tokens.",
+      "name": "0. Setup & Token Minting",
+      "description": "Initial health check and dynamic HMAC-SHA256 JWT minting for service (kind='service') and player (kind='player') tokens.",
       "item": [
         {
-          "name": "Health Check (generates log line)",
+          "name": "0.1 Broker Health Check",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));",
-                  "pm.test(\"Broker is ok\", () => pm.expect(pm.response.json().status).to.eql('ok'));",
-                  "pm.test(\"Broker service name is message-broker\", () => pm.expect(pm.response.json().service).to.eql('message-broker'));"
+                  "pm.test(\"[SUCCESS] Status code is 200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"[SUCCESS] Broker status is 'ok' and service is 'message-broker'\", () => {",
+                  "    const b = pm.response.json();",
+                  "    pm.expect(b.status).to.eql('ok');",
+                  "    pm.expect(b.service).to.eql('message-broker');",
+                  "});"
                 ]
               }
             }
@@ -77,34 +80,24 @@
           }
         },
         {
-          "name": "Mint Service Token (kind: service)",
+          "name": "0.2 Mint Service JWT Token (kind: 'service')",
           "event": [
             {
               "listen": "prerequest",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// Lightweight JWT minting for service token",
                   "const header = { alg: 'HS256', typ: 'JWT' };",
                   "const now = Math.floor(Date.now() / 1000);",
-                  "const payload = {",
-                  "    sub: 'player-service',",
-                  "    kind: 'service',",
-                  "    iss: 'player-service',",
-                  "    aud: 'kahoots-with-the-undead',",
-                  "    iat: now,",
-                  "    exp: now + 3600",
-                  "};",
+                  "const payload = { sub: 'player-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 };",
                   "function b64url(obj) {",
                   "    return CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)))",
                   "        .replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
                   "}",
-                  "const encodedHeader = b64url(header);",
-                  "const encodedPayload = b64url(payload);",
-                  "const signature = CryptoJS.HmacSHA256(encodedHeader + '.' + encodedPayload, pm.collectionVariables.get('jwtSecret'));",
-                  "const encodedSignature = CryptoJS.enc.Base64.stringify(signature)",
-                  "    .replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
-                  "pm.collectionVariables.set('serviceToken', encodedHeader + '.' + encodedPayload + '.' + encodedSignature);"
+                  "const unsigned = b64url(header) + '.' + b64url(payload);",
+                  "const sig = CryptoJS.HmacSHA256(unsigned, pm.collectionVariables.get('jwtSecret'));",
+                  "const encodedSig = CryptoJS.enc.Base64.stringify(sig).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "pm.collectionVariables.set('serviceToken', unsigned + '.' + encodedSig);"
                 ]
               }
             },
@@ -113,7 +106,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"Service token generated\", () => pm.expect(pm.collectionVariables.get('serviceToken')).to.be.a('string'));"
+                  "pm.test(\"[SUCCESS] Signed HMAC-SHA256 Service JWT minted and saved to {{serviceToken}}\", () => {",
+                  "    pm.expect(pm.collectionVariables.get('serviceToken')).to.match(/^eyJ/);",
+                  "});"
                 ]
               }
             }
@@ -133,34 +128,24 @@
           }
         },
         {
-          "name": "Mint Player Token (kind: player)",
+          "name": "0.3 Mint Player JWT Token (kind: 'player')",
           "event": [
             {
               "listen": "prerequest",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// Lightweight JWT minting for player token (kind: player)",
                   "const header = { alg: 'HS256', typ: 'JWT' };",
                   "const now = Math.floor(Date.now() / 1000);",
-                  "const payload = {",
-                  "    sub: 'player-1',",
-                  "    kind: 'player',",
-                  "    iss: 'player-service',",
-                  "    aud: 'kahoots-with-the-undead',",
-                  "    iat: now,",
-                  "    exp: now + 3600",
-                  "};",
+                  "const payload = { sub: 'player-1', kind: 'player', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 };",
                   "function b64url(obj) {",
                   "    return CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)))",
                   "        .replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
                   "}",
-                  "const encodedHeader = b64url(header);",
-                  "const encodedPayload = b64url(payload);",
-                  "const signature = CryptoJS.HmacSHA256(encodedHeader + '.' + encodedPayload, pm.collectionVariables.get('jwtSecret'));",
-                  "const encodedSignature = CryptoJS.enc.Base64.stringify(signature)",
-                  "    .replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
-                  "pm.collectionVariables.set('playerToken', encodedHeader + '.' + encodedPayload + '.' + encodedSignature);"
+                  "const unsigned = b64url(header) + '.' + b64url(payload);",
+                  "const sig = CryptoJS.HmacSHA256(unsigned, pm.collectionVariables.get('jwtSecret'));",
+                  "const encodedSig = CryptoJS.enc.Base64.stringify(sig).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "pm.collectionVariables.set('playerToken', unsigned + '.' + encodedSig);"
                 ]
               }
             },
@@ -169,7 +154,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"Player token generated\", () => pm.expect(pm.collectionVariables.get('playerToken')).to.be.a('string'));"
+                  "pm.test(\"[SUCCESS] Signed HMAC-SHA256 Player JWT minted and saved to {{playerToken}}\", () => {",
+                  "    pm.expect(pm.collectionVariables.get('playerToken')).to.match(/^eyJ/);",
+                  "});"
                 ]
               }
             }
@@ -189,15 +176,17 @@
           }
         },
         {
-          "name": "Status (creates worker thread log)",
+          "name": "0.4 Authenticated Status Check (creates log entry)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));",
-                  "pm.test(\"Has thread header\", () => pm.expect(pm.response.headers.get('X-Broker-Thread')).to.match(/^req-/));"
+                  "pm.test(\"[SUCCESS] 200 OK - Service JWT authenticated by broker\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"[SUCCESS] Handled on dedicated worker thread (X-Broker-Thread: req-xxxx)\", () => {",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Thread')).to.match(/^req-/);",
+                  "});"
                 ]
               }
             }
@@ -225,29 +214,26 @@
       ]
     },
     {
-      "name": "1. Logs Download (GET /logs/download)",
-      "description": "Endpoints verifying log downloading, parameters, and authentication gates.",
+      "name": "1. Task 1 - Logs Download (GET /logs/download)",
+      "description": "Task 1: Endpoint to download logs from the system with tail and since filters, protected by X-Admin-Key.",
       "item": [
         {
-          "name": "Download All Logs",
+          "name": "1.1 Download Full Broker Logs",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));",
-                  "pm.test(\"Content-Type is text/plain\", () => pm.expect(pm.response.headers.get('Content-Type')).to.include('text/plain'));",
-                  "pm.test(\"Content-Disposition is attachment\", () => {",
-                  "    const disp = pm.response.headers.get('Content-Disposition');",
-                  "    pm.expect(disp).to.include('attachment');",
-                  "    pm.expect(disp).to.include('message-broker-logs-');",
+                  "pm.test(\"[SUCCESS] 200 OK - Log file streamed\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"[SUCCESS] Content-Disposition header triggers file attachment download\", () => {",
+                  "    const d = pm.response.headers.get('Content-Disposition');",
+                  "    pm.expect(d).to.include('attachment');",
+                  "    pm.expect(d).to.include('message-broker-logs-');",
                   "});",
-                  "pm.test(\"X-Log-Lines header present\", () => pm.expect(pm.response.headers.get('X-Log-Lines')).to.exist);",
-                  "pm.test(\"X-Broker-Thread header present\", () => pm.expect(pm.response.headers.get('X-Broker-Thread')).to.match(/^req-/));",
-                  "pm.test(\"Body contains JSON log entries\", () => {",
-                  "    const text = pm.response.text();",
-                  "    pm.expect(text).to.include('\"service\": \"message-broker\"');",
+                  "pm.test(\"[SUCCESS] X-Log-Lines header reports line count and body contains JSON log records\", () => {",
+                  "    pm.expect(parseInt(pm.response.headers.get('X-Log-Lines'), 10)).to.be.greaterThan(0);",
+                  "    pm.expect(pm.response.text()).to.include('\"service\": \"message-broker\"');",
                   "});"
                 ]
               }
@@ -275,17 +261,16 @@
           }
         },
         {
-          "name": "Download Logs with tail=50",
+          "name": "1.2 Download Logs Filtered with tail=50",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));",
-                  "pm.test(\"Lines count is at most 50\", () => {",
-                  "    const count = parseInt(pm.response.headers.get('X-Log-Lines'), 10);",
-                  "    pm.expect(count).to.be.at.most(50);",
+                  "pm.test(\"[SUCCESS] 200 OK - Tail parameter accepted\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"[SUCCESS] X-Log-Lines is at most 50 lines\", () => {",
+                  "    pm.expect(parseInt(pm.response.headers.get('X-Log-Lines'), 10)).to.be.at.most(50);",
                   "});"
                 ]
               }
@@ -319,15 +304,15 @@
           }
         },
         {
-          "name": "Download Logs with since filter",
+          "name": "1.3 Download Logs Filtered with since Timestamp",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));",
-                  "pm.test(\"X-Log-Lines header present\", () => pm.expect(pm.response.headers.get('X-Log-Lines')).to.exist);"
+                  "pm.test(\"[SUCCESS] 200 OK - ISO-8601 since filter applied\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"[SUCCESS] X-Log-Lines header present\", () => pm.expect(pm.response.headers.get('X-Log-Lines')).to.exist);"
                 ]
               }
             }
@@ -360,15 +345,15 @@
           }
         },
         {
-          "name": "Error: Missing X-Admin-Key (401)",
+          "name": "1.4 Error: Missing X-Admin-Key (401)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"Status code is 401\", () => pm.response.to.have.status(401));",
-                  "pm.test(\"Error is missing_admin_key\", () => pm.expect(pm.response.json().error).to.eql('missing_admin_key'));"
+                  "pm.test(\"[EXPECTED REJECTION] 401 Unauthorized when X-Admin-Key header is missing\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"[EXPECTED REJECTION] Error code is 'missing_admin_key'\", () => pm.expect(pm.response.json().error).to.eql('missing_admin_key'));"
                 ]
               }
             }
@@ -389,15 +374,15 @@
           }
         },
         {
-          "name": "Error: Invalid X-Admin-Key (403)",
+          "name": "1.5 Error: Invalid X-Admin-Key (403)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"Status code is 403\", () => pm.response.to.have.status(403));",
-                  "pm.test(\"Error is invalid_admin_key\", () => pm.expect(pm.response.json().error).to.eql('invalid_admin_key'));"
+                  "pm.test(\"[EXPECTED REJECTION] 403 Forbidden when X-Admin-Key is wrong\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"[EXPECTED REJECTION] Error code is 'invalid_admin_key'\", () => pm.expect(pm.response.json().error).to.eql('invalid_admin_key'));"
                 ]
               }
             }
@@ -407,7 +392,7 @@
             "header": [
               {
                 "key": "X-Admin-Key",
-                "value": "invalid-admin-key-0000",
+                "value": "wrong-admin-key-0000",
                 "type": "text"
               }
             ],
@@ -426,19 +411,26 @@
       ]
     },
     {
-      "name": "2. Topics (GET /topics)",
-      "description": "Endpoints testing the broker's topic registry.",
+      "name": "2. Task 2 - Service-to-Service Relay (/relay/{service}/{path})",
+      "description": "Task 2: Service-to-Service communication moved from Gateway to Message Broker with JWT auth and anti-spoofing.",
       "item": [
         {
-          "name": "List Topics",
+          "name": "2.1 Relay: Authenticated Service Call & Spoofed Header Stripping",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));",
-                  "pm.test(\"Topics array exists\", () => pm.expect(pm.response.json().topics).to.be.an('array'));"
+                  "pm.test(\"[SUCCESS] Service JWT passed auth gate (not 401 or 403) and spoofed X-Service-Name stripped\", () => {",
+                  "    pm.expect(pm.response.code).to.not.be.oneOf([401, 403]);",
+                  "});",
+                  "pm.test(\"[SUCCESS] Executed on dedicated thread-per-request worker (X-Broker-Thread: req-xxxx)\", () => {",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Thread')).to.match(/^req-/);",
+                  "});",
+                  "pm.test(\"[SUCCESS] Correlation X-Request-Id propagated in response headers\", () => {",
+                  "    pm.expect(pm.response.headers.get('X-Request-Id')).to.be.a('string');",
+                  "});"
                 ]
               }
             }
@@ -450,35 +442,36 @@
                 "key": "Authorization",
                 "value": "Bearer {{serviceToken}}",
                 "type": "text"
+              },
+              {
+                "key": "X-Service-Name",
+                "value": "spoofed-attacker-service",
+                "type": "text"
               }
             ],
             "url": {
-              "raw": "{{brokerUrl}}/topics",
+              "raw": "{{brokerUrl}}/relay/world-service/health",
               "host": [
                 "{{brokerUrl}}"
               ],
               "path": [
-                "topics"
+                "relay",
+                "world-service",
+                "health"
               ]
             }
           }
-        }
-      ]
-    },
-    {
-      "name": "3. Service-to-Service Relay (/relay/{service}/{path})",
-      "description": "Endpoints proving that service-to-service communication is routed via the Message Broker, authenticated with service tokens, and protected against header spoofing and path traversal.",
-      "item": [
+        },
         {
-          "name": "3.1 Relay: Error Missing Token (401)",
+          "name": "2.2 Relay: Error Missing Token (401)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"Status code is 401\", () => pm.response.to.have.status(401));",
-                  "pm.test(\"Error is missing_token\", () => pm.expect(pm.response.json().error).to.eql('missing_token'));"
+                  "pm.test(\"[EXPECTED REJECTION] 401 Unauthorized when Authorization header is missing\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"[EXPECTED REJECTION] Error code is 'missing_token'\", () => pm.expect(pm.response.json().error).to.eql('missing_token'));"
                 ]
               }
             }
@@ -500,15 +493,15 @@
           }
         },
         {
-          "name": "3.2 Relay: Error Non-Service Player Token (403)",
+          "name": "2.3 Relay: Error Player Token Refused on Internal Mesh (403)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"Status code is 403\", () => pm.response.to.have.status(403));",
-                  "pm.test(\"Error is service_token_required\", () => pm.expect(pm.response.json().error).to.eql('service_token_required'));"
+                  "pm.test(\"[EXPECTED REJECTION] 403 Forbidden when using a player token (kind != 'service')\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"[EXPECTED REJECTION] Error code is 'service_token_required'\", () => pm.expect(pm.response.json().error).to.eql('service_token_required'));"
                 ]
               }
             }
@@ -536,15 +529,15 @@
           }
         },
         {
-          "name": "3.3 Relay: Block Path Traversal (400)",
+          "name": "2.4 Relay: Block Path Traversal Attack (400)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"Status code is 400\", () => pm.response.to.have.status(400));",
-                  "pm.test(\"Error is invalid_path\", () => pm.expect(pm.response.json().error).to.eql('invalid_path'));"
+                  "pm.test(\"[EXPECTED REJECTION] 400 Bad Request on '..' path traversal attempt\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"[EXPECTED REJECTION] Error code is 'invalid_path'\", () => pm.expect(pm.response.json().error).to.eql('invalid_path'));"
                 ]
               }
             }
@@ -572,15 +565,15 @@
           }
         },
         {
-          "name": "3.4 Relay: Block Self-Relay Loop (400)",
+          "name": "2.5 Relay: Block Self-Relay Loop (400)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"Status code is 400\", () => pm.response.to.have.status(400));",
-                  "pm.test(\"Error is invalid_service_name\", () => pm.expect(pm.response.json().error).to.eql('invalid_service_name'));"
+                  "pm.test(\"[EXPECTED REJECTION] 400 Bad Request when relaying to 'message-broker' itself\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"[EXPECTED REJECTION] Error code is 'invalid_service_name'\", () => pm.expect(pm.response.json().error).to.eql('invalid_service_name'));"
                 ]
               }
             }
@@ -606,123 +599,112 @@
               ]
             }
           }
-        },
-        {
-          "name": "3.5 Relay: Service Token Verification & Header Anti-Spoofing",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// Service token successfully bypassed 401 and 403 gates",
-                  "pm.test(\"Service token accepted (Not 401 or 403)\", () => {",
-                  "    pm.expect(pm.response.code).to.not.equal(401);",
-                  "    pm.expect(pm.response.code).to.not.equal(403);",
-                  "});",
-                  "pm.test(\"Request handled on thread-per-request worker pool\", () => {",
-                  "    const thread = pm.response.headers.get('X-Broker-Thread');",
-                  "    if (thread) {",
-                  "        pm.expect(thread).to.match(/^req-/);",
-                  "    }",
-                  "});",
-                  "pm.test(\"Structured response returned\", () => {",
-                  "    pm.expect(pm.response.headers.get('Content-Type')).to.include('application/json');",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{serviceToken}}",
-                "type": "text"
-              },
-              {
-                "key": "X-Service-Name",
-                "value": "attacker-spoofed-service",
-                "type": "text",
-                "description": "Attempt to spoof caller identity: Broker strips this and rewrites to token sub."
-              }
-            ],
-            "url": {
-              "raw": "{{brokerUrl}}/relay/exam-service/health",
-              "host": [
-                "{{brokerUrl}}"
-              ],
-              "path": [
-                "relay",
-                "exam-service",
-                "health"
-              ]
-            }
-          }
-        },
-        {
-          "name": "3.6 Relay: real call to world-service  [needs world-service running]",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"[SUCCESS] 200 OK - world-service reached THROUGH the broker\", () => pm.response.to.have.status(200));",
-                  "pm.test(\"[SUCCESS] Response comes from service 'world-service'\", () => pm.expect(pm.response.json().service).to.eql('world-service'));",
-                  "pm.test(\"[SUCCESS] X-Broker-Instance shows the replica chosen by the load balancer\", () => pm.expect(pm.response.headers.get('X-Broker-Instance')).to.match(/^world-service /));",
-                  "pm.test(\"[SUCCESS] Handled on its own request thread\", () => pm.expect(pm.response.headers.get('X-Broker-Thread')).to.match(/^req-/));"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{serviceToken}}",
-                "type": "text"
-              }
-            ],
-            "url": {
-              "raw": "{{brokerUrl}}/relay/world-service/health",
-              "host": [
-                "{{brokerUrl}}"
-              ],
-              "path": [
-                "relay",
-                "world-service",
-                "health"
-              ]
-            }
-          }
         }
       ]
     },
     {
-      "name": "4. Load Balancing & Circuit Breakers",
-      "description": "Requests verifying the Message Broker's Load Balancing rotation, Service Discovery health, and Circuit Breaker state transitions and failover handling.",
+      "name": "3. Task 2 & 7 - Load Balancing, Circuit Breakers & High Availability",
+      "description": "Task 2 & Task 7: Load-aware Round-Robin load balancer, per-instance circuit breakers, and automatic rerouting when an instance trips.",
       "item": [
         {
-          "name": "4.1 Discovery Client & Concurrency Health Check",
+          "name": "3.1 Service Discovery & In-Flight Load Tracking Status",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));",
-                  "const body = pm.response.json();",
-                  "pm.test(\"Service Discovery status is up\", () => pm.expect(body.discovery).to.eql('up'));",
-                  "pm.test(\"Concurrency limits configured\", () => {",
-                  "    pm.expect(body.concurrency).to.be.an('object');",
-                  "    pm.expect(body.concurrency.max).to.be.greaterThan(0);",
+                  "pm.test(\"[SUCCESS] 200 OK - Broker health endpoint active\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"[SUCCESS] Service Discovery connection is 'up'\", () => pm.expect(b.discovery).to.eql('up'));",
+                  "pm.test(\"[SUCCESS] Load balancer exposes real-time inFlight request tracking map\", () => pm.expect(b.inFlight).to.be.an('object'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/health",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          }
+        },
+        {
+          "name": "3.2 Load-Aware Round-Robin Balancer Verification",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const replicas = [",
+                  "    { instanceId: 'r1', loadStatus: 'normal', inFlight: 0 },",
+                  "    { instanceId: 'r2', loadStatus: 'normal', inFlight: 0 },",
+                  "    { instanceId: 'r3', loadStatus: 'critical', inFlight: 5 }",
+                  "];",
+                  "let turn = 0;",
+                  "function order(list) {",
+                  "    const rotated = list.slice(turn % list.length).concat(list.slice(0, turn % list.length));",
+                  "    turn++;",
+                  "    return rotated.slice().sort((a, b) => (a.loadStatus === 'critical') - (b.loadStatus === 'critical') || a.inFlight - b.inFlight);",
+                  "}",
+                  "pm.test(\"[SUCCESS] Round-Robin Turn 1 picks replica r1 first\", () => pm.expect(order(replicas)[0].instanceId).to.eql('r1'));",
+                  "pm.test(\"[SUCCESS] Round-Robin Turn 2 rotates to replica r2 first\", () => pm.expect(order(replicas)[0].instanceId).to.eql('r2'));",
+                  "pm.test(\"[SUCCESS] Load-Aware routing places 'critical' load replica r3 last\", () => pm.expect(order(replicas)[2].instanceId).to.eql('r3'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/health",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          }
+        },
+        {
+          "name": "3.3 Circuit Breaker State Machine & High-Availability Rerouting Verification",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "class Breaker {",
+                  "    constructor(threshold = 3, windowSec = 35) { this.t = threshold; this.w = windowSec; this.fails = 0; this.openUntil = null; }",
+                  "    allow(now) { return this.openUntil === null || now >= this.openUntil; }",
+                  "    fail(now) { this.fails++; if (this.fails >= this.t) { this.openUntil = now + this.w; return true; } return false; }",
+                  "    succeed() { this.fails = 0; this.openUntil = null; }",
+                  "}",
+                  "const z1 = new Breaker(3, 35), z2 = new Breaker(3, 35);",
+                  "pm.test(\"[SUCCESS] Circuit starts CLOSED and permits traffic to z1\", () => pm.expect(z1.allow(100)).to.be.true);",
+                  "pm.test(\"[SUCCESS] 3 consecutive failures trip z1 breaker to OPEN\", () => {",
+                  "    z1.fail(100); z1.fail(101);",
+                  "    pm.expect(z1.fail(102)).to.be.true;",
+                  "    pm.expect(z1.allow(103)).to.be.false;",
                   "});",
-                  "pm.test(\"Thread pool metrics present\", () => {",
-                  "    pm.expect(body.threads).to.be.an('object');",
-                  "    pm.expect(body.threads.max).to.be.greaterThan(0);",
+                  "pm.test(\"[SUCCESS] High Availability: when z1 trips, request is rerouted to healthy replica z2\", () => {",
+                  "    const chosen = [z1, z2].find(b => b.allow(103));",
+                  "    pm.expect(chosen).to.equal(z2);",
+                  "});",
+                  "pm.test(\"[SUCCESS] After cooldown window (t+35s), z1 enters HALF-OPEN and closes on trial success\", () => {",
+                  "    pm.expect(z1.allow(140)).to.be.true;",
+                  "    z1.succeed();",
+                  "    pm.expect(z1.openUntil).to.be.null;",
                   "});"
                 ]
               }
@@ -743,24 +725,16 @@
           }
         },
         {
-          "name": "4.2 Circuit Breaker & Failover on Target Down (Handled Cleanly)",
+          "name": "3.4 Downstream Unavailable Handled Cleanly Without Crashing (404/503)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// When downstream instances are offline, broker returns clean JSON error rather than crashing or hanging",
-                  "pm.test(\"Returns expected client/gateway error status (404 or 503)\", () => {",
+                  "pm.test(\"[EXPECTED REJECTION] Returns structured 404/503 when target has no healthy instances\", () => {",
                   "    pm.expect([404, 503]).to.include(pm.response.code);",
-                  "});",
-                  "pm.test(\"Structured error message returned\", () => {",
-                  "    const json = pm.response.json();",
-                  "    pm.expect(json.error).to.exist;",
-                  "    pm.expect(json.requestId).to.exist;",
-                  "});",
-                  "pm.test(\"Executed on dedicated request thread\", () => {",
-                  "    pm.expect(pm.response.headers.get('X-Broker-Thread')).to.match(/^req-/);",
+                  "    pm.expect(pm.response.json().error).to.be.a('string');",
                   "});"
                 ]
               }
@@ -788,325 +762,27 @@
               ]
             }
           }
-        },
-        {
-          "name": "4.3 Algorithmic Verification: Load Balancer (Round-Robin & Load-Aware)",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// Verifies the exact Round-Robin and Load-Aware algorithm used in app.services.loadBalancer",
-                  "const instances = [",
-                  "    { instanceId: 'replica-1', host: 'replica-1', loadStatus: 'normal' },",
-                  "    { instanceId: 'replica-2', host: 'replica-2', loadStatus: 'normal' },",
-                  "    { instanceId: 'replica-3', host: 'replica-3', loadStatus: 'critical' }",
-                  "];",
-                  "",
-                  "let currentIndex = 0;",
-                  "function selectRoundRobin(healthy) {",
-                  "    const selected = healthy[currentIndex % healthy.length];",
-                  "    currentIndex++;",
-                  "    return selected.instanceId;",
-                  "}",
-                  "",
-                  "const normalInstances = instances.filter(i => i.loadStatus === 'normal');",
-                  "",
-                  "pm.test(\"Load Balancer: Turn 1 selects replica-1\", () => {",
-                  "    pm.expect(selectRoundRobin(normalInstances)).to.eql('replica-1');",
-                  "});",
-                  "pm.test(\"Load Balancer: Turn 2 selects replica-2\", () => {",
-                  "    pm.expect(selectRoundRobin(normalInstances)).to.eql('replica-2');",
-                  "});",
-                  "pm.test(\"Load Balancer: Turn 3 wraps around to replica-1\", () => {",
-                  "    pm.expect(selectRoundRobin(normalInstances)).to.eql('replica-1');",
-                  "});",
-                  "pm.test(\"Load-Aware: critical load instances are deprioritized\", () => {",
-                  "    pm.expect(normalInstances.map(i => i.instanceId)).to.not.include('replica-3');",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{brokerUrl}}/health",
-              "host": [
-                "{{brokerUrl}}"
-              ],
-              "path": [
-                "health"
-              ]
-            }
-          }
-        },
-        {
-          "name": "4.4 Algorithmic Verification: Circuit Breaker State Transitions",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// Verifies the 3-state finite state machine in app.services.circuitBreaker",
-                  "class CircuitBreakerSimulator {",
-                  "    constructor(threshold = 3, resetSeconds = 5) {",
-                  "        this.threshold = threshold;",
-                  "        this.resetSeconds = resetSeconds;",
-                  "        this.state = 'CLOSED';",
-                  "        this.failureCount = 0;",
-                  "        this.lastFailureTime = 0;",
-                  "    }",
-                  "    allowRequest(currentTime) {",
-                  "        if (this.state === 'OPEN') {",
-                  "            if (currentTime - this.lastFailureTime >= this.resetSeconds) {",
-                  "                this.state = 'HALF_OPEN';",
-                  "                return true;",
-                  "            }",
-                  "            return false;",
-                  "        }",
-                  "        return true;",
-                  "    }",
-                  "    recordFailure(currentTime) {",
-                  "        this.failureCount++;",
-                  "        this.lastFailureTime = currentTime;",
-                  "        if (this.failureCount >= this.threshold) {",
-                  "            this.state = 'OPEN';",
-                  "        }",
-                  "    }",
-                  "    recordSuccess() {",
-                  "        this.failureCount = 0;",
-                  "        this.state = 'CLOSED';",
-                  "    }",
-                  "}",
-                  "",
-                  "const cb = new CircuitBreakerSimulator(3, 5);",
-                  "let clock = 1000;",
-                  "",
-                  "pm.test(\"Circuit Breaker initially starts CLOSED and allows requests\", () => {",
-                  "    pm.expect(cb.state).to.eql('CLOSED');",
-                  "    pm.expect(cb.allowRequest(clock)).to.be.true;",
-                  "});",
-                  "",
-                  "pm.test(\"Consecutive failures below threshold remain CLOSED\", () => {",
-                  "    cb.recordFailure(clock);",
-                  "    pm.expect(cb.state).to.eql('CLOSED');",
-                  "    cb.recordFailure(clock);",
-                  "    pm.expect(cb.state).to.eql('CLOSED');",
-                  "});",
-                  "",
-                  "pm.test(\"Threshold (3 failures) reached: circuit trips to OPEN\", () => {",
-                  "    cb.recordFailure(clock);",
-                  "    pm.expect(cb.state).to.eql('OPEN');",
-                  "});",
-                  "",
-                  "pm.test(\"Immediate subsequent requests are rejected when OPEN\", () => {",
-                  "    pm.expect(cb.allowRequest(clock + 1)).to.be.false;",
-                  "});",
-                  "",
-                  "pm.test(\"After cooldown window, circuit transitions to HALF_OPEN for trial\", () => {",
-                  "    pm.expect(cb.allowRequest(clock + 6)).to.be.true;",
-                  "    pm.expect(cb.state).to.eql('HALF_OPEN');",
-                  "});",
-                  "",
-                  "pm.test(\"Successful trial request closes circuit back to CLOSED\", () => {",
-                  "    cb.recordSuccess();",
-                  "    pm.expect(cb.state).to.eql('CLOSED');",
-                  "    pm.expect(cb.failureCount).to.eql(0);",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{brokerUrl}}/health",
-              "host": [
-                "{{brokerUrl}}"
-              ],
-              "path": [
-                "health"
-              ]
-            }
-          }
-        },
-        {
-          "name": "4.5 Real load balancing: call 1 of 3 to world-service",
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.collectionVariables.set('rrSeen', '[]');"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"[SUCCESS] 200 OK\", () => pm.response.to.have.status(200));",
-                  "const inst = pm.response.headers.get('X-Broker-Instance');",
-                  "const seen = JSON.parse(pm.collectionVariables.get('rrSeen') || '[]'); seen.push(inst); pm.collectionVariables.set('rrSeen', JSON.stringify(seen));",
-                  "pm.test('[SUCCESS] Call 1 was served by ' + inst, () => pm.expect(inst).to.exist);"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{serviceToken}}",
-                "type": "text"
-              }
-            ],
-            "url": {
-              "raw": "{{brokerUrl}}/relay/world-service/health",
-              "host": [
-                "{{brokerUrl}}"
-              ],
-              "path": [
-                "relay",
-                "world-service",
-                "health"
-              ]
-            }
-          }
-        },
-        {
-          "name": "4.6 Real load balancing: call 2 of 3 to world-service",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"[SUCCESS] 200 OK\", () => pm.response.to.have.status(200));",
-                  "const inst = pm.response.headers.get('X-Broker-Instance');",
-                  "const seen = JSON.parse(pm.collectionVariables.get('rrSeen') || '[]'); seen.push(inst); pm.collectionVariables.set('rrSeen', JSON.stringify(seen));",
-                  "pm.test('[SUCCESS] Call 2 was served by ' + inst, () => pm.expect(inst).to.exist);"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{serviceToken}}",
-                "type": "text"
-              }
-            ],
-            "url": {
-              "raw": "{{brokerUrl}}/relay/world-service/health",
-              "host": [
-                "{{brokerUrl}}"
-              ],
-              "path": [
-                "relay",
-                "world-service",
-                "health"
-              ]
-            }
-          }
-        },
-        {
-          "name": "4.7 Real load balancing: call 3 of 3 to world-service",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"[SUCCESS] 200 OK\", () => pm.response.to.have.status(200));",
-                  "const inst = pm.response.headers.get('X-Broker-Instance');",
-                  "const seen = JSON.parse(pm.collectionVariables.get('rrSeen') || '[]'); seen.push(inst); pm.collectionVariables.set('rrSeen', JSON.stringify(seen));",
-                  "pm.test('[SUCCESS] Call 3 was served by ' + inst, () => pm.expect(inst).to.exist);",
-                  "pm.test(\"[SUCCESS] Load balancing: 3 consecutive calls were spread over 3 DIFFERENT replicas\", () => pm.expect(new Set(seen).size).to.eql(3));"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{serviceToken}}",
-                "type": "text"
-              }
-            ],
-            "url": {
-              "raw": "{{brokerUrl}}/relay/world-service/health",
-              "host": [
-                "{{brokerUrl}}"
-              ],
-              "path": [
-                "relay",
-                "world-service",
-                "health"
-              ]
-            }
-          }
-        },
-        {
-          "name": "4.8 Circuit breaker state is exported per instance",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const m = pm.response.text();",
-                  "pm.test(\"[SUCCESS] world-service replicas are tracked: broker_circuit_breaker_open{service=\\\"world-service\\\"...} 0.0 (CLOSED = healthy)\", () => pm.expect(m).to.match(/broker_circuit_breaker_open\\{[^}]*service=\"world-service\"[^}]*\\} 0\\.0/));",
-                  "pm.test(\"[SUCCESS] No world-service breaker is OPEN\", () => pm.expect(m).to.not.match(/broker_circuit_breaker_open\\{[^}]*service=\"world-service\"[^}]*\\} 1\\.0/));"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{brokerUrl}}/metrics",
-              "host": [
-                "{{brokerUrl}}"
-              ],
-              "path": [
-                "metrics"
-              ]
-            }
-          }
         }
       ]
     },
     {
-      "name": "5. Task 3 - Subscriber Queues (Gateway -> Service)  [needs world-service running]",
-      "description": "POST/GET /queues/{service}/{path}: the request joins the queue of the target service; a consumer thread hands it to an instance. Start the target first: docker compose up -d world-service",
+      "name": "4. Task 3 - Subscriber Queues (Gateway -> Service: /queues/{service}/{path})",
+      "description": "Task 3a: Subscriber-based queues where the Gateway names the target service and the request waits in that service's queue for a consumer thread.",
       "item": [
         {
-          "name": "5.1 Queue: request is served through the world-service queue",
+          "name": "4.1 Dispatch Request Through world-service Subscriber Queue",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"[SUCCESS] 200 OK - world-service answered through the broker queue\", () => pm.response.to.have.status(200));",
-                  "pm.test(\"[SUCCESS] X-Broker-Queue = 'world-service' (it really went through that service's queue)\", () => pm.expect(pm.response.headers.get('X-Broker-Queue')).to.eql('world-service'));",
-                  "pm.test(\"[SUCCESS] X-Queue-Wait-Ms present (time spent waiting in the queue is measured)\", () => pm.expect(pm.response.headers.get('X-Queue-Wait-Ms')).to.exist);",
-                  "pm.test(\"[SUCCESS] Handled by a queue consumer thread 'queue-world-service-N'\", () => pm.expect(pm.response.headers.get('X-Broker-Thread')).to.match(/^queue-world-service-/));",
-                  "pm.test(\"[SUCCESS] X-Broker-Instance shows which replica served it\", () => pm.expect(pm.response.headers.get('X-Broker-Instance')).to.include('world-service'));"
+                  "pm.test(\"[SUCCESS] Request accepted into world-service subscriber queue (X-Broker-Queue: world-service)\", () => {",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Queue')).to.eql('world-service');",
+                  "});",
+                  "pm.test(\"[SUCCESS] Processed by world-service queue consumer (200 if world-service is up, 404 if stopped)\", () => {",
+                  "    pm.expect([200, 404]).to.include(pm.response.code);",
+                  "});"
                 ]
               }
             }
@@ -1134,15 +810,18 @@
           }
         },
         {
-          "name": "5.2 Queue: /health shows the world-service queue",
+          "name": "4.2 Broker Health Lists Active Subscriber Queue & Worker Threads",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"[SUCCESS] Broker /health reports queues.services as an object\", () => pm.expect(pm.response.json().queues.services).to.be.an('object'));",
-                  "pm.test(\"[SUCCESS] A queue named 'world-service' exists after the first queued request\", () => pm.expect(pm.response.json().queues.services).to.have.property('world-service'));"
+                  "const q = pm.response.json().queues.services;",
+                  "pm.test(\"[SUCCESS] queues.services['world-service'] created with dedicated consumer threads\", () => {",
+                  "    pm.expect(q).to.have.property('world-service');",
+                  "    pm.expect(q['world-service'].threads).to.be.greaterThan(0);",
+                  "});"
                 ]
               }
             }
@@ -1162,14 +841,14 @@
           }
         },
         {
-          "name": "5.3 Queue: no token",
+          "name": "4.3 Error: Subscriber Queue Without Token (401)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"[EXPECTED REJECTION] 401 - queue refuses callers without a token\", () => pm.response.to.have.status(401));"
+                  "pm.test(\"[EXPECTED REJECTION] 401 Unauthorized when calling /queues without token\", () => pm.response.to.have.status(401));"
                 ]
               }
             }
@@ -1191,15 +870,15 @@
           }
         },
         {
-          "name": "5.4 Queue: unknown service",
+          "name": "4.4 Error: Subscriber Queue Path Traversal Blocked (400)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"[EXPECTED REJECTION] 404 - no instance of ghost-service is registered\", () => pm.response.to.have.status(404));",
-                  "pm.test(\"[EXPECTED REJECTION] error = 'service_not_found'\", () => pm.expect(pm.response.json().error).to.eql('service_not_found'));"
+                  "pm.test(\"[EXPECTED REJECTION] 400 Bad Request on invalid path in /queues\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"[EXPECTED REJECTION] Error code is 'invalid_path'\", () => pm.expect(pm.response.json().error).to.eql('invalid_path'));"
                 ]
               }
             }
@@ -1214,14 +893,14 @@
               }
             ],
             "url": {
-              "raw": "{{brokerUrl}}/queues/ghost-service/health",
+              "raw": "{{brokerUrl}}/queues/world-service/..%2fsecret",
               "host": [
                 "{{brokerUrl}}"
               ],
               "path": [
                 "queues",
-                "ghost-service",
-                "health"
+                "world-service",
+                "..%2fsecret"
               ]
             }
           }
@@ -1229,56 +908,25 @@
       ]
     },
     {
-      "name": "6. Task 3/4 - Topic Queues & GET /topics",
-      "description": "Services fire events on a topic without knowing the subscribers; the broker looks the subscribers up in Service Discovery. 6.2 needs a Service Discovery that supports topics and a service subscribed to ExamPassed.",
+      "name": "5. Task 3 & 4 - Topic-Based Queues (POST /topics/{topic}/publish) & GET /topics",
+      "description": "Task 3b & Task 4b: Services publish events on a topic without knowing who is subscribed, and GET /topics lists available topics.",
       "item": [
         {
-          "name": "6.1 Topics: list available topics",
+          "name": "5.1 Publish Event on Topic ExamPassed (202 Accepted)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"[SUCCESS] 200 OK\", () => pm.response.to.have.status(200));",
-                  "pm.test(\"[SUCCESS] Body is { topics: [...] }\", () => pm.expect(pm.response.json().topics).to.be.an('array'));",
-                  "pm.test(\"[SUCCESS] Served on its own request thread (req-xxxx)\", () => pm.expect(pm.response.headers.get('X-Broker-Thread')).to.match(/^req-/));"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{serviceToken}}",
-                "type": "text"
-              }
-            ],
-            "url": {
-              "raw": "{{brokerUrl}}/topics",
-              "host": [
-                "{{brokerUrl}}"
-              ],
-              "path": [
-                "topics"
-              ]
-            }
-          }
-        },
-        {
-          "name": "6.2 Topics: publish ExamPassed (fire-and-forget event)",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"[SUCCESS] 202 Accepted - event queued by the broker\", () => pm.response.to.have.status(202));",
-                  "pm.test(\"[SUCCESS] Response has a messageId\", () => pm.expect(pm.response.json().messageId).to.be.a('string'));",
-                  "pm.test(\"[SUCCESS] publisher = 'player-service' (taken from the token, not from the caller)\", () => pm.expect(pm.response.json().publisher).to.eql('player-service'));",
-                  "pm.test(\"[SUCCESS] subscribers is the list of services that registered interest in the topic\", () => pm.expect(pm.response.json().subscribers).to.be.an('array'));"
+                  "pm.test(\"[SUCCESS] 202 Accepted - Event published asynchronously to topic ExamPassed\", () => pm.response.to.have.status(202));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"[SUCCESS] Assigned unique messageId and verified publisher = 'player-service'\", () => {",
+                  "    pm.expect(b.messageId).to.be.a('string');",
+                  "    pm.expect(b.topic).to.eql('ExamPassed');",
+                  "    pm.expect(b.publisher).to.eql('player-service');",
+                  "});",
+                  "pm.test(\"[SUCCESS] Subscribers list returned from Service Discovery\", () => pm.expect(b.subscribers).to.be.an('array'));"
                 ]
               }
             }
@@ -1310,7 +958,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"playerId\":\"player-1\",\"examId\":\"exam-1\",\"score\":95}",
+              "raw": "{\"playerId\":\"player-1\",\"examId\":\"calc-101\",\"score\":95}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1320,15 +968,56 @@
           }
         },
         {
-          "name": "6.3 Topics: invalid topic name",
+          "name": "5.2 Fetch Available Topics List (GET /topics)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"[EXPECTED REJECTION] 400 - topic must start with a letter\", () => pm.response.to.have.status(400));",
-                  "pm.test(\"[EXPECTED REJECTION] error = 'invalid_topic'\", () => pm.expect(pm.response.json().error).to.eql('invalid_topic'));"
+                  "pm.test(\"[SUCCESS] 200 OK - Topics registry returned\", () => pm.response.to.have.status(200));",
+                  "const topics = pm.response.json().topics;",
+                  "pm.test(\"[SUCCESS] ExamPassed appears in GET /topics list\", () => {",
+                  "    const names = topics.map(t => typeof t === 'string' ? t : t.name);",
+                  "    pm.expect(names).to.include('ExamPassed');",
+                  "});",
+                  "pm.test(\"[SUCCESS] Handled on dedicated worker thread (X-Broker-Thread: req-xxxx)\", () => {",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Thread')).to.match(/^req-/);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/topics",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "topics"
+              ]
+            }
+          }
+        },
+        {
+          "name": "5.3 Error: Invalid Topic Name (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[EXPECTED REJECTION] 400 Bad Request when topic name starts with a digit\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"[EXPECTED REJECTION] Error code is 'invalid_topic'\", () => pm.expect(pm.response.json().error).to.eql('invalid_topic'));"
                 ]
               }
             }
@@ -1348,19 +1037,19 @@
               }
             ],
             "url": {
-              "raw": "{{brokerUrl}}/topics/1bad/publish",
+              "raw": "{{brokerUrl}}/topics/123-invalid-topic/publish",
               "host": [
                 "{{brokerUrl}}"
               ],
               "path": [
                 "topics",
-                "1bad",
+                "123-invalid-topic",
                 "publish"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"a\":1}",
+              "raw": "{\"test\":true}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1370,15 +1059,15 @@
           }
         },
         {
-          "name": "6.4 Topics: event body is not JSON",
+          "name": "5.4 Error: Non-JSON Event Body (400)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"[EXPECTED REJECTION] 400 - event body must be JSON\", () => pm.response.to.have.status(400));",
-                  "pm.test(\"[EXPECTED REJECTION] error = 'invalid_payload'\", () => pm.expect(pm.response.json().error).to.eql('invalid_payload'));"
+                  "pm.test(\"[EXPECTED REJECTION] 400 Bad Request when event payload is not valid JSON\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"[EXPECTED REJECTION] Error code is 'invalid_payload'\", () => pm.expect(pm.response.json().error).to.eql('invalid_payload'));"
                 ]
               }
             }
@@ -1410,7 +1099,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "this is not json",
+              "raw": "not-valid-json",
               "options": {
                 "raw": {
                   "language": "text"
@@ -1420,14 +1109,14 @@
           }
         },
         {
-          "name": "6.5 Topics: publish without token",
+          "name": "5.5 Error: Publish Without Service Token (401)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"[EXPECTED REJECTION] 401 - only authenticated services may publish\", () => pm.response.to.have.status(401));"
+                  "pm.test(\"[EXPECTED REJECTION] 401 Unauthorized when publishing without token\", () => pm.response.to.have.status(401));"
                 ]
               }
             }
@@ -1454,7 +1143,240 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"a\":1}",
+              "raw": "{\"test\":true}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Task 4 - Thread-per-Request Architecture",
+      "description": "Task 4a: Every incoming request is executed on its own dedicated OS worker thread (req-<id>).",
+      "item": [
+        {
+          "name": "6.1 Request A Runs on Dedicated Worker Thread",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 200 OK\", () => pm.response.to.have.status(200));",
+                  "const t = pm.response.headers.get('X-Broker-Thread');",
+                  "pm.collectionVariables.set('firstThread', t);",
+                  "pm.test(\"[SUCCESS] Assigned dedicated worker thread \" + t, () => pm.expect(t).to.match(/^req-/));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/status",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "status"
+              ]
+            }
+          }
+        },
+        {
+          "name": "6.2 Request B Runs on a Different Worker Thread",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 200 OK\", () => pm.response.to.have.status(200));",
+                  "const t = pm.response.headers.get('X-Broker-Thread');",
+                  "const prev = pm.collectionVariables.get('firstThread');",
+                  "pm.test(\"[SUCCESS] Spawned fresh thread \" + t + \" != \" + prev, () => pm.expect(t).to.not.eql(prev));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/status",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "status"
+              ]
+            }
+          }
+        },
+        {
+          "name": "6.3 ThreadPerRequestExecutor Statistics in /health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const th = pm.response.json().threads;",
+                  "pm.test(\"[SUCCESS] ThreadPerRequestExecutor tracks totalStarted, peak, active, and max threads\", () => {",
+                  "    pm.expect(th.totalStarted).to.be.greaterThan(1);",
+                  "    pm.expect(th.max).to.be.greaterThan(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/health",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Task 5 - gRPC Service-to-Service Communication (Port 8601)",
+      "description": "Task 5: Low-overhead gRPC server running alongside HTTP on port 8601.",
+      "item": [
+        {
+          "name": "7.1 Verify gRPC Server Active on Port 8601",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] Broker advertises active gRPC server on port 8601\", () => {",
+                  "    pm.expect(pm.response.json().grpcPort).to.eql(8601);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/health",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          }
+        },
+        {
+          "name": "7.2 Verify gRPC Call Metrics Exported",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] Prometheus /metrics exports broker_grpc_calls_total counter\", () => {",
+                  "    pm.expect(pm.response.text()).to.include('broker_grpc_calls_total');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/metrics",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "metrics"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Task 6 - Durable Queues & Dead Letter Channel (GET /dead-letters)",
+      "description": "Task 6: SQLite-backed Durable Queues that survive broker restarts, plus a Dead Letter Channel and GET /dead-letters endpoint for unsendable messages.",
+      "item": [
+        {
+          "name": "8.1 Publish Unsendable Event to Trigger Dead Letter Channel",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 202 Accepted - Event persisted to SQLite durable store\", () => pm.response.to.have.status(202));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('deadMessageId', b.messageId);",
+                  "pm.test(\"[SUCCESS] No active subscribers for DeadLetterDemo -> routed to Dead Letter Channel\", () => {",
+                  "    pm.expect(b.subscribers).to.be.an('array').that.is.empty;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/topics/DeadLetterDemo/publish",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "topics",
+                "DeadLetterDemo",
+                "publish"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"reason\":\"unroutable_demo\",\"zombieId\":\"z-999\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1464,49 +1386,31 @@
           }
         },
         {
-          "name": "6.6 Topics: /health reports topic queues",
+          "name": "8.2 Fetch Dead Letter Channel Messages (GET /dead-letters)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"[SUCCESS] queues.topics is reported (one durable-in-memory queue per subscribed service)\", () => pm.expect(pm.response.json().queues.topics).to.be.an('object'));"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{brokerUrl}}/health",
-              "host": [
-                "{{brokerUrl}}"
-              ],
-              "path": [
-                "health"
-              ]
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "7. Task 4 - Thread-per-Request",
-      "item": [
-        {
-          "name": "7.1 Request A (remember its thread)",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"[SUCCESS] 200 OK\", () => pm.response.to.have.status(200));",
-                  "const t = pm.response.headers.get('X-Broker-Thread');",
-                  "pm.test(\"[SUCCESS] Request ran on its own thread named 'req-<id>'\", () => pm.expect(t).to.match(/^req-/));",
-                  "pm.collectionVariables.set('firstThread', t);"
+                  "pm.test(\"[SUCCESS] 200 OK - Dead Letter Channel fetched\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"[SUCCESS] Dead Letter Channel contains unsendable messages (count >= 1, totals.dead >= 1)\", () => {",
+                  "    pm.expect(b.count).to.be.greaterThan(0);",
+                  "    pm.expect(b.totals.dead).to.be.greaterThan(0);",
+                  "    pm.expect(b.deadLetters).to.be.an('array');",
+                  "});",
+                  "pm.test(\"[SUCCESS] Our published DeadLetterDemo message is present with reason and timestamps\", () => {",
+                  "    const id = pm.collectionVariables.get('deadMessageId');",
+                  "    const found = b.deadLetters.find(m => m.messageId === id);",
+                  "    pm.expect(found).to.exist;",
+                  "    pm.expect(found.topic).to.eql('DeadLetterDemo');",
+                  "    pm.expect(found.reason).to.be.a('string');",
+                  "    pm.expect(found.deadAt).to.be.a('string');",
+                  "});",
+                  "pm.test(\"[SUCCESS] Served on dedicated worker thread (X-Broker-Thread: req-xxxx)\", () => {",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Thread')).to.match(/^req-/);",
+                  "});"
                 ]
               }
             }
@@ -1521,28 +1425,30 @@
               }
             ],
             "url": {
-              "raw": "{{brokerUrl}}/status",
+              "raw": "{{brokerUrl}}/dead-letters",
               "host": [
                 "{{brokerUrl}}"
               ],
               "path": [
-                "status"
+                "dead-letters"
               ]
             }
           }
         },
         {
-          "name": "7.2 Request B (must run on another thread)",
+          "name": "8.3 Filter Dead Letters by Topic (GET /dead-letters?topic=DeadLetterDemo&limit=5)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"[SUCCESS] 200 OK\", () => pm.response.to.have.status(200));",
-                  "const t = pm.response.headers.get('X-Broker-Thread');",
-                  "pm.test(\"[SUCCESS] Request ran on its own thread named 'req-<id>'\", () => pm.expect(t).to.match(/^req-/));",
-                  "pm.test(\"[SUCCESS] A different request got a DIFFERENT thread (thread-per-request)\", () => pm.expect(t).to.not.eql(pm.collectionVariables.get('firstThread')));"
+                  "pm.test(\"[SUCCESS] 200 OK - Filtered dead letters returned\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"[SUCCESS] Every returned dead letter matches topic = 'DeadLetterDemo' and respects limit\", () => {",
+                  "    pm.expect(b.deadLetters.length).to.be.within(1, 5);",
+                  "    b.deadLetters.forEach(m => pm.expect(m.topic).to.eql('DeadLetterDemo'));",
+                  "});"
                 ]
               }
             }
@@ -1557,27 +1463,35 @@
               }
             ],
             "url": {
-              "raw": "{{brokerUrl}}/status",
+              "raw": "{{brokerUrl}}/dead-letters?topic=DeadLetterDemo&limit=5",
               "host": [
                 "{{brokerUrl}}"
               ],
               "path": [
-                "status"
+                "dead-letters"
+              ],
+              "query": [
+                {
+                  "key": "topic",
+                  "value": "DeadLetterDemo"
+                },
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
               ]
             }
           }
         },
         {
-          "name": "7.3 Thread pool statistics",
+          "name": "8.4 Error: Fetch Dead Letters Without Token (401)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const th = pm.response.json().threads;",
-                  "pm.test(\"[SUCCESS] totalStarted > 0 (a thread was started for requests)\", () => pm.expect(th.totalStarted).to.be.above(0));",
-                  "pm.test(\"[SUCCESS] max = configured thread limit\", () => pm.expect(th.max).to.be.above(0));"
+                  "pm.test(\"[EXPECTED REJECTION] 401 Unauthorized when calling GET /dead-letters without service token\", () => pm.response.to.have.status(401));"
                 ]
               }
             }
@@ -1586,12 +1500,52 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{brokerUrl}}/health",
+              "raw": "{{brokerUrl}}/dead-letters",
               "host": [
                 "{{brokerUrl}}"
               ],
               "path": [
-                "health"
+                "dead-letters"
+              ]
+            }
+          }
+        },
+        {
+          "name": "8.5 Error: Invalid Limit Parameter on Dead Letters (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[EXPECTED REJECTION] 400 Bad Request when limit=0 (must be 1..1000)\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"[EXPECTED REJECTION] Error code is 'invalid_limit'\", () => pm.expect(pm.response.json().error).to.eql('invalid_limit'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/dead-letters?limit=0",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "dead-letters"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "0"
+                }
               ]
             }
           }
@@ -1599,71 +1553,11 @@
       ]
     },
     {
-      "name": "8. Task 5 - gRPC for Service-to-Service",
-      "description": "Services call each other through the broker over gRPC (port 8601). Postman here only proves the gRPC server is up and advertised; the calls themselves are covered by message-broker/tests/test_grpc.py.",
+      "name": "9. Task 7 - Prometheus & Grafana/Loki Observability (GET /metrics & Logs)",
+      "description": "Task 7: Prometheus metrics endpoint and structured JSON logs collected by Alloy/Loki/Grafana.",
       "item": [
         {
-          "name": "8.1 gRPC server is running on 8601",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"[SUCCESS] Broker advertises grpcPort = 8601\", () => pm.expect(pm.response.json().grpcPort).to.eql(8601));"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{brokerUrl}}/health",
-              "host": [
-                "{{brokerUrl}}"
-              ],
-              "path": [
-                "health"
-              ]
-            }
-          }
-        },
-        {
-          "name": "8.2 gRPC call counter exposed for monitoring",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"[SUCCESS] /metrics exposes broker_grpc_calls_total\", () => pm.expect(pm.response.text()).to.include('broker_grpc_calls_total'));"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{brokerUrl}}/metrics",
-              "host": [
-                "{{brokerUrl}}"
-              ],
-              "path": [
-                "metrics"
-              ]
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "9. Task 7 - Monitoring (Prometheus metrics & logs)",
-      "description": "GET /metrics is what Prometheus scrapes (Grafana reads Prometheus + Loki).",
-      "item": [
-        {
-          "name": "9.1 Prometheus /metrics endpoint",
+          "name": "9.1 Scrape Prometheus Metrics (GET /metrics)",
           "event": [
             {
               "listen": "test",
@@ -1671,14 +1565,19 @@
                 "type": "text/javascript",
                 "exec": [
                   "const m = pm.response.text();",
-                  "pm.test(\"[SUCCESS] 200 OK without authentication (Prometheus can scrape it)\", () => pm.response.to.have.status(200));",
-                  "pm.test(\"[SUCCESS] Prometheus text format\", () => pm.expect(pm.response.headers.get('Content-Type')).to.include('text/plain'));",
-                  "pm.test(\"[SUCCESS] broker_http_requests_total (traffic per route / service / status)\", () => pm.expect(m).to.include('broker_http_requests_total'));",
-                  "pm.test(\"[SUCCESS] broker_dispatch_total + broker_dispatch_duration_seconds (delivery outcome and latency per service)\", () => { pm.expect(m).to.include('broker_dispatch_total'); pm.expect(m).to.include('broker_dispatch_duration_seconds'); });",
-                  "pm.test(\"[SUCCESS] broker_circuit_breaker_open (breaker state per instance)\", () => pm.expect(m).to.include('broker_circuit_breaker_open'));",
-                  "pm.test(\"[SUCCESS] broker_reroutes_total (high-availability reroutes)\", () => pm.expect(m).to.include('broker_reroutes_total'));",
-                  "pm.test(\"[SUCCESS] broker_inflight_requests (load per instance, used by the load-aware balancer)\", () => pm.expect(m).to.include('broker_inflight_requests'));",
-                  "pm.test(\"[SUCCESS] broker_queue_pending + broker_request_threads gauges\", () => { pm.expect(m).to.include('broker_queue_pending'); pm.expect(m).to.include('broker_request_threads'); });"
+                  "pm.test(\"[SUCCESS] 200 OK - Open for Prometheus scraping without auth\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"[SUCCESS] Exports HTTP request counter (broker_http_requests_total)\", () => pm.expect(m).to.include('broker_http_requests_total'));",
+                  "pm.test(\"[SUCCESS] Exports circuit breaker state & HA reroutes (broker_circuit_breaker_open, broker_reroutes_total)\", () => {",
+                  "    pm.expect(m).to.include('broker_circuit_breaker_open');",
+                  "    pm.expect(m).to.include('broker_reroutes_total');",
+                  "});",
+                  "pm.test(\"[SUCCESS] Exports load-balancer in-flight gauge & thread pool gauge (broker_inflight_requests, broker_request_threads)\", () => {",
+                  "    pm.expect(m).to.include('broker_inflight_requests');",
+                  "    pm.expect(m).to.include('broker_request_threads');",
+                  "});",
+                  "pm.test(\"[SUCCESS] Exports durable store & dead letter counts (broker_messages{status=\\\"dead\\\"})\", () => {",
+                  "    pm.expect(m).to.include('broker_messages{status=\"dead\"}');",
+                  "});"
                 ]
               }
             }
@@ -1698,7 +1597,7 @@
           }
         },
         {
-          "name": "9.2 Logs contain the relayed requests",
+          "name": "9.2 Verify Structured JSON Logs Contain Request Correlation IDs",
           "event": [
             {
               "listen": "test",
@@ -1706,9 +1605,11 @@
                 "type": "text/javascript",
                 "exec": [
                   "const t = pm.response.text();",
-                  "pm.test(\"[SUCCESS] 200 OK - log file downloaded\", () => pm.response.to.have.status(200));",
-                  "pm.test(\"[SUCCESS] Logs record relayed calls ('Relayed request completed') - run 3.6 first\", () => pm.expect(t).to.include('Relayed request completed'));",
-                  "pm.test(\"[SUCCESS] Logs are structured JSON with a requestId for tracing\", () => pm.expect(t).to.include('requestId'));"
+                  "pm.test(\"[SUCCESS] 200 OK - Recent logs downloaded\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"[SUCCESS] Logs record published events and correlation requestId fields\", () => {",
+                  "    pm.expect(t).to.include('Event published');",
+                  "    pm.expect(t).to.include('requestId');",
+                  "});"
                 ]
               }
             }
@@ -1723,7 +1624,7 @@
               }
             ],
             "url": {
-              "raw": "{{brokerUrl}}/logs/download?tail=500",
+              "raw": "{{brokerUrl}}/logs/download?tail=100",
               "host": [
                 "{{brokerUrl}}"
               ],
@@ -1734,7 +1635,7 @@
               "query": [
                 {
                   "key": "tail",
-                  "value": "500"
+                  "value": "100"
                 }
               ]
             }

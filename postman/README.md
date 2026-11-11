@@ -44,15 +44,18 @@ the broker delivers the event to the subscribed service, and the next request re
 back through the Gateway. `brokerUrl` defaults to `http://localhost:8600`, which the team compose
 publishes.
 
-The Message Broker collection (`message-broker.postman_collection.json`) verifies the Message Broker
-running on port `8600`:
-- **Folder 0 (Setup & Traffic Generation)**: Health checks, lightweight dynamic JWT token minting for both service tokens (`kind: "service"`) and player tokens (`kind: "player"`), and initial request logs.
-- **Folder 1 (Logs Download)**: Exercises `GET /logs/download` testing full download, `tail=50`, `since` timestamp filtering, and security gates (`401 missing_admin_key`, `403 invalid_admin_key`).
-- **Folder 2 (Topics)**: Exercises `GET /topics` to retrieve the registered topics list.
-- **Folder 3 (Service-to-Service Relay)**: Verifies the `ANY /relay/{serviceName}/{path}` endpoint, confirming authentication enforcement (`401` on missing token, `403` on player token), path traversal blocking (`400`), loop blocking (`400`), and service token verification with anti-spoofing header stripping.
-- **Folder 4 (Load Balancing & Circuit Breakers)**: Checks Service Discovery connectivity, verifies clean handling and thread tracking on offline replicas, and runs algorithmic verifications directly in Postman asserting Round-Robin rotation and Circuit Breaker state transitions (`CLOSED` -> `OPEN` on failure threshold -> `HALF_OPEN` after cooldown -> `CLOSED` on success).
-
-- **Folders 5-9** cover the later tasks: subscriber queues (`/queues/...`), topic queues (`POST /topics/{topic}/publish`, `GET /topics`), thread-per-request, gRPC (port advertised + metric), and monitoring (`GET /metrics`, logs). Every assertion is named `[SUCCESS] ...` or `[EXPECTED REJECTION] ...` so the Test Results tab reads as a story. Requests marked *needs world-service running* require `docker compose up -d world-service` (3 replicas, also proves real round-robin in 4.5-4.7). Request 6.2 (publish) needs a Service Discovery image that supports topic subscriptions (`/registry/topics/{topic}`); the pinned `service-discovery:3.0.0` does not, so it answers 503 until the image is updated.
+The Message Broker collection (`message-broker.postman_collection.json`) verifies all 7 Message Broker tasks
+running on port `8600` (with every assertion labeled `[SUCCESS] ...` or `[EXPECTED REJECTION] ...` in the Test Results tab):
+- **Folder 0 (Setup & Token Minting)**: Health check and dynamic HMAC-SHA256 JWT minting for both service tokens (`kind: "service"`) and player tokens (`kind: "player"`).
+- **Folder 1 (Task 1 - Logs Download)**: Exercises `GET /logs/download` testing full download, `tail=50`, `since` timestamp filtering, and security gates (`401 missing_admin_key`, `403 invalid_admin_key`).
+- **Folder 2 (Task 2 - Service-to-Service Relay)**: Verifies `ANY /relay/{serviceName}/{path}`, testing service token authentication, anti-spoofing header stripping (`X-Service-Name`), `401` on missing token, `403` on player token, and `400` on path traversal and self-relay loops.
+- **Folder 3 (Task 2 & 7 - Load Balancing, Circuit Breakers & High Availability)**: Checks Service Discovery connectivity, verifies Load-Aware Round-Robin rotation, Circuit Breaker state transitions (`CLOSED` -> `OPEN` -> `HALF_OPEN` -> `CLOSED`), and High-Availability rerouting.
+- **Folder 4 (Task 3 - Subscriber Queues)**: Exercises `ANY /queues/{serviceName}/{path}` (`X-Broker-Queue` header, active consumer threads in `/health`, `401` and `400` rejections).
+- **Folder 5 (Task 3 & 4 - Topic-Based Queues & GET /topics)**: Publishes events to `POST /topics/{topic}/publish` (`202 Accepted`), fetches the registered topics from `GET /topics`, and verifies `400`/`401` rejections.
+- **Folder 6 (Task 4 - Thread-per-Request Architecture)**: Proves consecutive requests execute on distinct OS worker threads (`X-Broker-Thread: req-xxxx`) and inspects thread pool statistics in `/health`.
+- **Folder 7 (Task 5 - gRPC Service-to-Service Communication)**: Verifies the gRPC server is active on port `8601` and `broker_grpc_calls_total` is exported.
+- **Folder 8 (Task 6 - Durable Queues & Dead Letter Channel)**: Publishes an unsendable event to trigger the SQLite-backed Dead Letter Channel, fetches dead letters via `GET /dead-letters` (and filtered via `?topic=DeadLetterDemo&limit=5`), and tests `401`/`400` error gates.
+- **Folder 9 (Task 7 - Prometheus & Grafana/Loki Observability)**: Scrapes `GET /metrics` for HTTP, dispatch, circuit breaker, HA reroute, in-flight load, thread pool, and durable message store gauges, and verifies structured JSON logs with correlation `requestId`s.
 
 The Base and Crafting collections use the broker the same way. Their setup credits the test player
 through Resource Service's `POST /api/refund`, which the Gateway refuses, so it goes to the broker's
