@@ -69,6 +69,18 @@ or leave it empty to check that the download is refused.
 The Zombie and Resource collections read seeded records (`prof_calc`, `infected_student`,
 `wood`, `node_1`), so they fail on an unseeded database. Seed first.
 
+The Zombie and Resource collections also call the routes only the services use, which the Gateway
+refuses with `404 route_not_found`: `POST /api/zombies/spawn` and `POST /api/zombies/{id}/special-action`
+(Game Service), `POST /api/inventory/{playerId}` and `POST /api/gather` (Game Service), `POST /api/spend`
+and `POST /api/refund` (Base and Crafting Service). For each, one request checks that the Gateway refuses
+it, and the real requests go to the service's queue in the broker
+(`POST {{brokerUrl}}/queues/zombie-service/api/zombies/spawn`, `.../queues/resource-service/api/gather`, ...)
+with a token of the service that calls the route, minted from `jwtSecret` like the Base and Crafting
+collections do; each checks the broker's `X-Broker-Queue` and `X-Broker-Instance` headers. Their last
+folder, **Monitoring**, reads `GET /metrics` of one replica through the broker's queue (what Prometheus
+scrapes; the team compose does not publish the services' ports) and checks that the Gateway does not
+expose it.
+
 Requests are numbered and share state through collection variables, so run the whole
 collection rather than firing requests individually - later requests depend on ids captured
 by earlier ones.
