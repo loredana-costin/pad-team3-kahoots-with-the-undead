@@ -179,7 +179,7 @@ services:
   # each other through it over gRPC (8601); it looks the instances up in Service Discovery. 8600 is published
   # for the demo: the log download (X-Admin-Key) and the Postman event requests, which publish on a topic.
   message-broker:
-    image: mariaelenabotnari/message-broker:4.1.0
+    image: mariaelenabotnari/message-broker:4.0.0
     container_name: message-broker
     restart: always
     environment:
