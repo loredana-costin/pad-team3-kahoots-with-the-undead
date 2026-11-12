@@ -785,7 +785,7 @@
           }
         },
         {
-          "name": "3.5 Verify Service-Load Aware Routing Strategy (GET /load-balancer/verify)",
+          "name": "3.5 Service-Load Routing: Verify Load-Aware Ordering on real world-service replicas",
           "event": [
             {
               "listen": "test",
@@ -794,16 +794,20 @@
                 "exec": [
                   "pm.test(\"[SUCCESS] 200 OK - Load-Aware routing verified\", () => pm.response.to.have.status(200));",
                   "const body = pm.response.json();",
-                  "pm.test(\"[SUCCESS] Algorithm is Load-Aware Round-Robin\", () => {",
-                  "    pm.expect(body.algorithm).to.eql('Load-Aware Round-Robin');",
+                  "pm.test(\"[SUCCESS] Targets real world-service replicas with Load-Aware Round-Robin\", () => {",
+                  "    pm.expect(body.service).to.eql(\"world-service\");",
+                  "    pm.expect(body.algorithm).to.eql(\"Load-Aware Round-Robin\");",
+                  "    pm.expect(body.inputInstancesCount).to.eql(3);",
                   "});",
                   "pm.test(\"[SUCCESS] Normal load with lowest in-flight requests is prioritized 1st\", () => {",
-                  "    pm.expect(body.orderedInstances[0].instanceId).to.eql('replica-normal-1');",
-                  "    pm.expect(body.orderedInstances[0].loadStatus).to.eql('normal');",
+                  "    pm.expect(body.orderedInstances[0].loadStatus).to.eql(\"normal\");",
+                  "    pm.expect(body.orderedInstances[0].service).to.eql(\"world-service\");",
+                  "    pm.expect(body.orderedInstances[0].order).to.eql(1);",
                   "});",
-                  "pm.test(\"[SUCCESS] Critical load instance reported by Service Discovery is deprioritized to last\", () => {",
-                  "    pm.expect(body.orderedInstances[2].instanceId).to.eql('replica-critical');",
-                  "    pm.expect(body.orderedInstances[2].loadStatus).to.eql('critical');",
+                  "pm.test(\"[SUCCESS] Critical load replica is deprioritized to last place\", () => {",
+                  "    pm.expect(body.orderedInstances[2].loadStatus).to.eql(\"critical\");",
+                  "    pm.expect(body.orderedInstances[2].service).to.eql(\"world-service\");",
+                  "    pm.expect(body.orderedInstances[2].order).to.eql(3);",
                   "});"
                 ]
               }
@@ -825,7 +829,7 @@
           }
         },
         {
-          "name": "3.6 Service High Availability: Circuit Breaker Trip & Automatic Reroute to Healthy Replica",
+          "name": "3.6 High Availability: Verify Circuit Breaker Trip & Reroute to healthy world-service replica",
           "event": [
             {
               "listen": "test",
@@ -834,17 +838,21 @@
                 "exec": [
                   "pm.test(\"[SUCCESS] 200 OK - High Availability reroute succeeded\", () => pm.response.to.have.status(200));",
                   "const body = pm.response.json();",
-                  "pm.test(\"[SUCCESS] High Availability mechanism confirmed active\", () => {",
+                  "pm.test(\"[SUCCESS] High Availability mechanism confirmed active for world-service\", () => {",
+                  "    pm.expect(body.service).to.eql(\"world-service\");",
                   "    pm.expect(body.highAvailability).to.be.true;",
                   "    pm.expect(body.rerouted).to.be.true;",
                   "});",
-                  "pm.test(\"[SUCCESS] Faulty instance tripped Circuit Breaker into OPEN state\", () => {",
-                  "    pm.expect(body.circuitBreaker.state).to.eql('OPEN');",
-                  "    pm.expect(body.trippedInstance).to.include('faulty');",
+                  "pm.test(\"[SUCCESS] First world-service replica tripped Circuit Breaker into OPEN state\", () => {",
+                  "    pm.expect(body.circuitBreaker.state).to.eql(\"OPEN\");",
+                  "    pm.expect(body.trippedReplica.service).to.eql(\"world-service\");",
+                  "    pm.expect(body.trippedReplica.host).to.be.a(\"string\");",
                   "});",
-                  "pm.test(\"[SUCCESS] In-flight request seamlessly rerouted and answered by healthy replica (200 OK)\", () => {",
+                  "pm.test(\"[SUCCESS] In-flight request seamlessly rerouted to healthy world-service replica 2\", () => {",
                   "    pm.expect(body.finalResponseStatus).to.eql(200);",
-                  "    pm.expect(body.healthyReplica).to.include('healthy');",
+                  "    pm.expect(body.servingReplica.service).to.eql(\"world-service\");",
+                  "    pm.expect(body.servingReplica.host).to.not.eql(body.trippedReplica.host);",
+                  "    pm.expect(body.downstreamResponse.service).to.eql(\"world-service\");",
                   "});"
                 ]
               }
