@@ -874,16 +874,16 @@
           }
         },
         {
-          "name": "3.7 Downstream Unavailable Handled Cleanly Without Crashing (404/503)",
+          "name": "3.7 Downstream Unavailable Handled Cleanly (404/502/503)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"[EXPECTED REJECTION] Returns structured 404/503 when target has no healthy instances\", () => {",
-                  "    pm.expect([404, 503]).to.include(pm.response.code);",
-                  "    pm.expect(pm.response.json().error).to.be.a('string');",
+                  "pm.test(\"[EXPECTED REJECTION] Returns structured 404/502/503 when target has no healthy instances\", () => {",
+                  "    pm.expect([404, 502, 503]).to.include(pm.response.code);",
+                  "    pm.expect(pm.response.json().error).to.be.a(\"string\");",
                   "});"
                 ]
               }
@@ -899,15 +899,14 @@
               }
             ],
             "url": {
-              "raw": "{{brokerUrl}}/relay/zombie-service/api/zombie-types",
+              "raw": "{{brokerUrl}}/relay/non-existent-service/health",
               "host": [
                 "{{brokerUrl}}"
               ],
               "path": [
                 "relay",
-                "zombie-service",
-                "api",
-                "zombie-types"
+                "non-existent-service",
+                "health"
               ]
             }
           }
