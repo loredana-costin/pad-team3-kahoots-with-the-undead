@@ -188,9 +188,9 @@ services:
       SERVICE_DISCOVERY_URL: http://discovery-service:8500
       JWT_SECRET: team-compose-development-secret-at-least-32-chars
       # Key for GET /logs/download; the download is off while it is empty (set it in .env, never commit it).
-      LOGS_ADMIN_KEY: ${LOGS_ADMIN_KEY:-team-logs-admin-secret-key-16chars}
+      LOGS_ADMIN_KEY: ${LOGS_ADMIN_KEY:-}
       # Durable queues: undelivered events and dead letters survive restarts in this volume.
-      MESSAGE_DB_PATH: /app/data/messages.db
+      QUEUE_STORE_PATH: /app/data/messages.db
     volumes:
       - broker_data:/app/data
     ports:
@@ -207,7 +207,7 @@ services:
   # serve any request. Each registers its own address with Service Discovery; the Gateway reads it
   # to spread requests over them, and each replica looks up World Service there for its ExamPassed events.
   exam-service:
-    image: mariaelenabotnari/exam-service:3.0.0
+    image: mariaelenabotnari/exam-service:4.0.0
     restart: always
     deploy:
       replicas: 3
@@ -221,6 +221,9 @@ services:
       DB_NAME: exam_db
       DATABASE_URL: "postgresql://postgres:postgres@exam-db:5432/exam_db?schema=public"
       DISCOVERY_URL: http://discovery-service:8500
+      BROKER_URL: http://message-broker:8600
+      BROKER_GRPC_URL: message-broker:8601
+      JWT_SECRET: team-compose-development-secret-at-least-32-chars
     expose:
       - "3000"
     depends_on:
@@ -234,7 +237,7 @@ services:
   # No container_name: 3 replicas share world-db, where zones and rooms live, so any replica can serve
   # any request. Each registers its own address with Service Discovery, which the Gateway and Exam Service read.
   world-service:
-    image: mariaelenabotnari/world-service:3.0.0
+    image: mariaelenabotnari/world-service:4.0.0
     restart: always
     deploy:
       replicas: 3
@@ -248,6 +251,8 @@ services:
       DB_NAME: world_db
       DATABASE_URL: "postgresql://postgres:postgres@world-db:5432/world_db?schema=public"
       DISCOVERY_URL: http://discovery-service:8500
+      BROKER_URL: http://message-broker:8600
+      JWT_SECRET: team-compose-development-secret-at-least-32-chars
     expose:
       - "3001"
     depends_on:
