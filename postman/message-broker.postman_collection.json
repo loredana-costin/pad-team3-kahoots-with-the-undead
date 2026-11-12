@@ -690,7 +690,7 @@
                                                                  ],
                                                       "body":  {
                                                                    "mode":  "raw",
-                                                                   "raw":  "{\\n  \"eventId\": \"{{s2sEventId}}\",\\n  \"playerId\": \"player-s2s-tester\",\\n  \"examId\": \"discreteMathematicsExam\",\\n  \"course\": \"Discrete Mathematics\",\\n  \"gradedAt\": \"{{currentIsoDate}}\"\\n}",
+                                                                   "raw":  "{\n  \"eventId\": \"{{s2sEventId}}\",\n  \"playerId\": \"player-s2s-tester\",\n  \"examId\": \"discreteMathematicsExam\",\n  \"course\": \"Discrete Mathematics\",\n  \"gradedAt\": \"{{currentIsoDate}}\"\n}",
                                                                    "options":  {
                                                                                    "raw":  {
                                                                                                "language":  "json"
