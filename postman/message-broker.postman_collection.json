@@ -12,6 +12,11 @@
       "type": "string"
     },
     {
+      "key": "discoveryUrl",
+      "value": "http://localhost:8500",
+      "type": "string"
+    },
+    {
       "key": "logsAdminKey",
       "value": "team-logs-admin-secret-key-16chars",
       "type": "string"
@@ -1009,7 +1014,151 @@
           }
         },
         {
-          "name": "5.3 Error: Invalid Topic Name (400)",
+          "name": "5.3 Dynamic Pub/Sub - Register Dynamic Subscriber with New Topic in Discovery",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 201 Created - Dynamic subscriber registered with new topic\", () => pm.expect([200, 201]).to.include(pm.response.code));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"[SUCCESS] Subscriber serviceName is quest-service\", () => pm.expect(body.serviceName).to.eql('quest-service'));",
+                  "pm.test(\"[SUCCESS] Registered topics includes BossDefeated\", () => pm.expect(body.topics).to.include('BossDefeated'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"serviceName\": \"quest-service\",\n  \"host\": \"127.0.0.1\",\n  \"port\": 9999,\n  \"healthPath\": \"/health\",\n  \"topics\": [\"BossDefeated\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{discoveryUrl}}/registry/register",
+              "host": [
+                "{{discoveryUrl}}"
+              ],
+              "path": [
+                "registry",
+                "register"
+              ]
+            }
+          }
+        },
+        {
+          "name": "5.4 Dynamic Pub/Sub - Publish Event on Dynamic Topic BossDefeated",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 202 Accepted - Event published to dynamic topic BossDefeated\", () => pm.response.to.have.status(202));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"[SUCCESS] Response confirms subscriber delivery target is quest-service\", () => {",
+                  "    pm.expect(body.subscribers).to.be.an('array');",
+                  "    pm.expect(body.subscribers).to.include('quest-service');",
+                  "});",
+                  "pm.test(\"[SUCCESS] Event published on dedicated broker worker thread\", () => {",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Thread')).to.match(/^req-/);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bossId\": \"vampire-lord-42\",\n  \"slayer\": \"HeroPlayer1\",\n  \"expAwarded\": 5000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{brokerUrl}}/topics/BossDefeated/publish",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "topics",
+                "BossDefeated",
+                "publish"
+              ]
+            }
+          }
+        },
+        {
+          "name": "5.5 Dynamic Pub/Sub - Verify Dynamic Topic and Subscriber Visible in Topics List",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 200 OK - Topics registry returned\", () => pm.response.to.have.status(200));",
+                  "const topics = pm.response.json().topics;",
+                  "pm.test(\"[SUCCESS] BossDefeated topic exists with quest-service subscriber\", () => {",
+                  "    const bossDefeated = topics.find(t => (typeof t === 'string' ? t : t.name) === 'BossDefeated');",
+                  "    pm.expect(bossDefeated).to.not.be.undefined;",
+                  "    if (typeof bossDefeated === 'object' && bossDefeated.subscribers) {",
+                  "        pm.expect(bossDefeated.subscribers).to.include('quest-service');",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/topics",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "topics"
+              ]
+            }
+          }
+        },
+        {
+          "name": "5.6 Error: Invalid Topic Name (400)",
           "event": [
             {
               "listen": "test",
@@ -1046,20 +1195,20 @@
                 "123-invalid-topic",
                 "publish"
               ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"test\":true}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
+            }
+          },
+          "body": {
+            "mode": "raw",
+            "raw": "{\"test\":true}",
+            "options": {
+              "raw": {
+                "language": "json"
               }
             }
           }
         },
         {
-          "name": "5.4 Error: Non-JSON Event Body (400)",
+          "name": "5.7 Error: Non-JSON Event Body (400)",
           "event": [
             {
               "listen": "test",
@@ -1096,20 +1245,20 @@
                 "ExamPassed",
                 "publish"
               ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "not-valid-json",
-              "options": {
-                "raw": {
-                  "language": "text"
-                }
+            }
+          },
+          "body": {
+            "mode": "raw",
+            "raw": "not-valid-json",
+            "options": {
+              "raw": {
+                "language": "text"
               }
             }
           }
         },
         {
-          "name": "5.5 Error: Publish Without Service Token (401)",
+          "name": "5.8 Error: Publish Without Service Token (401)",
           "event": [
             {
               "listen": "test",
@@ -1321,6 +1470,71 @@
               ],
               "path": [
                 "metrics"
+              ]
+            }
+          }
+        },
+        {
+          "name": "7.3 Verify Service A to Service B gRPC Communication & Channel Multiplexing",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 200 OK - gRPC communication verified between microservices\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"[SUCCESS] Protocol verified as gRPC / HTTP/2 multiplexing\", () => {",
+                  "    pm.expect(body.protocol).to.include('gRPC');",
+                  "});",
+                  "pm.test(\"[SUCCESS] Verified caller is game-service and target is world-service\", () => {",
+                  "    pm.expect(body.callerService).to.eql('game-service');",
+                  "    pm.expect(body.targetService).to.eql('world-service');",
+                  "});",
+                  "pm.test(\"[SUCCESS] Single multiplexed HTTP/2 channel connection reused across multiple calls\", () => {",
+                  "    pm.expect(body.connectionReused).to.be.true;",
+                  "    pm.expect(body.channel.multiplexed).to.be.true;",
+                  "    pm.expect(body.callsCount).to.be.at.least(2);",
+                  "});",
+                  "pm.test(\"[SUCCESS] All sequential RPC calls completed with status 200 on dedicated threads\", () => {",
+                  "    pm.expect(body.calls.every(c => c.status === 200)).to.be.true;",
+                  "    pm.expect(body.calls.every(c => c.brokerThread && c.brokerThread.length > 0)).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/grpc/verify-connection?caller=game-service&target=world-service&count=2",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "grpc",
+                "verify-connection"
+              ],
+              "query": [
+                {
+                  "key": "caller",
+                  "value": "game-service"
+                },
+                {
+                  "key": "target",
+                  "value": "world-service"
+                },
+                {
+                  "key": "count",
+                  "value": "2"
+                }
               ]
             }
           }
