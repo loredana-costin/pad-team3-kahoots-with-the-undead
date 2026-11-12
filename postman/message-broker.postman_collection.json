@@ -917,21 +917,115 @@
       "description": "Task 3b & Task 4b: Services publish events on a topic without knowing who is subscribed, and GET /topics lists available topics.",
       "item": [
         {
-          "name": "5.1 Publish Event on Topic ExamPassed (202 Accepted)",
+          "name": "5.1 Dynamic Pub/Sub - Register Real Subscriber Service (world-service) to Topic ExamPassed in Discovery",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"[SUCCESS] 202 Accepted - Event published asynchronously to topic ExamPassed\", () => pm.response.to.have.status(202));",
-                  "const b = pm.response.json();",
-                  "pm.test(\"[SUCCESS] Assigned unique messageId and verified publisher = 'player-service'\", () => {",
-                  "    pm.expect(b.messageId).to.be.a('string');",
-                  "    pm.expect(b.topic).to.eql('ExamPassed');",
-                  "    pm.expect(b.publisher).to.eql('player-service');",
+                  "pm.test(\"[SUCCESS] 200/201 OK - Real service world-service registered with topic ExamPassed\", () => pm.expect([200, 201]).to.include(pm.response.code));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"[SUCCESS] Subscriber serviceName is world-service\", () => pm.expect(body.serviceName).to.eql('world-service'));",
+                  "pm.test(\"[SUCCESS] Registered topics includes ExamPassed\", () => pm.expect(body.topics).to.include('ExamPassed'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"serviceName\": \"world-service\",\n  \"host\": \"world-service\",\n  \"port\": 3001,\n  \"healthPath\": \"/health\",\n  \"topics\": [\"ExamPassed\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{discoveryUrl}}/registry/register",
+              "host": [
+                "{{discoveryUrl}}"
+              ],
+              "path": [
+                "registry",
+                "register"
+              ]
+            }
+          }
+        },
+        {
+          "name": "5.2 Dynamic Pub/Sub - Register Second Real Subscriber Service (player-service) to Topic ExamPassed in Discovery",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 200/201 OK - Real service player-service registered with topic ExamPassed\", () => pm.expect([200, 201]).to.include(pm.response.code));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"[SUCCESS] Subscriber serviceName is player-service\", () => pm.expect(body.serviceName).to.eql('player-service'));",
+                  "pm.test(\"[SUCCESS] Registered topics includes ExamPassed\", () => pm.expect(body.topics).to.include('ExamPassed'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"serviceName\": \"player-service\",\n  \"host\": \"player-service\",\n  \"port\": 3002,\n  \"healthPath\": \"/health\",\n  \"topics\": [\"ExamPassed\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{discoveryUrl}}/registry/register",
+              "host": [
+                "{{discoveryUrl}}"
+              ],
+              "path": [
+                "registry",
+                "register"
+              ]
+            }
+          }
+        },
+        {
+          "name": "5.3 Dynamic Pub/Sub - Publish Event on Topic ExamPassed and Verify Delivery to Both Real Subscribers",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 202 Accepted - Event published to topic ExamPassed\", () => pm.response.to.have.status(202));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"[SUCCESS] Delivery targets confirmed for both real subscribers (world-service and player-service)\", () => {",
+                  "    pm.expect(body.subscribers).to.be.an('array');",
+                  "    pm.expect(body.subscribers).to.include('world-service');",
+                  "    pm.expect(body.subscribers).to.include('player-service');",
                   "});",
-                  "pm.test(\"[SUCCESS] Subscribers list returned from Service Discovery\", () => pm.expect(b.subscribers).to.be.an('array'));"
+                  "pm.test(\"[SUCCESS] Event published on dedicated broker worker thread\", () => {",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Thread')).to.match(/^req-/);",
+                  "});"
                 ]
               }
             }
@@ -950,6 +1044,15 @@
                 "type": "text"
               }
             ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventId\": \"exam-passed-42\",\n  \"examId\": 101,\n  \"playerId\": \"player-001\",\n  \"course\": \"Distributed Systems\",\n  \"grade\": 10,\n  \"passedAt\": \"2026-11-12T09:00:00Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
             "url": {
               "raw": "{{brokerUrl}}/topics/ExamPassed/publish",
               "host": [
@@ -960,20 +1063,11 @@
                 "ExamPassed",
                 "publish"
               ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"playerId\":\"player-1\",\"examId\":\"calc-101\",\"score\":95}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
             }
           }
         },
         {
-          "name": "5.2 Fetch Available Topics List (GET /topics)",
+          "name": "5.4 Dynamic Pub/Sub - Fetch Available Topics List (GET /topics)",
           "event": [
             {
               "listen": "test",
@@ -982,9 +1076,13 @@
                 "exec": [
                   "pm.test(\"[SUCCESS] 200 OK - Topics registry returned\", () => pm.response.to.have.status(200));",
                   "const topics = pm.response.json().topics;",
-                  "pm.test(\"[SUCCESS] ExamPassed appears in GET /topics list\", () => {",
-                  "    const names = topics.map(t => typeof t === 'string' ? t : t.name);",
-                  "    pm.expect(names).to.include('ExamPassed');",
+                  "pm.test(\"[SUCCESS] ExamPassed topic contains both world-service and player-service subscribers\", () => {",
+                  "    const examPassed = topics.find(t => (typeof t === 'string' ? t : t.name) === 'ExamPassed');",
+                  "    pm.expect(examPassed).to.not.be.undefined;",
+                  "    if (typeof examPassed === 'object' && examPassed.subscribers) {",
+                  "        pm.expect(examPassed.subscribers).to.include('world-service');",
+                  "        pm.expect(examPassed.subscribers).to.include('player-service');",
+                  "    }",
                   "});",
                   "pm.test(\"[SUCCESS] Handled on dedicated worker thread (X-Broker-Thread: req-xxxx)\", () => {",
                   "    pm.expect(pm.response.headers.get('X-Broker-Thread')).to.match(/^req-/);",
@@ -1014,17 +1112,17 @@
           }
         },
         {
-          "name": "5.3 Dynamic Pub/Sub - Register Dynamic Subscriber with New Topic in Discovery",
+          "name": "5.5 Dynamic Pub/Sub - Register Real Subscriber Service (zombie-service) to Topic PlayerDied in Discovery",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"[SUCCESS] 201 Created - Dynamic subscriber registered with new topic\", () => pm.expect([200, 201]).to.include(pm.response.code));",
+                  "pm.test(\"[SUCCESS] 200/201 OK - Real service zombie-service registered with topic PlayerDied\", () => pm.expect([200, 201]).to.include(pm.response.code));",
                   "const body = pm.response.json();",
-                  "pm.test(\"[SUCCESS] Subscriber serviceName is quest-service\", () => pm.expect(body.serviceName).to.eql('quest-service'));",
-                  "pm.test(\"[SUCCESS] Registered topics includes BossDefeated\", () => pm.expect(body.topics).to.include('BossDefeated'));"
+                  "pm.test(\"[SUCCESS] Subscriber serviceName is zombie-service\", () => pm.expect(body.serviceName).to.eql('zombie-service'));",
+                  "pm.test(\"[SUCCESS] Registered topics includes PlayerDied\", () => pm.expect(body.topics).to.include('PlayerDied'));"
                 ]
               }
             }
@@ -1040,7 +1138,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"serviceName\": \"quest-service\",\n  \"host\": \"127.0.0.1\",\n  \"port\": 9999,\n  \"healthPath\": \"/health\",\n  \"topics\": [\"BossDefeated\"]\n}",
+              "raw": "{\n  \"serviceName\": \"zombie-service\",\n  \"host\": \"zombie-service\",\n  \"port\": 4001,\n  \"healthPath\": \"/health\",\n  \"topics\": [\"PlayerDied\"]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1060,18 +1158,18 @@
           }
         },
         {
-          "name": "5.4 Dynamic Pub/Sub - Publish Event on Dynamic Topic BossDefeated",
+          "name": "5.6 Dynamic Pub/Sub - Publish Event on Topic PlayerDied and Verify zombie-service Delivery Target",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"[SUCCESS] 202 Accepted - Event published to dynamic topic BossDefeated\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"[SUCCESS] 202 Accepted - Event published to topic PlayerDied\", () => pm.response.to.have.status(202));",
                   "const body = pm.response.json();",
-                  "pm.test(\"[SUCCESS] Response confirms subscriber delivery target is quest-service\", () => {",
+                  "pm.test(\"[SUCCESS] Response confirms delivery target is zombie-service\", () => {",
                   "    pm.expect(body.subscribers).to.be.an('array');",
-                  "    pm.expect(body.subscribers).to.include('quest-service');",
+                  "    pm.expect(body.subscribers).to.include('zombie-service');",
                   "});",
                   "pm.test(\"[SUCCESS] Event published on dedicated broker worker thread\", () => {",
                   "    pm.expect(pm.response.headers.get('X-Broker-Thread')).to.match(/^req-/);",
@@ -1096,7 +1194,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"bossId\": \"vampire-lord-42\",\n  \"slayer\": \"HeroPlayer1\",\n  \"expAwarded\": 5000\n}",
+              "raw": "{\n  \"eventId\": \"player-died-99\",\n  \"playerId\": \"player-001\",\n  \"zoneId\": \"graveyard-zone\",\n  \"killedBy\": \"undead-boss\",\n  \"timestamp\": \"2026-11-12T09:05:00Z\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1104,20 +1202,20 @@
               }
             },
             "url": {
-              "raw": "{{brokerUrl}}/topics/BossDefeated/publish",
+              "raw": "{{brokerUrl}}/topics/PlayerDied/publish",
               "host": [
                 "{{brokerUrl}}"
               ],
               "path": [
                 "topics",
-                "BossDefeated",
+                "PlayerDied",
                 "publish"
               ]
             }
           }
         },
         {
-          "name": "5.5 Dynamic Pub/Sub - Verify Dynamic Topic and Subscriber Visible in Topics List",
+          "name": "5.7 Dynamic Pub/Sub - Verify Multiple Real Topics in Topics Registry (GET /topics)",
           "event": [
             {
               "listen": "test",
@@ -1126,11 +1224,18 @@
                 "exec": [
                   "pm.test(\"[SUCCESS] 200 OK - Topics registry returned\", () => pm.response.to.have.status(200));",
                   "const topics = pm.response.json().topics;",
-                  "pm.test(\"[SUCCESS] BossDefeated topic exists with quest-service subscriber\", () => {",
-                  "    const bossDefeated = topics.find(t => (typeof t === 'string' ? t : t.name) === 'BossDefeated');",
-                  "    pm.expect(bossDefeated).to.not.be.undefined;",
-                  "    if (typeof bossDefeated === 'object' && bossDefeated.subscribers) {",
-                  "        pm.expect(bossDefeated.subscribers).to.include('quest-service');",
+                  "pm.test(\"[SUCCESS] Registry lists both ExamPassed and PlayerDied with real subscribers\", () => {",
+                  "    const names = topics.map(t => typeof t === 'string' ? t : t.name);",
+                  "    pm.expect(names).to.include('ExamPassed');",
+                  "    pm.expect(names).to.include('PlayerDied');",
+                  "    const exam = topics.find(t => (typeof t === 'string' ? t : t.name) === 'ExamPassed');",
+                  "    const playerDied = topics.find(t => (typeof t === 'string' ? t : t.name) === 'PlayerDied');",
+                  "    if (exam && exam.subscribers) {",
+                  "        pm.expect(exam.subscribers).to.include('world-service');",
+                  "        pm.expect(exam.subscribers).to.include('player-service');",
+                  "    }",
+                  "    if (playerDied && playerDied.subscribers) {",
+                  "        pm.expect(playerDied.subscribers).to.include('zombie-service');",
                   "    }",
                   "});"
                 ]
@@ -1158,7 +1263,7 @@
           }
         },
         {
-          "name": "5.6 Error: Invalid Topic Name (400)",
+          "name": "5.7 Error: Invalid Topic Name (400)",
           "event": [
             {
               "listen": "test",
@@ -1208,7 +1313,7 @@
           }
         },
         {
-          "name": "5.7 Error: Non-JSON Event Body (400)",
+          "name": "5.8 Error: Non-JSON Event Body (400)",
           "event": [
             {
               "listen": "test",
@@ -1258,7 +1363,7 @@
           }
         },
         {
-          "name": "5.8 Error: Publish Without Service Token (401)",
+          "name": "5.9 Error: Publish Without Service Token (401)",
           "event": [
             {
               "listen": "test",
