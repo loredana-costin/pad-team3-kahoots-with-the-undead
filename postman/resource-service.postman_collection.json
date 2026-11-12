@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Resource Service",
-    "description": "In Kahoots with the Undead \u2014 Resource Service API. Covers the implemented CRUD endpoints over /api/resource-types and /api/inventory, plus the mocked idempotent gather/spend/refund endpoints and the mocked node lookup that Game/Base/Crafting Service will call once they exist (see the CPR communication contract). Owner: Costin Loredana.",
+    "description": "In Kahoots with the Undead \u2014 Resource Service API. Covers the CRUD endpoints over /api/resource-types and /api/inventory through the Gateway, the idempotent gather / spend / refund endpoints and inventory creation that Game, Base and Crafting Service call (through the message broker, since the Gateway refuses them), the node lookup, and GET /metrics. Owner: Costin Loredana.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -60,6 +60,18 @@
       "key": "jwt",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "brokerUrl",
+      "value": "http://localhost:8600"
+    },
+    {
+      "key": "jwtSecret",
+      "value": "team-compose-development-secret-at-least-32-chars"
+    },
+    {
+      "key": "serviceJwt",
+      "value": ""
     }
   ],
   "auth": {
@@ -461,20 +473,33 @@
       "name": "Player Inventory",
       "item": [
         {
-          "name": "Create Inventory",
+          "name": "Create Inventory (through the Message Broker)",
           "request": {
             "method": "POST",
             "url": {
-              "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
+              "raw": "{{brokerUrl}}/queues/resource-service/api/inventory/{{playerId}}",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "resource-service",
                 "api",
                 "inventory",
                 "{{playerId}}"
               ]
-            }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "The Gateway refuses this route, which only game-service calls in the system, so the collection sends it to resource-service through the message broker's queue ({{brokerUrl}}/queues/resource-service/...) with a game-service service token."
           },
           "event": [
             {
@@ -482,6 +507,16 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// Mint a service token for game-service, which the message broker requires (it calls this route in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'game-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);",
+                  "",
                   "// Use a fresh player (and fresh spend/refund keys) on every run. The gather/spend/refund",
                   "// requests later in this collection re-create the player's inventory after 'Delete Inventory',",
                   "// so a fixed playerId would make this request return 409 on the next run.",
@@ -499,6 +534,10 @@
                   "pm.test('Status is 201', function () { pm.response.to.have.status(201); });",
                   "pm.test('Resources start empty', function () {",
                   "  pm.expect(pm.response.json().resources).to.eql({});",
+                  "});",
+                  "pm.test('Delivered by the message broker from the service queue', function () {",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Queue')).to.eql('resource-service');",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Instance')).to.include('resource-service');",
                   "});"
                 ]
               }
@@ -507,7 +546,7 @@
           "response": []
         },
         {
-          "name": "Create Inventory - Already Exists (409)",
+          "name": "Create Inventory through the Gateway - Internal Route (404)",
           "request": {
             "method": "POST",
             "url": {
@@ -520,14 +559,81 @@
                 "inventory",
                 "{{playerId}}"
               ]
+            },
+            "description": "Only Game Service calls this route, through the message broker, so the Gateway must not forward it, whatever token the request carries (Lab 4: routes that must not be user available are removed from the Gateway)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('The Gateway refuses the internal route with 404', function () { pm.response.to.have.status(404); });",
+                  "pm.test('Error is route_not_found', function () {",
+                  "    pm.expect(pm.response.json().error).to.eql('route_not_found');",
+                  "});"
+                ]
+              }
             }
+          ]
+        },
+        {
+          "name": "Create Inventory - Already Exists (409) (through the Message Broker)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/inventory/{{playerId}}",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "inventory",
+                "{{playerId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "The Gateway refuses this route, which only game-service calls in the system, so the collection sends it to resource-service through the message broker's queue ({{brokerUrl}}/queues/resource-service/...) with a game-service service token."
           },
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('Status is 409', function () { pm.response.to.have.status(409); });"
+                  "pm.test('Status is 409', function () { pm.response.to.have.status(409); });",
+                  "pm.test('Delivered by the message broker from the service queue', function () {",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Queue')).to.eql('resource-service');",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Instance')).to.include('resource-service');",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for game-service, which the message broker requires (it calls this route in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'game-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
                 ]
               }
             }
@@ -725,14 +831,15 @@
           ],
           "response": []
         }
-      ]
+      ],
+      "description": "POST /api/inventory/{playerId} is called by Game Service only, so the Gateway refuses it (404 route_not_found); the collection creates the test inventory through the message broker with a game-service token. Reading, setting and deleting an inventory stay available through the Gateway."
     },
     {
-      "name": "Resource Economy (Mocked)",
-      "description": "Mocked business logic for the endpoints the CPR contract documents as consumed by Game/Base/Crafting Service (none of which exist yet). Idempotency is real: these are backed by the resource_transactions ledger table. Node data is an in-memory stand-in for the node placement World Service will eventually own. Run 'Gather - Apply' before 'Gather - Duplicate' so the idempotency key exists.",
+      "name": "Resource Economy (Game, Base and Crafting Service routes, through the Message Broker)",
+      "description": "POST /api/gather (Game Service), POST /api/spend and POST /api/refund (Base and Crafting Service) are refused by the Gateway (404 route_not_found), so the collection checks that, then sends them to resource-service's queue in the message broker with the token of the service that calls them. Idempotency is real: a repeated idempotencyKey answers already_applied without changing the balance. GET /api/nodes/{nodeId} stays available through the Gateway.",
       "item": [
         {
-          "name": "Gather - Apply",
+          "name": "Gather - Apply through the Gateway - Internal Route (404)",
           "request": {
             "method": "POST",
             "header": [
@@ -753,8 +860,63 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"idempotencyKey\": \"{{gatherIdempotencyKey}}\",\n    \"playerId\": \"{{playerId}}\",\n    \"nodeId\": \"{{nodeId}}\",\n    \"resourceType\": \"wood\",\n    \"amount\": 12\n  }"
+              "raw": "{\n    \"idempotencyKey\": \"gateway_check_{{$randomInt}}\",\n    \"playerId\": \"{{playerId}}\",\n    \"nodeId\": \"{{nodeId}}\",\n    \"resourceType\": \"wood\",\n    \"amount\": 12\n  }"
+            },
+            "description": "Only Game Service calls this route, through the message broker, so the Gateway must not forward it, whatever token the request carries (Lab 4: routes that must not be user available are removed from the Gateway)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('The Gateway refuses the internal route with 404', function () { pm.response.to.have.status(404); });",
+                  "pm.test('Error is route_not_found', function () {",
+                  "    pm.expect(pm.response.json().error).to.eql('route_not_found');",
+                  "});"
+                ]
+              }
             }
+          ]
+        },
+        {
+          "name": "Gather - Apply (through the Message Broker)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/gather",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "gather"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"idempotencyKey\": \"{{gatherIdempotencyKey}}\",\n    \"playerId\": \"{{playerId}}\",\n    \"nodeId\": \"{{nodeId}}\",\n    \"resourceType\": \"wood\",\n    \"amount\": 12\n  }"
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "The Gateway refuses this route, which only game-service calls in the system, so the collection sends it to resource-service through the message broker's queue ({{brokerUrl}}/queues/resource-service/...) with a game-service service token."
           },
           "response": [],
           "event": [
@@ -762,6 +924,16 @@
               "listen": "prerequest",
               "script": {
                 "exec": [
+                  "// Mint a service token for game-service, which the message broker requires (it calls this route in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'game-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);",
+                  "",
                   "// Generate the key once here so 'Gather - Duplicate' can reuse the",
                   "// exact same literal string; {{$randomInt}} re-evaluates on every",
                   "// use, so it can't safely live inside the stored variable itself.",
@@ -778,6 +950,10 @@
                   "  const body = pm.response.json();",
                   "  pm.expect(body.status).to.eql('applied');",
                   "  pm.expect(body.newBalance).to.be.an('object');",
+                  "});",
+                  "pm.test('Delivered by the message broker from the service queue', function () {",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Queue')).to.eql('resource-service');",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Instance')).to.include('resource-service');",
                   "});"
                 ]
               }
@@ -785,7 +961,7 @@
           ]
         },
         {
-          "name": "Gather - Duplicate (Idempotent)",
+          "name": "Gather - Duplicate (Idempotent) (through the Message Broker)",
           "request": {
             "method": "POST",
             "header": [
@@ -795,11 +971,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/gather",
+              "raw": "{{brokerUrl}}/queues/resource-service/api/gather",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "resource-service",
                 "api",
                 "gather"
               ]
@@ -807,7 +985,18 @@
             "body": {
               "mode": "raw",
               "raw": "{\n    \"idempotencyKey\": \"{{gatherIdempotencyKey}}\",\n    \"playerId\": \"{{playerId}}\",\n    \"nodeId\": \"{{nodeId}}\",\n    \"resourceType\": \"wood\",\n    \"amount\": 12\n  }"
-            }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "The Gateway refuses this route, which only game-service calls in the system, so the collection sends it to resource-service through the message broker's queue ({{brokerUrl}}/queues/resource-service/...) with a game-service service token."
           },
           "response": [],
           "event": [
@@ -819,14 +1008,35 @@
                   "pm.test('Replays result instead of applying twice', function () {",
                   "  const body = pm.response.json();",
                   "  pm.expect(body.status).to.eql('already_applied');",
+                  "});",
+                  "pm.test('Delivered by the message broker from the service queue', function () {",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Queue')).to.eql('resource-service');",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Instance')).to.include('resource-service');",
                   "});"
+                ]
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for game-service, which the message broker requires (it calls this route in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'game-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Gather - Missing Fields (400)",
+          "name": "Gather - Missing Fields (400) (through the Message Broker)",
           "request": {
             "method": "POST",
             "header": [
@@ -836,11 +1046,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/gather",
+              "raw": "{{brokerUrl}}/queues/resource-service/api/gather",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "resource-service",
                 "api",
                 "gather"
               ]
@@ -848,7 +1060,18 @@
             "body": {
               "mode": "raw",
               "raw": "{\n    \"playerId\": \"{{playerId}}\"\n  }"
-            }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "The Gateway refuses this route, which only game-service calls in the system, so the collection sends it to resource-service through the message broker's queue ({{brokerUrl}}/queues/resource-service/...) with a game-service service token."
           },
           "response": [],
           "event": [
@@ -856,14 +1079,35 @@
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('Status is 400', function () { pm.response.to.have.status(400); });"
+                  "pm.test('Status is 400', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Delivered by the message broker from the service queue', function () {",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Queue')).to.eql('resource-service');",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Instance')).to.include('resource-service');",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for game-service, which the message broker requires (it calls this route in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'game-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Spend - Sufficient Balance",
+          "name": "Spend - Sufficient Balance through the Gateway - Internal Route (404)",
           "request": {
             "method": "POST",
             "header": [
@@ -884,8 +1128,63 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"idempotencyKey\": \"{{spendIdempotencyKey}}\",\n    \"playerId\": \"{{playerId}}\",\n    \"reason\": \"barricade\",\n    \"costs\": [\n      {\n        \"resourceType\": \"wood\",\n        \"amount\": 5\n      }\n    ]\n  }"
+              "raw": "{\n    \"idempotencyKey\": \"gateway_check_{{$randomInt}}\",\n    \"playerId\": \"{{playerId}}\",\n    \"reason\": \"barricade\",\n    \"costs\": [\n      {\n        \"resourceType\": \"wood\",\n        \"amount\": 5\n      }\n    ]\n  }"
+            },
+            "description": "Only Base and Crafting Service calls this route, through the message broker, so the Gateway must not forward it, whatever token the request carries (Lab 4: routes that must not be user available are removed from the Gateway)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('The Gateway refuses the internal route with 404', function () { pm.response.to.have.status(404); });",
+                  "pm.test('Error is route_not_found', function () {",
+                  "    pm.expect(pm.response.json().error).to.eql('route_not_found');",
+                  "});"
+                ]
+              }
             }
+          ]
+        },
+        {
+          "name": "Spend - Sufficient Balance (through the Message Broker)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/spend",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "spend"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"idempotencyKey\": \"{{spendIdempotencyKey}}\",\n    \"playerId\": \"{{playerId}}\",\n    \"reason\": \"barricade\",\n    \"costs\": [\n      {\n        \"resourceType\": \"wood\",\n        \"amount\": 5\n      }\n    ]\n  }"
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "The Gateway refuses this route, which only base-service calls in the system, so the collection sends it to resource-service through the message broker's queue ({{brokerUrl}}/queues/resource-service/...) with a base-service service token."
           },
           "response": [],
           "event": [
@@ -896,14 +1195,35 @@
                   "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
                   "pm.test('Status is applied', function () {",
                   "  pm.expect(pm.response.json().status).to.eql('applied');",
+                  "});",
+                  "pm.test('Delivered by the message broker from the service queue', function () {",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Queue')).to.eql('resource-service');",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Instance')).to.include('resource-service');",
                   "});"
+                ]
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for base-service, which the message broker requires (it calls this route in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'base-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Spend - Insufficient Balance (402)",
+          "name": "Spend - Insufficient Balance (402) (through the Message Broker)",
           "request": {
             "method": "POST",
             "header": [
@@ -913,11 +1233,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/spend",
+              "raw": "{{brokerUrl}}/queues/resource-service/api/spend",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "resource-service",
                 "api",
                 "spend"
               ]
@@ -925,7 +1247,18 @@
             "body": {
               "mode": "raw",
               "raw": "{\n    \"idempotencyKey\": \"spend_p44_insufficient_{{$randomInt}}\",\n    \"playerId\": \"{{playerId}}\",\n    \"reason\": \"barricade\",\n    \"costs\": [\n      {\n        \"resourceType\": \"wood\",\n        \"amount\": 999999\n      }\n    ]\n  }"
-            }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "The Gateway refuses this route, which only base-service calls in the system, so the collection sends it to resource-service through the message broker's queue ({{brokerUrl}}/queues/resource-service/...) with a base-service service token."
           },
           "response": [],
           "event": [
@@ -938,14 +1271,35 @@
                   "  const body = pm.response.json();",
                   "  pm.expect(body.status).to.eql('rejected_insufficient');",
                   "  pm.expect(body.missing).to.be.an('object');",
+                  "});",
+                  "pm.test('Delivered by the message broker from the service queue', function () {",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Queue')).to.eql('resource-service');",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Instance')).to.include('resource-service');",
                   "});"
+                ]
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for base-service, which the message broker requires (it calls this route in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'base-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Refund",
+          "name": "Refund through the Gateway - Internal Route (404)",
           "request": {
             "method": "POST",
             "header": [
@@ -966,8 +1320,63 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"idempotencyKey\": \"{{refundIdempotencyKey}}\",\n    \"playerId\": \"{{playerId}}\",\n    \"reason\": \"craft_rollback\",\n    \"costs\": [\n      {\n        \"resourceType\": \"wood\",\n        \"amount\": 5\n      }\n    ]\n  }"
+              "raw": "{\n    \"idempotencyKey\": \"gateway_check_{{$randomInt}}\",\n    \"playerId\": \"{{playerId}}\",\n    \"reason\": \"craft_rollback\",\n    \"costs\": [\n      {\n        \"resourceType\": \"wood\",\n        \"amount\": 5\n      }\n    ]\n  }"
+            },
+            "description": "Only Base and Crafting Service calls this route, through the message broker, so the Gateway must not forward it, whatever token the request carries (Lab 4: routes that must not be user available are removed from the Gateway)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('The Gateway refuses the internal route with 404', function () { pm.response.to.have.status(404); });",
+                  "pm.test('Error is route_not_found', function () {",
+                  "    pm.expect(pm.response.json().error).to.eql('route_not_found');",
+                  "});"
+                ]
+              }
             }
+          ]
+        },
+        {
+          "name": "Refund (through the Message Broker)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/refund",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "refund"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"idempotencyKey\": \"{{refundIdempotencyKey}}\",\n    \"playerId\": \"{{playerId}}\",\n    \"reason\": \"craft_rollback\",\n    \"costs\": [\n      {\n        \"resourceType\": \"wood\",\n        \"amount\": 5\n      }\n    ]\n  }"
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "The Gateway refuses this route, which only crafting-service calls in the system, so the collection sends it to resource-service through the message broker's queue ({{brokerUrl}}/queues/resource-service/...) with a crafting-service service token."
           },
           "response": [],
           "event": [
@@ -978,7 +1387,28 @@
                   "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
                   "pm.test('Status is refunded', function () {",
                   "  pm.expect(pm.response.json().status).to.eql('refunded');",
+                  "});",
+                  "pm.test('Delivered by the message broker from the service queue', function () {",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Queue')).to.eql('resource-service');",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Instance')).to.include('resource-service');",
                   "});"
+                ]
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for crafting-service, which the message broker requires (it calls this route in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'crafting-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
                 ]
               }
             }
@@ -1044,6 +1474,120 @@
               }
             }
           ]
+        }
+      ]
+    },
+    {
+      "name": "Monitoring",
+      "description": "GET /metrics of resource-service (Prometheus text format), the endpoint Prometheus scrapes for the Grafana dashboard.",
+      "item": [
+        {
+          "name": "Metrics (GET /metrics through the Message Broker)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for game-service, which the message broker requires (it calls this route in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'game-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Prometheus text format', function () {",
+                  "    pm.expect(pm.response.headers.get('Content-Type')).to.include('text/plain');",
+                  "});",
+                  "const text = pm.response.text();",
+                  "pm.test('HTTP metrics with the team names and labels', function () {",
+                  "    pm.expect(text).to.include('# TYPE http_requests_received_total counter');",
+                  "    pm.expect(text).to.include('http_requests_received_total{');",
+                  "    pm.expect(text).to.include('http_request_duration_seconds_bucket{');",
+                  "    pm.expect(text).to.include('http_requests_in_progress');",
+                  "    pm.expect(text).to.match(/code=\"\\d{3}\",method=\"[A-Z]+\",route=\"[^\"]+\"/);",
+                  "});",
+                  "pm.test('The database answers', function () { pm.expect(text).to.include('kahoots_database_up 1'); });",
+                  "pm.test('Circuit breaker towards Service Discovery is closed', function () {",
+                  "    pm.expect(text).to.include('kahoots_circuit_breaker_open{target=\"discovery-service\"} 0');",
+                  "});",
+                  "pm.test('Node.js process metrics', function () { pm.expect(text).to.include('process_cpu_user_seconds_total'); });",
+                  "// The broker hands the scrape to one of the 3 replicas, which may not be the one that applied this run's",
+                  "// gather / spend / refund, so only the metric itself is checked here; Grafana sums it over every replica.",
+                  "pm.test('Gather / spend / refund outcomes are exported', function () {",
+                  "    pm.expect(text).to.include('# TYPE kahoots_resource_transactions_total counter');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/metrics",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "metrics"
+              ]
+            },
+            "description": "What Prometheus scrapes every 10 s from each replica (it reads the replicas directly on the Docker network; the team compose does not publish their ports, so the collection reaches one replica through the broker's queue)."
+          },
+          "response": []
+        },
+        {
+          "name": "Metrics through the Gateway - Not Exposed (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('The Gateway does not route /metrics', function () { pm.response.to.have.status(404); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/metrics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "metrics"
+              ]
+            },
+            "description": "GET /metrics is for Prometheus inside the Docker network; players cannot read it through the Gateway."
+          },
+          "response": []
         }
       ]
     }
