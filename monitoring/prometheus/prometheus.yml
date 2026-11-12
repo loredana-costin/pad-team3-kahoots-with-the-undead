@@ -37,3 +37,16 @@ scrape_configs:
       - names: ["crafting-service"]
         type: A
         port: 5004
+
+  - job_name: exam-service
+    dns_sd_configs:
+      - names: ["exam-service"]
+        type: A
+        port: 3000
+
+  - job_name: world-service
+    dns_sd_configs:
+      - names: ["world-service"]
+        type: A
+        port: 3001
+
