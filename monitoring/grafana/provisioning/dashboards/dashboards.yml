@@ -1,0 +1,11 @@
+# Loads every dashboard JSON in monitoring/grafana/dashboards on startup.
+apiVersion: 1
+
+providers:
+  - name: kahoots
+    folder: ""
+    type: file
+    disableDeletion: false
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards

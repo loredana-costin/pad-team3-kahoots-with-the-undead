@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Zombie Service",
-    "description": "In Kahoots with the Undead \u2014 Zombie Service API. Covers the implemented CRUD endpoints over /api/zombie-types, plus the mocked spawn / special-action endpoints that Game Service will call once it exists (see the CPR communication contract). Owner: Costin Loredana.",
+    "description": "In Kahoots with the Undead \u2014 Zombie Service API. Covers the CRUD endpoints over /api/zombie-types through the Gateway, the spawn / special-action endpoints Game Service calls (through the message broker, since the Gateway refuses them), and GET /metrics. Owner: Costin Loredana.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -42,6 +42,18 @@
       "key": "jwt",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "brokerUrl",
+      "value": "http://localhost:8600"
+    },
+    {
+      "key": "jwtSecret",
+      "value": "team-compose-development-secret-at-least-32-chars"
+    },
+    {
+      "key": "serviceJwt",
+      "value": ""
     }
   ],
   "auth": {
@@ -710,11 +722,11 @@
       ]
     },
     {
-      "name": "Zombie Instances (Mocked)",
-      "description": "Mocked business logic for the endpoints the CPR contract documents as consumed by Game Service (which doesn't exist yet). Spawning picks real, weighted zombie types from /api/zombie-types; special-action responses are shaped by the real category/specialAbility/cureRequirement on that type. Instances are in-memory and short-lived by design (they don't survive a restart) \u2014 run 'Spawn Zombies' before 'Trigger Special Action' in the same session.",
+      "name": "Zombie Instances (Game Service routes, through the Message Broker)",
+      "description": "POST /api/zombies/spawn and POST /api/zombies/{instanceId}/special-action are called by Game Service only. The Gateway refuses them (404 route_not_found), so the collection checks that, then sends them to zombie-service's queue in the message broker with a game-service token. Spawning picks real, weighted zombie types from /api/zombie-types; special actions are shaped by the instance's category and ability.",
       "item": [
         {
-          "name": "Spawn Zombies",
+          "name": "Spawn Zombies through the Gateway - Internal Route (404)",
           "request": {
             "method": "POST",
             "header": [
@@ -737,7 +749,63 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"cycleId\": \"cyc_884\",\n  \"worldZoneId\": \"zone_12\",\n  \"spawnCount\": 5,\n  \"typeWeights\": {\n    \"professor\": 0.3,\n    \"tourist\": 0.7\n  }\n}"
+            },
+            "description": "Only Game Service calls this route, through the message broker, so the Gateway must not forward it, whatever token the request carries (Lab 4: routes that must not be user available are removed from the Gateway)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('The Gateway refuses the internal route with 404', function () { pm.response.to.have.status(404); });",
+                  "pm.test('Error is route_not_found', function () {",
+                  "    pm.expect(pm.response.json().error).to.eql('route_not_found');",
+                  "});"
+                ]
+              }
             }
+          ]
+        },
+        {
+          "name": "Spawn Zombies (through the Message Broker)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/zombies/spawn",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "zombies",
+                "spawn"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cycleId\": \"cyc_884\",\n  \"worldZoneId\": \"zone_12\",\n  \"spawnCount\": 5,\n  \"typeWeights\": {\n    \"professor\": 0.3,\n    \"tourist\": 0.7\n  }\n}"
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "The Gateway refuses this route, which only game-service calls in the system, so the collection sends it to zombie-service through the message broker's queue ({{brokerUrl}}/queues/zombie-service/...) with a game-service service token."
           },
           "response": [],
           "event": [
@@ -755,14 +823,35 @@
                   "    pm.expect(z.health).to.be.a('number');",
                   "  });",
                   "  pm.collectionVariables.set('spawnedInstanceId', body.zombies[0].instanceId);",
+                  "});",
+                  "pm.test('Delivered by the message broker from the service queue', function () {",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Queue')).to.eql('zombie-service');",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Instance')).to.include('zombie-service');",
                   "});"
+                ]
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for game-service, which the message broker requires (it calls this route in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'game-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Spawn Zombies - Invalid Category (400)",
+          "name": "Spawn Zombies - Invalid Category (400) (through the Message Broker)",
           "request": {
             "method": "POST",
             "header": [
@@ -772,11 +861,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/zombies/spawn",
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/zombies/spawn",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "zombie-service",
                 "api",
                 "zombies",
                 "spawn"
@@ -785,7 +876,18 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"cycleId\": \"cyc_1\",\n  \"worldZoneId\": \"zone_1\",\n  \"spawnCount\": 1,\n  \"typeWeights\": {\n    \"ghost\": 1\n  }\n}"
-            }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "The Gateway refuses this route, which only game-service calls in the system, so the collection sends it to zombie-service through the message broker's queue ({{brokerUrl}}/queues/zombie-service/...) with a game-service service token."
           },
           "response": [],
           "event": [
@@ -793,14 +895,35 @@
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('Status is 400', function () { pm.response.to.have.status(400); });"
+                  "pm.test('Status is 400', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Delivered by the message broker from the service queue', function () {",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Queue')).to.eql('zombie-service');",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Instance')).to.include('zombie-service');",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for game-service, which the message broker requires (it calls this route in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'game-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Spawn Zombies - Missing spawnCount (400)",
+          "name": "Spawn Zombies - Missing spawnCount (400) (through the Message Broker)",
           "request": {
             "method": "POST",
             "header": [
@@ -810,11 +933,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/zombies/spawn",
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/zombies/spawn",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "zombie-service",
                 "api",
                 "zombies",
                 "spawn"
@@ -823,7 +948,18 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"cycleId\": \"cyc_1\",\n  \"worldZoneId\": \"zone_1\",\n  \"typeWeights\": {\n    \"professor\": 1\n  }\n}"
-            }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "The Gateway refuses this route, which only game-service calls in the system, so the collection sends it to zombie-service through the message broker's queue ({{brokerUrl}}/queues/zombie-service/...) with a game-service service token."
           },
           "response": [],
           "event": [
@@ -831,14 +967,35 @@
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('Status is 400', function () { pm.response.to.have.status(400); });"
+                  "pm.test('Status is 400', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Delivered by the message broker from the service queue', function () {",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Queue')).to.eql('zombie-service');",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Instance')).to.include('zombie-service');",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for game-service, which the message broker requires (it calls this route in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'game-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Trigger Special Action",
+          "name": "Trigger Special Action through the Gateway - Internal Route (404)",
           "request": {
             "method": "POST",
             "header": [
@@ -862,7 +1019,64 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"targetPlayerId\": \"p_44\"\n}"
+            },
+            "description": "Only Game Service calls this route, through the message broker, so the Gateway must not forward it, whatever token the request carries (Lab 4: routes that must not be user available are removed from the Gateway)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('The Gateway refuses the internal route with 404', function () { pm.response.to.have.status(404); });",
+                  "pm.test('Error is route_not_found', function () {",
+                  "    pm.expect(pm.response.json().error).to.eql('route_not_found');",
+                  "});"
+                ]
+              }
             }
+          ]
+        },
+        {
+          "name": "Trigger Special Action (through the Message Broker)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/zombies/{{spawnedInstanceId}}/special-action",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "zombies",
+                "{{spawnedInstanceId}}",
+                "special-action"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"targetPlayerId\": \"p_44\"\n}"
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "The Gateway refuses this route, which only game-service calls in the system, so the collection sends it to zombie-service through the message broker's queue ({{brokerUrl}}/queues/zombie-service/...) with a game-service service token."
           },
           "response": [],
           "event": [
@@ -873,14 +1087,35 @@
                   "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
                   "pm.test('Response has an actionType', function () {",
                   "  pm.expect(pm.response.json().actionType).to.be.a('string');",
+                  "});",
+                  "pm.test('Delivered by the message broker from the service queue', function () {",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Queue')).to.eql('zombie-service');",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Instance')).to.include('zombie-service');",
                   "});"
+                ]
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for game-service, which the message broker requires (it calls this route in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'game-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Trigger Special Action - Instance Not Found (404)",
+          "name": "Trigger Special Action - Instance Not Found (404) (through the Message Broker)",
           "request": {
             "method": "POST",
             "header": [
@@ -890,11 +1125,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/zombies/does_not_exist/special-action",
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/zombies/does_not_exist/special-action",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "zombie-service",
                 "api",
                 "zombies",
                 "does_not_exist",
@@ -904,7 +1141,18 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"targetPlayerId\": \"p_44\"\n}"
-            }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "The Gateway refuses this route, which only game-service calls in the system, so the collection sends it to zombie-service through the message broker's queue ({{brokerUrl}}/queues/zombie-service/...) with a game-service service token."
           },
           "response": [],
           "event": [
@@ -912,11 +1160,141 @@
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('Status is 404', function () { pm.response.to.have.status(404); });"
+                  "pm.test('Status is 404', function () { pm.response.to.have.status(404); });",
+                  "pm.test('Delivered by the message broker from the service queue', function () {",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Queue')).to.eql('zombie-service');",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Instance')).to.include('zombie-service');",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for game-service, which the message broker requires (it calls this route in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'game-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
                 ]
               }
             }
           ]
+        }
+      ]
+    },
+    {
+      "name": "Monitoring",
+      "description": "GET /metrics of zombie-service (Prometheus text format), the endpoint Prometheus scrapes for the Grafana dashboard.",
+      "item": [
+        {
+          "name": "Metrics (GET /metrics through the Message Broker)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for game-service, which the message broker requires (it calls this route in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'game-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Prometheus text format', function () {",
+                  "    pm.expect(pm.response.headers.get('Content-Type')).to.include('text/plain');",
+                  "});",
+                  "const text = pm.response.text();",
+                  "pm.test('HTTP metrics with the team names and labels', function () {",
+                  "    pm.expect(text).to.include('# TYPE http_requests_received_total counter');",
+                  "    pm.expect(text).to.include('http_requests_received_total{');",
+                  "    pm.expect(text).to.include('http_request_duration_seconds_bucket{');",
+                  "    pm.expect(text).to.include('http_requests_in_progress');",
+                  "    pm.expect(text).to.match(/code=\"\\d{3}\",method=\"[A-Z]+\",route=\"[^\"]+\"/);",
+                  "});",
+                  "pm.test('The database answers', function () { pm.expect(text).to.include('kahoots_database_up 1'); });",
+                  "pm.test('Circuit breaker towards Service Discovery is closed', function () {",
+                  "    pm.expect(text).to.include('kahoots_circuit_breaker_open{target=\"discovery-service\"} 0');",
+                  "});",
+                  "pm.test('Node.js process metrics', function () { pm.expect(text).to.include('process_cpu_user_seconds_total'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/metrics",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "metrics"
+              ]
+            },
+            "description": "What Prometheus scrapes every 10 s from each replica (it reads the replicas directly on the Docker network; the team compose does not publish their ports, so the collection reaches one replica through the broker's queue)."
+          },
+          "response": []
+        },
+        {
+          "name": "Metrics through the Gateway - Not Exposed (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('The Gateway does not route /metrics', function () { pm.response.to.have.status(404); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/metrics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "metrics"
+              ]
+            },
+            "description": "GET /metrics is for Prometheus inside the Docker network; players cannot read it through the Gateway."
+          },
+          "response": []
         }
       ]
     }

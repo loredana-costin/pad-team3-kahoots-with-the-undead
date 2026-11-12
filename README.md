@@ -12,6 +12,8 @@ Microservices are implemented using two technologies:
 * **Node.js/TypeScript:** Exam Service, World Service, Zombie Service, Resource Service
 * **C#/.NET (ASP.NET Core):** Player Service, Game Service, Base Service, Crafting Service
 
+The infrastructure services are written in **Python (FastAPI)**: the API Gateway (entry point), the Message Broker (service queues, gRPC relay and topic events) and Service Discovery (registry and health polling).
+
 ---
 ## Team Definition
 
@@ -19,16 +21,17 @@ Microservices are implemented using two technologies:
 |---|---|
 | Ceaetchii Andrei | Player Service, Game Service |
 | Botnari Maria-Elena | Exam Service, World Service |
-| Costin Loredana | Gateway Service, Zombie Service, Resource Service |
+| Costin Loredana | Zombie Service, Resource Service |
 | Bulat Cristian | Base Service, Crafting Service |
+| Whole team | API Gateway, Service Discovery, Message Broker |
 
 ---
 ## Data Management Strategy
 
 Every service owns a **database** — no service reads or writes another service's tables directly. All cross-service data access happens through the network, using two patterns:
 
-- **Synchronous REST** for data an actor needs immediately to proceed (e.g. Game Service needs zombie stats before it can spawn an encounter).
-- **Asynchronous events** (RabbitMQ) for state changes that other services should eventually react to, but that shouldn't stop the initial request (e.g. World Service unlocking a wing doesn't need to block exam grading).
+- **Synchronous requests** for data an actor needs immediately to proceed (e.g. Game Service needs zombie stats before it can spawn an encounter). They go through the Message Broker: `Broker.Relay` over gRPC from a service, a subscriber-based queue over HTTP from the Gateway.
+- **Asynchronous events** (the Message Broker's topic-based queues, `Broker.Publish`) for state changes that other services should eventually react to, but that shouldn't stop the initial request (e.g. World Service unlocking a wing doesn't need to block exam grading).
 
 Two rules apply across every state-changing endpoint that moves resources, items, or currency-like values:
 
@@ -45,17 +48,25 @@ The full communication contract — every endpoint, its payload, and its respons
 
 | Team | Services | Language & Framework | Database | Communication Patterns | Motivation & Trade-offs |
 |---|---|---|---|---|---|
-| Ceaetchii Andrei | Player Service, Game Service | C# / ASP.NET Core | PostgreSQL (both services) | REST/HTTP + WebSockets + RabbitMQ Events | C# provides strong typing and asynchronous programming. PostgreSQL ensures data integrity and transactions for player identity, inventory and trades. Game Service uses it as well so both services share one architecture: the same generic repository, migration runner and base entity. Its state is short-lived but still relational (sessions, rosters, timed actions), and one DBMS keeps deployment and the shared compose file simpler. REST is used for request/response communication, WebSockets for real-time updates, and RabbitMQ for asynchronous cross-service events. Trade-off: Redis would fit ephemeral session state better and was the original choice, but running a single database across both services is simpler to operate at this scale. |
+| Ceaetchii Andrei | Player Service, Game Service | C# / ASP.NET Core | PostgreSQL (both services) | REST/HTTP for clients, gRPC to the Message Broker for calls to other services, WebSockets, broker topic events | C# provides strong typing and asynchronous programming. PostgreSQL ensures data integrity and transactions for player identity, inventory and trades. Game Service uses it as well so both services share one architecture: the same generic repository, migration runner and base entity. Its state is short-lived but still relational (sessions, rosters, timed actions), and one DBMS keeps deployment and the shared compose file simpler. REST is used for request/response communication with clients, gRPC through the Message Broker (`Broker.Relay`, a binary protobuf call over one multiplexed HTTP/2 connection) for Game Service's calls to the other services, WebSockets for real-time updates, and the broker's topic queues for asynchronous cross-service events. Trade-off: Redis would fit ephemeral session state better and was the original choice, but running a single database across both services is simpler to operate at this scale. |
 | Botnari Maria-Elena | Exam Service, World Service | Node.js/TypeScript (Express) | PostgreSQL | REST + RabbitMQ events | Both services store structured, relational data (exams and attempts for one, rooms and connections for the other), so one language and one database keeps things simple and easy to maintain across both. Trade-off: without EF Core's built-in migration tooling, schema changes to the room graph require more manual discipline to keep consistent. |
 | Costin Loredana | Gateway Service, Zombie Service, Resource Service | Gateway: Python (FastAPI); Others: Node.js/TypeScript (Express) | Gateway: None; Zombie: MongoDB; Resource: PostgreSQL | Gateway: REST routing; Zombie: REST; Resource: REST, idempotency-key-gated | Gateway uses FastAPI to provide an async entry point and routing layer. Node's non-blocking I/O fits the other two I/O-bound services. MongoDB's flexible schema enables rapid Zombie Service iteration without migrations as ability types expand. The correctness-critical Resource Service uses TypeScript and DB transactions to enforce atomic, idempotent balance updates. Trade-off: Node is weaker at CPU-heavy work, but neither service does any, so this cost doesn't apply here. |
-| Bulat Cristian | Base Service, Crafting Service | C#/.NET (ASP.NET Core) | PostgreSQL | REST for Base and Crafting Services; RabbitMQ publisher and consumer for both | Both services perform "spend and apply" operations that must not partially succeed. C#'s explicit exception handling and EF Core transactions make atomic, saga-style operations across service calls easier to reason about than a dynamically-typed alternative. Trade-off: more boilerplate than Node for simple CRUD, accepted for the correctness guarantee. |
+| Bulat Cristian | Base Service, Crafting Service | C#/.NET (ASP.NET Core) | PostgreSQL | REST for Base and Crafting Services, gRPC to the Message Broker for calls to other services, broker topic events published and consumed by both | Both services perform "spend and apply" operations that must not partially succeed. C#'s explicit exception handling and EF Core transactions make atomic, saga-style operations across service calls easier to reason about than a dynamically-typed alternative. Trade-off: more boilerplate than Node for simple CRUD, accepted for the correctness guarantee. |
 
 ---
 # Architectural Diagram of Microservices Operation
 
 ![architecture-diagram](architectural-diagram.png)
 
-The diagram illustrates the microservices architecture for the **In Kahoots with the Undead** system. Game Service acts as the central service handling the others, making synchronous calls to Player, Exam, World, Zombie, Resource, and Base Service to run a gameplay cycle. Resource Service and Zombie Service never call outward to other microservices. Exam Service and World Service are loosely coupled via asynchronous events — `AchievementUnlocked` (consumed by World Service, Player Service, and Crafting Service) and `ZoneUnlocked` (consumed by Game Service, Base Service, and Crafting Service) — so grading a player's exam doesn't block on procedural map generation. Base Service and Crafting Service each additionally read from and coordinate sagas across several other services to validate and apply their own effects — see the dependency diagram below for the full picture. Crafting Service specifically coordinates a saga across Resource Service and Player Service to atomically consume ingredients and deliver crafted items, and reads from Player, Exam, and World Service to evaluate recipe unlock conditions.
+The diagram illustrates the microservices architecture for the **In Kahoots with the Undead** system as it runs in the team compose.
+
+- **Entry point.** Players reach the system only through the API Gateway (`:8000`, HTTP + JWT), plus a WebSocket opened straight to a Game Service replica (`:3003-3005`) for live game updates. The Gateway validates the token, finds the service that owns the path and puts the request on that service's **subscriber-based queue** in the Message Broker (HTTP `:8600`).
+- **Message Broker.** It hands each request to one registered instance, balancing by service load (instances in critical load last, fewest requests in flight first). It keeps a circuit breaker per instance: when a breaker trips, the request is rerouted to the next instance and the tripped instance is removed from Service Discovery. Load balancing and circuit breaking are no longer the Gateway's job.
+- **Service-to-service calls.** Game Service (World, Exam, Zombie, Resource, Base), Base Service (Resource, Player, World) and Crafting Service (Resource, Player, Exam, World) call the other services through the broker over gRPC (`Broker.Relay`). Base and Crafting coordinate their spend-and-apply sagas this way. Resource Service and Zombie Service never call outward. The one direct call left is Exam Service → World Service (`ExamPassed`, HTTP to an instance found in Service Discovery).
+- **Events.** Services publish with `Broker.Publish`. The broker delivers a copy to every service subscribed to the topic in Service Discovery as `POST /events/{topic}`. Base Service (`BaseDefenseChanged`) and Crafting Service (`RecipeUnlocked`) already publish. Player, Game, Base and Crafting Service are subscribed to `ExamPassed`, `CourseCompleted`, `AchievementUnlocked`, `ExamFailed` and `ZoneUnlocked`, but Exam and World Service (3.0.0) don't publish on the broker yet.
+- **Service Discovery** (`:8500`) holds every replica's registration and topics. It polls each instance's `/health` to set its load status and sends alerts to Discord / Telegram.
+- **Replicas.** Every domain service runs 3 replicas that share that service's own database.
+- **Monitoring.** Prometheus scrapes the broker and the Player, Game, Base and Crafting replicas, Alloy ships every container's logs to Loki, and Grafana shows both.
 
 ## Authorization at the Gateway
 
@@ -63,7 +74,7 @@ Every request to the Gateway (`http://localhost:8000`) needs `Authorization: Bea
 
 Services calling through the Gateway present a service token signed with the same secret (`"kind": "service"`); the Gateway forwards its subject as `X-Service-Name` instead of player headers. The secret is `JWT_SECRET` on the Gateway and `Jwt__Secret` on Player and Game Service; all three must match.
 
-Service-to-service calls through the Gateway: Game Service to World, Exam, Zombie, Resource and Base Service. The Postman collections get a token first and send it on every request.
+Service-to-service calls do not go through the Gateway any more: Game Service reaches World, Exam, Zombie, Resource and Base Service through the Message Broker over gRPC (`Broker.Relay`, see the message-broker README), with the same service token in the call metadata. The routes only the services call are therefore not available through the Gateway, which answers `404` and `{ "error": "route_not_found", "message": "This route is only for the services and is not available through the gateway." }` whatever token the request carries: `PATCH /api/players/{id}/progression`, `POST /api/players/{id}/inventory/items`, `POST /api/players/{id}/achievements`, `/api/players/events`, `/api/sessions/events`, `POST /exams/start`, `POST /exams/{attemptId}/submit`, `POST /exams/{attemptId}/abandon`, `GET /exams/{examId}/retryEligibility`, `POST /api/zombies/spawn`, `POST /api/zombies/{id}/special-action`, `POST /api/inventory/{playerId}`, `POST /api/gather`, `POST /api/spend`, `POST /api/refund`, `POST /api/base/{id}/barricade` and `POST /api/base/{id}/facilities`. The Postman collections get a token first and send it on every request.
 
 ---
 ## **1. Player Service**
@@ -79,7 +90,7 @@ Handles global player identity, progression, and inventory.
 
 ### **DockerHub Image**
 - **Repository:** [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service)
-- **Image Tag:** `andrei045/player-service:3.1.0`
+- **Image Tag:** `andrei045/player-service:4.0.0`
 - **Default Port:** `Internal only (8080), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
@@ -97,7 +108,7 @@ Describes the running instance: version, when it started and how long it has bee
 
 Response
 ```json
-{ "status": "ok", "service": "player-service", "version": "3.1.0", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z" }
+{ "status": "ok", "service": "player-service", "version": "4.0.0", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z" }
 ```
 
 **`POST /api/auth/register`** *(Consumed by Gateway)*
@@ -215,7 +226,27 @@ Error Response (409 Conflict)
 { "status": "rejected", "reason": "insufficient_items" }
 ```
 
+**`POST /events/{topic}`** *(Consumed by Message Broker)*
+
+Delivery of an event published on a topic Player Service subscribes to (see Message Queue Events below). The broker posts its envelope, with the publisher's event as `payload`, and sends it again later on a `5xx` or a timeout; a `4xx` (unknown or malformed event) tells it not to. The handler ignores an event already applied, so a repeated delivery is harmless.
+
+Payload
+```json
+{ "messageId": "ddaa98928d344993bc584176e696fbee", "topic": "ExamPassed", "publisher": "exam-service", "publishedAt": "2026-11-03T14:34:14.006033+00:00", "payload": { "playerId": "player_123", "courseCategory": "mathematics", "examId": "discreteMathematicsExam", "attemptId": "attempt_456", "grade": 70, "xpAwarded": 100, "timestamp": "2026-09-08T10:30:00Z" } }
+```
+
+Success Response (200 OK)
+```json
+{ "eventName": "ExamPassedEvent", "status": "applied", "xp": 1350 }
+```
+
+**`GET /metrics`** *(Consumed by Prometheus)*
+
+Request counts and durations per route and status in the Prometheus text format (`http_requests_received_total`, `http_request_duration_seconds`, `http_requests_in_progress`), exempt from the task limits like `GET /health`. Not available through the Gateway.
+
 ### **Message Queue Events**
+
+Player Service registers with Service Discovery with `"topics": ["ExamPassed", "ExamPassedEvent", "CourseCompleted", "CourseCompletedEvent", "AchievementUnlocked", "AchievementUnlockedEvent"]` (both spellings, until every publisher uses the same one), and the Message Broker delivers the events published on them to `POST /events/{topic}`.
 
 **SUBSCRIBE `ExamPassed`** *(Published by Exam Service)* — awards the XP reported by an exam attempt.
 
@@ -237,7 +268,7 @@ The central real-time gameplay service. Manages sessions, the day/night cycle, t
 
 ### **DockerHub Image**
 - **Repository:** [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service)
-- **Image Tag:** `andrei045/game-service:3.1.0`
+- **Image Tag:** `andrei045/game-service:4.0.0`
 - **Default Port:** `Internal only (8080), accessible via Gateway (8000); WebSocket on 3003-3005`
 
 ### **Consumed API Endpoints**
@@ -250,7 +281,7 @@ The central real-time gameplay service. Manages sessions, the day/night cycle, t
 - `POST /api/base/{playerId}/barricade`, `POST /api/base/{playerId}/facilities` *(Base Service)* — trigger base actions.
 - `PATCH /api/players/{playerId}/progression` *(Player Service)* — award XP after a cycle.
 
-Game Service calls them through the Gateway with a service token (`kind: service`, forwarded as `X-Service-Name: game-service`). Each called service, Service Discovery included, has a circuit breaker shared by all its endpoints: 3 failures (`5xx`, timeout, unreachable; a `4xx` is not a failure) within Task Timeout × 3.5 (28 s) trip it, the trip is logged, and calls to that service fail at once (`502`) until a trial call after the window succeeds. Every request and every call to another service is logged as one JSON line with its status and duration, and every line of a request carries its `X-Request-ID` as `CorrelationId`.
+Game Service calls them through the Message Broker over gRPC (`Broker.Relay` on `message-broker:8601`, set with `Broker__Url`): each call carries the service name, method, path, query, headers and body, and the instance's status, headers and body come back in the answer, so the HTTP clients above the gRPC layer are unchanged. The call is signed with a service token in the metadata (`kind: service`; the broker forwards its subject as `X-Service-Name: game-service`) and the broker picks the instance (load-aware balancing, circuit breakers, rerouting). Each called service, Service Discovery included, has a circuit breaker shared by all its endpoints: 3 failures (`5xx`, timeout, unreachable; a `4xx` is not a failure) within Task Timeout × 3.5 (28 s) trip it, the trip is logged, and calls to that service fail at once (`502`) until a trial call after the window succeeds. Every request and every call to another service is logged as one JSON line with its status and duration, and every line of a request carries its `X-Request-ID` as `CorrelationId`.
 
 ### **Exposed API Endpoints**
 
@@ -260,7 +291,7 @@ Describes the running instance: version, when it started and how long it has bee
 
 Response
 ```json
-{ "status": "ok", "service": "game-service", "version": "3.1.0", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z" }
+{ "status": "ok", "service": "game-service", "version": "4.0.0", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z" }
 ```
 
 **`POST /api/sessions/{session_id}/actions`** *(Consumed by Gateway)*
@@ -297,7 +328,27 @@ The ticket is single-use and valid for one minute. `ws://.../ws/sessions/{sessio
 - `zombie_encounter`: `{"type":"zombie_encounter","zombieInstanceId":"z_991","zombieType":"professor","typeId":"prof_calc","spawnPoint":"mathematicsWing_spawn_1"}`
 - `exam_failed`, `zone_unlocked`: the events below, relayed to the session
 
+**`POST /events/{topic}`** *(Consumed by Message Broker)*
+
+Delivery of an event published on a topic Game Service subscribes to (see Message Queue Events below), in the broker's envelope, as for Player Service. A `2xx` means handled, a `4xx` means the broker must not retry it; repeated deliveries are ignored.
+
+Payload
+```json
+{ "messageId": "ddaa98928d344993bc584176e696fbee", "topic": "ZoneUnlocked", "publisher": "world-service", "publishedAt": "2026-11-03T14:34:14.006033+00:00", "payload": { "zoneId": "mathematicsWing", "roomsAdded": ["physicsLaboratory"], "timestamp": "2026-09-08T10:45:00Z" } }
+```
+
+Success Response (200 OK)
+```json
+{ "eventName": "ZoneUnlockedEvent", "status": "applied", "notificationsCreated": 2 }
+```
+
+**`GET /metrics`** *(Consumed by Prometheus)*
+
+Request counts and durations per route and status in the Prometheus text format, on the REST port only, exempt from the task limits like `GET /health`. Not available through the Gateway.
+
 ### **Message Queue Events**
+
+Game Service registers with Service Discovery with `"topics": ["ExamFailed", "ExamFailedEvent", "ZoneUnlocked", "ZoneUnlockedEvent"]`, and the Message Broker delivers the events published on them to `POST /events/{topic}`.
 
 **SUBSCRIBE `ExamFailed`** *(Published by Exam Service)* — notifies the client of a failed exam attempt.
 
@@ -317,7 +368,7 @@ Owns the definitions of all courses, questions, and the logic to grade them.
 
 ### **DockerHub Image**
 - **Repository:** [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service)
-- **Image Tag:** `mariaelenabotnari/exam-service:3.0.0` (also tagged `mariaelenabotnari/exam-service:lab3` and `mariaelenabotnari/exam-service:latest`)
+- **Image Tag:** `mariaelenabotnari/exam-service:4.0.0` (also tagged `mariaelenabotnari/exam-service:latest`)
 - **Default Port:** `Internal only (3000), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
@@ -516,7 +567,7 @@ Owns the persistent physical state of the university.
 
 ### **DockerHub Image**
 - **Repository:** [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service)
-- **Image Tag:** `mariaelenabotnari/world-service:3.0.0` (also tagged `mariaelenabotnari/world-service:lab3` and `mariaelenabotnari/world-service:latest`)
+- **Image Tag:** `mariaelenabotnari/world-service:4.0.0` (also tagged `mariaelenabotnari/world-service:latest`)
 - **Default Port:** `Internal only (3001), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
@@ -810,7 +861,7 @@ Owns the persistent definitions and short-lived instance state of zombies.
 
 ### **DockerHub Image**
 - **Repository:** [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service)
-- **Image Tag:** `costinloredana/zombie-service:3.0.0`
+- **Image Tag:** `costinloredana/zombie-service:4.0.0`
 - **Default Port:** `Internal only (4001), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
@@ -827,6 +878,10 @@ Response
 ```json
 { "status": "ok", "service": "zombie-service" }
 ```
+
+**`GET /metrics`** *(Consumed by Prometheus)*
+
+The state of the instance in the Prometheus text format, scraped every 10 s and shown in Grafana. It needs no token, is exempt from the task limits like `GET /health`, and is not available through the Gateway. The HTTP metrics have the same names and labels as Player, Game, Base and Crafting Service: `http_requests_received_total` and `http_request_duration_seconds` by `code`, `method` and `route` (the route template, or `unmatched`), and `http_requests_in_progress`. Also `kahoots_database_up` (MongoDB answered at scrape time), `kahoots_circuit_breaker_open{target="discovery-service"}` and the Node.js process metrics (`process_*`, `nodejs_*`).
 
 **`GET /api/zombie-types?category=professor|tourist|infected`** *(Consumed by Game Service)*
 
@@ -969,7 +1024,7 @@ Owns the university's resource economy independently from the physical map.
 
 ### **DockerHub Image**
 - **Repository:** [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service)
-- **Image Tag:** `costinloredana/resource-service:3.0.0`
+- **Image Tag:** `costinloredana/resource-service:4.0.0`
 - **Default Port:** `Internal only (4002), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
@@ -986,6 +1041,10 @@ Response
 ```json
 { "status": "ok", "service": "resource-service" }
 ```
+
+**`GET /metrics`** *(Consumed by Prometheus)*
+
+The state of the instance in the Prometheus text format, scraped every 10 s and shown in Grafana. It needs no token, is exempt from the task limits like `GET /health`, and is not available through the Gateway. The HTTP metrics have the same names and labels as Player, Game, Base and Crafting Service: `http_requests_received_total` and `http_request_duration_seconds` by `code`, `method` and `route` (the route template, or `unmatched`), and `http_requests_in_progress`. Also `kahoots_database_up` (PostgreSQL answered at scrape time), `kahoots_circuit_breaker_open{target="discovery-service"}`, `kahoots_resource_transactions_total{type, outcome}` (every gather, spend and refund: `applied`, `already_applied` / `already_refunded` for an idempotent replay, `refunded`, `rejected_insufficient`, `node_depleted`, `not_found`, `invalid_body`, `error`) and the Node.js process metrics (`process_*`, `nodejs_*`).
 
 **`GET /api/resource-types`**, **`GET /api/resource-types/{id}`** *(Consumed by development team and any service that needs resource metadata)*
 
@@ -1147,7 +1206,7 @@ Responsible for the player's survival base, initially represented by the FAF Cab
 
 ### **DockerHub Image**
 - **Repository:** [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service)
-- **Image Tag:** `cristi150404/base-service:3.0.0`
+- **Image Tag:** `cristi150404/base-service:4.0.0`
 - **Default Port:** `Internal only (5003), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
@@ -1159,7 +1218,7 @@ Responsible for the player's survival base, initially represented by the FAF Cab
 - `POST /api/refund` *(Resource Service)* — returns the resources if the effect cannot be applied.
 - `POST /api/players/{player_id}/inventory/items` *(Player Service)* — delivers a Kiki reward to the player's inventory.
 
-Base Service calls them through the Gateway with a service token (`kind: service`, forwarded as `X-Service-Name: base-service`). Each called service has a circuit breaker shared by all its endpoints: 3 failures (`5xx`, timeout, unreachable; a `4xx` is not a failure) within Task Timeout × 3.5 (28 s) trip it, the trip is logged, and calls to that service fail at once until a trial call after the window succeeds. Every state-changing endpoint spends first, then applies the effect in one database transaction. If that fails, Base Service refunds the resources rather than leaving the player having paid for nothing.
+Base Service calls them through the Message Broker over gRPC (`Broker.Relay` on `message-broker:8601`, set with `Broker__Url`), signed with a service token in the call metadata (`kind: service`; the broker forwards its subject as `X-Service-Name: base-service`), and the broker picks the instance (load balancing, circuit breakers, rerouting). Without `Broker__Url` it calls them through the Gateway as before. Each called service has a circuit breaker shared by all its endpoints: 3 failures (`5xx`, timeout, unreachable; a `4xx` is not a failure) within Task Timeout × 3.5 (28 s) trip it, the trip is logged, and calls to that service fail at once until a trial call after the window succeeds. Every state-changing endpoint spends first, then applies the effect in one database transaction. If that fails, Base Service refunds the resources rather than leaving the player having paid for nothing.
 
 ### **Exposed API Endpoints**
 
@@ -1169,7 +1228,7 @@ Describes the running instance: version, uptime, its Service Discovery registrat
 
 Response
 ```json
-{ "status": "ok", "service": "base-service", "version": "3.0.0", "instanceId": "d79591b64fdd4e12ba70c2d94355a46e", "hostname": "ea93129ca3f1", "registeredWithDiscovery": true, "lastRegisteredAt": "2026-10-26T12:00:30Z", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z", "database": "up", "integrations": "http", "circuitBreakers": { "resource-service": "closed", "world-service": "closed", "player-service": "closed" }, "taskLimits": { "timeoutSeconds": 8, "maxConcurrentTasks": 50 } }
+{ "status": "ok", "service": "base-service", "version": "4.0.0", "instanceId": "d79591b64fdd4e12ba70c2d94355a46e", "hostname": "ea93129ca3f1", "registeredWithDiscovery": true, "lastRegisteredAt": "2026-10-26T12:00:30Z", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z", "database": "up", "integrations": "broker", "circuitBreakers": { "resource-service": "closed", "world-service": "closed", "player-service": "closed" }, "taskLimits": { "timeoutSeconds": 8, "maxConcurrentTasks": 50 } }
 ```
 
 **`GET /api/base/{player_id}`** *(Consumed by Gateway, Game Service)*
@@ -1284,7 +1343,31 @@ Response
 { "idempotencyKey": "barricade_p44_faf_cab_001", "action": "barricade", "status": "completed" }
 ```
 
+**`POST /events/{topic}`** *(Consumed by Message Broker)*
+
+Delivery of an event published on a topic Base Service subscribes to (see Message Queue Events below). The broker posts its envelope, with the publisher's event as `payload`, and sends it again later on a `5xx` or a timeout; a `400` (unknown topic or malformed event) tells it not to. A repeated delivery is harmless.
+
+Payload
+```json
+{ "messageId": "ddaa98928d344993bc584176e696fbee", "topic": "ZoneUnlocked", "publisher": "world-service", "publishedAt": "2026-11-09T10:00:00Z", "payload": { "zoneId": "mathematicsWing", "roomsAdded": ["mathematicsWingLibrary"], "timestamp": "2026-11-09T10:00:00Z" } }
+```
+
+Success Response (200 OK)
+```json
+{ "eventName": "ZoneUnlocked", "status": "applied", "roomsNowClaimable": 1 }
+```
+
+**`GET /metrics`** *(Consumed by Prometheus)*
+
+Request counts and durations per route and status in the Prometheus text format (`http_requests_received_total`, `http_request_duration_seconds`), plus `kahoots_events_published_total` and `kahoots_events_received_total` by topic and outcome, `kahoots_saga_compensations_total` and `kahoots_circuit_breaker_open` per called service. Exempt from the task limits like `GET /health`. Not available through the Gateway.
+
+**`GET /logs/download`** *(Consumed by development team; also `GET /api/base/logs/download` through the Gateway)*
+
+Downloads the instance's recent log lines (up to 10,000, one JSON object per line, oldest first) as a file. The `X-Admin-Key` header must match `Logs__AdminKey` (`LOGS_ADMIN_KEY` in the team `.env`); the download answers `503` while the key is empty, `401` without the header and `403` with a wrong one. `since` (ISO 8601) and `tail` (last N lines) narrow it. The logs of every replica together are in Loki (Grafana, Explore).
+
 ### **Message Queue Events**
+
+Base Service registers with Service Discovery with `"topics": ["ZoneUnlocked", "ZoneUnlockedEvent"]` (both spellings, until every publisher uses the same one), and the Message Broker delivers the events published on them to `POST /events/{topic}`. It publishes with `Broker.Publish` after the change is saved; a failed publish is logged and counted, never undoes the action.
 
 **PUBLISH `BaseDefenseChanged`** *(Consumed by Game Service)* — reports the new defense rating whenever a barricade or facility changes it.
 ```json
@@ -1306,7 +1389,7 @@ Allows players to combine resources into useful survival equipment.
 
 ### **DockerHub Image**
 - **Repository:** [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service)
-- **Image Tag:** `cristi150404/crafting-service:3.0.0`
+- **Image Tag:** `cristi150404/crafting-service:4.0.0`
 - **Default Port:** `Internal only (5004), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
@@ -1319,7 +1402,7 @@ Allows players to combine resources into useful survival equipment.
 - `GET /players/{playerId}/progress` *(Exam Service)* — reads passed exams.
 - `GET /world/zones` *(World Service)* — reads unlocked zones.
 
-Crafting Service calls them through the Gateway with a service token (`kind: service`, forwarded as `X-Service-Name: crafting-service`). Each called service has a circuit breaker shared by all its endpoints: 3 failures (`5xx`, timeout, unreachable; a `4xx` is not a failure) within Task Timeout × 3.5 (28 s) trip it, the trip is logged, and calls to that service fail at once until a trial call after the window succeeds. A recipe can be gated on a player level, a passed exam, an unlocked zone, or a discovered resource, which is why this service reads from four others. If delivery fails after the ingredients were consumed, Crafting Service refunds them — this is the saga's rollback path.
+Crafting Service calls them through the Message Broker over gRPC (`Broker.Relay` on `message-broker:8601`, set with `Broker__Url`), signed with a service token in the call metadata (`kind: service`; the broker forwards its subject as `X-Service-Name: crafting-service`), and the broker picks the instance (load balancing, circuit breakers, rerouting). Without `Broker__Url` it calls them through the Gateway as before. Each called service has a circuit breaker shared by all its endpoints: 3 failures (`5xx`, timeout, unreachable; a `4xx` is not a failure) within Task Timeout × 3.5 (28 s) trip it, the trip is logged, and calls to that service fail at once until a trial call after the window succeeds. A recipe can be gated on a player level, a passed exam, an unlocked zone, or a discovered resource, which is why this service reads from four others. If delivery fails after the ingredients were consumed, Crafting Service refunds them — this is the saga's rollback path.
 
 ### **Exposed API Endpoints**
 
@@ -1329,7 +1412,7 @@ Describes the running instance: version, uptime, its Service Discovery registrat
 
 Response
 ```json
-{ "status": "ok", "service": "crafting-service", "version": "3.0.0", "instanceId": "d79591b64fdd4e12ba70c2d94355a46e", "hostname": "ea93129ca3f1", "registeredWithDiscovery": true, "lastRegisteredAt": "2026-10-26T12:00:30Z", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z", "database": "up", "integrations": "http", "circuitBreakers": { "resource-service": "closed", "player-service": "closed", "exam-service": "closed", "world-service": "closed" }, "taskLimits": { "timeoutSeconds": 8, "maxConcurrentTasks": 50 } }
+{ "status": "ok", "service": "crafting-service", "version": "4.0.0", "instanceId": "d79591b64fdd4e12ba70c2d94355a46e", "hostname": "ea93129ca3f1", "registeredWithDiscovery": true, "lastRegisteredAt": "2026-10-26T12:00:30Z", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z", "database": "up", "integrations": "broker", "circuitBreakers": { "resource-service": "closed", "player-service": "closed", "exam-service": "closed", "world-service": "closed" }, "taskLimits": { "timeoutSeconds": 8, "maxConcurrentTasks": 50 } }
 ```
 
 **`GET /api/recipes`** *(Consumed by Gateway)*
@@ -1414,7 +1497,31 @@ Response
 { "craftId": "craft_881", "playerId": "p_44", "recipeId": "recipe_wood_metal", "status": "completed" }
 ```
 
+**`POST /events/{topic}`** *(Consumed by Message Broker)*
+
+Delivery of an event published on a topic Crafting Service subscribes to (see Message Queue Events below). The broker posts its envelope, with the publisher's event as `payload`, and sends it again later on a `5xx` or a timeout; a `400` (unknown topic or malformed event) tells it not to. A repeated delivery is harmless.
+
+Payload
+```json
+{ "messageId": "ddaa98928d344993bc584176e696fbee", "topic": "AchievementUnlocked", "publisher": "exam-service", "publishedAt": "2026-11-09T10:00:00Z", "payload": { "playerId": "p_44", "achievementId": "ach_discrete_math", "xpAwarded": 50, "timestamp": "2026-11-09T10:00:00Z" } }
+```
+
+Success Response (200 OK)
+```json
+{ "eventName": "AchievementUnlocked", "status": "applied", "recipesUnlocked": ["recipe_paper_metal"] }
+```
+
+**`GET /metrics`** *(Consumed by Prometheus)*
+
+Request counts and durations per route and status in the Prometheus text format (`http_requests_received_total`, `http_request_duration_seconds`), plus `kahoots_events_published_total` and `kahoots_events_received_total` by topic and outcome, `kahoots_saga_compensations_total` and `kahoots_circuit_breaker_open` per called service. Exempt from the task limits like `GET /health`. Not available through the Gateway.
+
+**`GET /logs/download`** *(Consumed by development team; also `GET /api/crafts/logs/download` through the Gateway)*
+
+Downloads the instance's recent log lines (up to 10,000, one JSON object per line, oldest first) as a file. The `X-Admin-Key` header must match `Logs__AdminKey` (`LOGS_ADMIN_KEY` in the team `.env`); the download answers `503` while the key is empty, `401` without the header and `403` with a wrong one. `since` (ISO 8601) and `tail` (last N lines) narrow it. The logs of every replica together are in Loki (Grafana, Explore).
+
 ### **Message Queue Events**
+
+Crafting Service registers with Service Discovery with `"topics": ["AchievementUnlocked", "AchievementUnlockedEvent", "ZoneUnlocked", "ZoneUnlockedEvent"]` (both spellings, until every publisher uses the same one), and the Message Broker delivers the events published on them to `POST /events/{topic}`. It publishes with `Broker.Publish` after the recipe is unlocked; a failed publish is logged and counted, never undoes the unlock.
 
 **SUBSCRIBE `AchievementUnlocked`** *(Published by Exam Service)* — re-evaluates the player's locked recipes.
 
@@ -1429,16 +1536,24 @@ Response
 
 ## **9. Service Discovery**
 
-Maintains the runtime service registry so microservices can register their reachable address and health check endpoint on startup, deregister on graceful shutdown, and be discovered dynamically by the Gateway and development team.
+Maintains the runtime service registry so microservices can register their reachable address, health check endpoint and subscribed topics on startup, deregister on graceful shutdown, and be discovered dynamically by the Message Broker, Exam Service and the development team.
 
 ### **Owns**
 - In-memory registry of active service instances keyed by `(serviceName, host, port)` with capacity limits (`MAX_REGISTERED_INSTANCES`, default `100`).
 - Stable instance identifiers (`instanceId`) and registration/heartbeat timestamps (`registeredAt`, `lastRegisteredAt`).
+- The topics each service subscribes to, which the Message Broker reads to deliver events.
+- The health and load state of every instance, from its own health polling.
 - Grouped and per-service instance lookup endpoints for dynamic request routing.
+
+### **Health Polling, Expiry & Alerts**
+- **Health polling.** Every `HEALTH_POLL_INTERVAL_SECONDS` (`10`) Discovery calls `GET {healthPath}` on every instance (timeout `HEALTH_POLL_TIMEOUT_SECONDS`, `2`). A `2xx` is `healthy`, anything else `unreachable`. Load is measured by the latency of that check: `LOAD_CRITICAL_CONSECUTIVE` (`3`) checks in a row slower than `LOAD_CRITICAL_LATENCY_MS` (`1000`) make the instance's `loadStatus` `critical`, and the Message Broker's load balancer sends to it last. The poller only observes: it never removes an instance.
+- **Expiry.** An instance whose last refresh is older than `INSTANCE_TTL_SECONDS` (`90`, three missed 30 s refreshes) is removed from the registry.
+- **Removal by a caller.** The Message Broker removes an instance whose circuit breaker trips, and Exam Service removes a failing World Service instance (`DELETE /registry/instances/{instanceId}`).
+- **Alerts.** `instance unreachable`, `instance healthy again`, `service load critical`, `service load back to normal` and `Instance expired and removed` are logged when the state changes and sent to the developers on Discord (`ALERT_DISCORD_WEBHOOK_URL`) and / or Telegram (`ALERT_TELEGRAM_BOT_TOKEN`, `ALERT_TELEGRAM_CHAT_ID`), set in the git-ignored `.env`.
 
 ### **DockerHub Image**
 - **Repository:** [`mariaelenabotnari/service-discovery`](https://hub.docker.com/r/mariaelenabotnari/service-discovery)
-- **Image Tag:** `mariaelenabotnari/service-discovery:3.0.0` (also tagged `mariaelenabotnari/service-discovery:lab3` and `mariaelenabotnari/service-discovery:latest`)
+- **Image Tag:** `mariaelenabotnari/service-discovery:4.0.0` (also tagged `mariaelenabotnari/service-discovery:lab4` and `mariaelenabotnari/service-discovery:latest`)
 - **Default Port:** `Internal only (8500)`
 
 ### **Exposed API Endpoints**
@@ -1454,11 +1569,12 @@ Payload
   "host": "exam-service",
   "port": 3000,
   "healthPath": "/health",
-  "metadata": {
-    "version": "1.0.0"
-  }
+  "version": "3.0.0",
+  "topics": ["ZoneUnlocked", "ExamFailed"]
 }
 ```
+
+`topics` (optional, default `[]`) lists the topics the service subscribes to; the Message Broker delivers every event published on one of them to an instance of the service as `POST /events/{topic}`. A refresh replaces the list. Each topic is 1 to 100 letters, digits, `.`, `_` or `-`, starting with a letter, and names are case-sensitive.
 
 Success Response (201 Created on first registration / 200 OK on refresh)
 ```json
@@ -1497,7 +1613,7 @@ Error Response (429 Too Many Requests — registry capacity reached)
 }
 ```
 
-**`DELETE /registry/instances/{instanceId}`** *(Consumed by every service on shutdown, and by Exam Service to remove a failing World Service instance)*
+**`DELETE /registry/instances/{instanceId}`** *(Consumed by every service on shutdown, by the Message Broker to remove an instance whose circuit breaker tripped, and by Exam Service to remove a failing World Service instance)*
 
 Removes a registered instance when a service shuts down gracefully.
 
@@ -1519,7 +1635,7 @@ Error Response (404 Not Found)
 }
 ```
 
-**`GET /registry/services`** *(Consumed by development team, Gateway)*
+**`GET /registry/services`** *(Consumed by development team)*
 
 Returns all currently registered instances grouped by `serviceName`, sorted alphabetically by `serviceName` and by `registeredAt` ascending within each service.
 
@@ -1550,9 +1666,9 @@ Success Response (200 OK)
 }
 ```
 
-**`GET /registry/services/{serviceName}`** *(Consumed by Gateway, Exam Service)*
+**`GET /registry/services/{serviceName}`** *(Consumed by Message Broker, Exam Service, Gateway when it runs without a broker)*
 
-Returns all registered instances for a single service, sorted by `registeredAt` ascending.
+Returns all registered instances for a single service, sorted by `registeredAt` ascending. Since the health poller runs, each instance also carries `healthStatus` (`healthy`, `unreachable`, `unknown`), `lastCheckedAt`, `lastLatencyMs` and `loadStatus` (`normal`, `critical`).
 
 Success Response (200 OK)
 ```json
@@ -1584,22 +1700,186 @@ Error Response (404 Not Found — unknown service or zero instances)
 }
 ```
 
-**`GET /health`** *(Consumed by Docker healthcheck, development team)*
+**`GET /registry/topics`** *(Consumed by development team)* and **`GET /registry/topics/{topic}`** *(Consumed by Message Broker)*
 
-Returns the health status, uptime, and live registry counters (`registeredServices`, `registeredInstances`) for the Service Discovery service.
+Which services subscribe to which topics, from the `topics` each instance registered with. The broker calls `GET /registry/topics/{topic}` when an event is published, to find where to deliver it. A topic nobody subscribes to answers `200` with `"serviceCount": 0`; an invalid topic name answers `400 invalid_topic`.
+
+Success Response (200 OK, `GET /registry/topics`)
+```json
+{
+  "totalTopics": 2,
+  "topics": [
+    { "topic": "ExamFailed", "services": ["game-service"] },
+    { "topic": "ZoneUnlocked", "services": ["base-service", "crafting-service", "game-service"] }
+  ]
+}
+```
+
+Success Response (200 OK, `GET /registry/topics/ZoneUnlocked`, instances shortened)
+```json
+{
+  "topic": "ZoneUnlocked",
+  "serviceCount": 1,
+  "services": [
+    {
+      "serviceName": "base-service",
+      "instanceCount": 1,
+      "instances": [
+        { "instanceId": "d79591b64fdd4e12ba70c2d94355a46e", "host": "172.18.0.9", "port": 5003, "topics": ["ZoneUnlocked", "ZoneUnlockedEvent"], "healthStatus": "healthy", "loadStatus": "normal" }
+      ]
+    }
+  ]
+}
+```
+
+**`GET /health`** *(Consumed by Docker healthcheck, Message Broker, development team)*
+
+Returns the health status, uptime, and live registry counters (`registeredServices`, `registeredInstances`) for the Service Discovery service, plus the state of the poller (`polling`), the instance TTL (`expiry`) and the alert channels that are on (`notifications`).
 
 Success Response (200 OK)
 ```json
 {
-  "status": "healthy",
+  "status": "ok",
   "service": "discovery-service",
-  "version": "1.0.0",
-  "uptimeSeconds": 42,
-  "timestamp": "2026-04-20T12:00:42Z",
-  "registeredServices": 2,
-  "registeredInstances": 3
+  "registeredServices": 8,
+  "registeredInstances": 24,
+  "polling": { "enabled": true, "intervalSeconds": 10, "lastCycleAt": "2026-10-26T09:51:03.100000+00:00" },
+  "expiry": { "ttlSeconds": 90 },
+  "notifications": { "channels": ["discord"] },
+  "timestamp": "2026-10-26T09:51:03.132400+00:00"
 }
 ```
+
+---
+
+## **10. Message Broker**
+
+Carries every request inside the system. The Gateway sends each player request to the queue of the service that owns it; the services call each other and publish their events through it. The broker picks the instance, balances the load, and handles circuit breaking and rerouting. These were the Gateway's job before.
+
+### **Owns**
+- One **subscriber-based queue** per service (Gateway → service): a request waits in it until a registered instance of the service takes it, and the answer goes back to the Gateway.
+- One **topic-based queue** per subscribed service (service → service events): every event published on a topic is copied to each service subscribed to it in Service Discovery and delivered in order.
+- **Load balancing by service load**: instances are tried in round-robin order, those Service Discovery reports under `critical` load last, and among the rest the one with the fewest requests in flight first.
+- A **circuit breaker** per instance: 3 failures (`5xx`, timeout, unreachable) within the timeout × 3.5 window trip it. The request that tripped it is **rerouted** to the next instance, and the tripped instance is removed from Service Discovery.
+- A request thread per request (`X-Broker-Thread`), with a limit on concurrent requests (`503 too_many_concurrent_requests`).
+
+It keeps no database: the queues live in memory, and events still waiting when it stops are lost. Its own README (`message-broker/README.md`) documents every endpoint, header, error and setting; this section is the contract the other services rely on.
+
+### **DockerHub Image**
+- **Repository:** [`mariaelenabotnari/message-broker`](https://hub.docker.com/r/mariaelenabotnari/message-broker)
+- **Image Tag:** `mariaelenabotnari/message-broker:4.0.0` (also tagged `:lab4` and `:latest`)
+- **Default Port:** `8600` (HTTP; published in the team compose for the log download and the Postman event requests), `Internal only (8601)` (gRPC)
+
+### **Consumed API Endpoints**
+- `GET /registry/services/{serviceName}` *(Service Discovery)*: the instances of the target service, with their `loadStatus` (cached for `DISCOVERY_CACHE_TTL_SECONDS`, 5 s).
+- `GET /registry/topics/{topic}` *(Service Discovery)*: the services subscribed to a topic, on every publish.
+- `DELETE /registry/instances/{instanceId}` *(Service Discovery)*: removes an instance whose circuit breaker tripped.
+- `ANY {path}` *(every service)*: the requests of the queues and of `Broker.Relay`, sent to one instance with `X-Request-Id`, `X-Service-Name` (the caller) and, from the Gateway only, `X-Player-Id` / `X-Username`.
+- `POST /events/{topic}` *(Player, Game, Base, Crafting Service)*: delivery of an event to one instance of a subscribed service.
+
+### **Exposed API Endpoints**
+
+Every endpoint except `GET /health` and `GET /metrics` needs a **service token** (`Authorization: Bearer <jwt>` with `"kind": "service"`, signed with the shared `JWT_SECRET`); a player token is refused with `403 service_token_required`. Errors use the team format `{ "error", "message", "requestId" }`.
+
+**`ANY /queues/{serviceName}/{path}`** *(Consumed by Gateway)*
+
+Subscriber-based queue. The request keeps its method, path, query, headers and body, and waits in the queue of `{serviceName}` until one of `SERVICE_QUEUE_WORKERS` (10) consumer threads hands it to an instance. The instance's answer is returned as it is, with the broker's headers added.
+
+```http
+GET /queues/zombie-service/api/zombie-types HTTP/1.1
+Host: message-broker:8600
+Authorization: Bearer <gateway-service token>
+X-Player-Id: p_44
+```
+```http
+HTTP/1.1 200 OK
+X-Broker-Queue: zombie-service
+X-Broker-Instance: zombie-service 172.18.0.7:4001
+X-Broker-Thread: queue-zombie-service-3
+X-Queue-Wait-Ms: 0.12
+```
+
+**gRPC `Broker.Relay(RelayRequest) returns (RelayResponse)`** *(Consumed by Game, Base, Crafting Service)* on `:8601`, contract `message-broker/proto/broker.proto`
+
+One service → service request to one instance, answered in full. The caller's service token goes in the call metadata (`authorization: Bearer <jwt>`), and its `sub` is sent on as `X-Service-Name`. The same operation is available over HTTP as `ANY /relay/{serviceName}/{path}`.
+
+```
+RelayRequest  { service: "resource-service", method: "POST", path: "/api/spend", query: "", headers: [...], body: <bytes> }
+RelayResponse { status: 200, headers: [X-Broker-Instance, X-Broker-Thread, X-Request-Id, ...], body: <bytes>, instance: "resource-service 172.18.0.6:4002" }
+```
+
+**gRPC `Broker.Publish(PublishRequest) returns (PublishResponse)`** *(Consumed by Base, Crafting Service)* and **`POST /topics/{topic}/publish`** *(Consumed by development team, Postman)*
+
+Publishes an event on a topic. The token's `sub` is the publisher. The broker asks Service Discovery who subscribes, queues a copy for each of them and answers right away; with no subscriber it still answers `202` with empty lists.
+
+Payload (the event itself, any JSON up to `MAX_EVENT_PAYLOAD_BYTES`)
+```json
+{ "zoneId": "mathematicsWing", "roomsAdded": ["physicsLaboratory"], "timestamp": "2026-09-08T10:45:00Z" }
+```
+
+Response (202 Accepted)
+```json
+{
+  "messageId": "ddaa98928d344993bc584176e696fbee",
+  "topic": "ZoneUnlocked",
+  "publisher": "world-service",
+  "publishedAt": "2026-11-03T14:34:14.006033+00:00",
+  "subscribers": ["base-service", "crafting-service", "game-service"],
+  "notQueued": []
+}
+```
+
+Delivery to a subscriber is `POST /events/{topic}` on one of its instances, with the envelope `{ "messageId", "topic", "publisher", "publishedAt", "payload" }`. A `2xx` means delivered, and a `4xx` means refused for good. A `5xx`, timeout or unreachable instance is retried after `TOPIC_RETRY_DELAY_SECONDS` (1 s, doubling), up to `TOPIC_DELIVERY_MAX_ATTEMPTS` (3) attempts. Subscribers use `messageId` to ignore an event delivered twice.
+
+**`GET /topics`** *(Consumed by development team)*
+
+The topics an event has been published on, with their subscribers and queue depth.
+
+**`GET /health`** *(Consumed by Docker healthcheck, Service Discovery, development team)*
+
+Status, concurrency and thread counters, Service Discovery status, the pending messages per queue and the requests in flight per instance. It needs no token.
+
+```json
+{
+  "status": "ok",
+  "service": "message-broker",
+  "version": "4.0.0",
+  "discovery": "up",
+  "concurrency": { "current": 0, "max": 100 },
+  "queues": {
+    "services": { "zombie-service": { "pending": 0, "threads": 10 } },
+    "topics": { "game-service": { "pending": 2, "threads": 1 } }
+  },
+  "inFlight": { "zombie-service": { "zombie-1:4001": 2 } },
+  "grpcPort": 8601
+}
+```
+
+**`GET /status`** *(Consumed by development team)*
+
+Version, start time and uptime of the running instance.
+
+**`GET /metrics`** *(Consumed by Prometheus)*
+
+Prometheus text format: `broker_http_requests_total`, `broker_grpc_calls_total`, `broker_dispatch_total` and `broker_dispatch_duration_seconds` per service, `broker_reroutes_total`, `broker_request_threads`, `broker_queue_pending`, `broker_circuit_breaker_open` and `broker_inflight_requests` per instance, and `broker_discovery_up`.
+
+**`GET /logs/download`** *(Consumed by development team)*
+
+Downloads the broker's log lines (one JSON object per line) as a file, optionally filtered with `since` and `tail`. The `X-Admin-Key` header must match `LOGS_ADMIN_KEY` (set in the git-ignored `.env`); the download is off while the key is empty.
+
+### **Errors**
+
+| Status | `error` | When |
+|---|---|---|
+| `400` | `invalid_service_name`, `invalid_path`, `invalid_topic`, `invalid_payload` | Bad service name, path, topic or event body |
+| `401` / `403` | `missing_token`, `invalid_token`, `token_expired` / `service_token_required` | No valid service token |
+| `404` | `service_not_found` | No registered instance of the service |
+| `413` | `payload_too_large` | Body over `MAX_RELAY_BODY_BYTES` (5 MB) or `MAX_EVENT_PAYLOAD_BYTES` |
+| `502` | `upstream_unreachable`, `upstream_response_too_large` | Every instance failed, or the answer is too large |
+| `503` | `no_available_instance`, `queue_full`, `too_many_concurrent_requests`, `discovery_unavailable`, `shutting_down` | Every breaker open, queue full, at the concurrency limit, Discovery down with nothing cached, or stopping (with `Retry-After` where it applies) |
+| `504` | `upstream_timeout` | The `REQUEST_TIMEOUT_MS` budget (10 s) ran out |
+
+Over gRPC the broker's own errors come back as status codes: `UNAUTHENTICATED`, `PERMISSION_DENIED`, `INVALID_ARGUMENT`, `RESOURCE_EXHAUSTED`, `UNAVAILABLE`. The errors of `Relay` come back in `RelayResponse.status` with the same JSON body as over HTTP.
 
 ---
 
@@ -1785,16 +2065,29 @@ The microservices are containerized and published on DockerHub:
 
 | Service | DockerHub Repository | Image Tag | Default Port | Description |
 |---|---|---|---|---|
-| **Gateway Service** | [`mariaelenabotnari/gateway-service`](https://hub.docker.com/r/mariaelenabotnari/gateway-service) | `mariaelenabotnari/gateway-service:3.0.0` | `8000` | System entry point, async request routing layer |
-| **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:3.0.0` | `Internal (3000)` | Academic progression, exams, and achievements |
-| **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:3.0.0` | `Internal (3001)` | Physical campus layout, rooms, zones, and spawn points |
-| **Service Discovery** | [`mariaelenabotnari/service-discovery`](https://hub.docker.com/r/mariaelenabotnari/service-discovery) | `mariaelenabotnari/service-discovery:3.0.0` | `Internal (8500)` | Service registry: instances register, deregister and are looked up by name |
-| **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:3.1.0` | `Internal (8080)` | Player identity, progression, inventory, and trades |
-| **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:3.1.0` | `Internal (8080), WebSocket 3003-3005` | Game sessions, day/night cycle, and timed player actions |
-| **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:3.0.0` | `Internal (4001)` | Zombie type definitions, spawned instances, and special actions |
-| **Resource Service** | [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service) | `costinloredana/resource-service:3.0.0` | `Internal (4002)` | Resource types, player balances, nodes, and idempotent transactions |
-| **Base Service** | [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service) | `cristi150404/base-service:3.0.0` | `Internal (5003)` | Player bases, barricades, facilities, and decorations |
-| **Crafting Service** | [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service) | `cristi150404/crafting-service:3.0.0` | `Internal (5004)` | Recipes, unlock conditions, and crafting sagas |
+| **Gateway Service** | [`mariaelenabotnari/gateway-service`](https://hub.docker.com/r/mariaelenabotnari/gateway-service) | `mariaelenabotnari/gateway-service:4.0.0` | `8000` | System entry point, async request routing layer |
+| **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:4.0.0` | `Internal (3000)` | Academic progression, exams, and achievements |
+| **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:4.0.0` | `Internal (3001)` | Physical campus layout, rooms, zones, and spawn points |
+| **Service Discovery** | [`mariaelenabotnari/service-discovery`](https://hub.docker.com/r/mariaelenabotnari/service-discovery) | `mariaelenabotnari/service-discovery:4.0.0` | `Internal (8500)` | Service registry: instances register, deregister and are looked up by name |
+| **Message Broker** | [`mariaelenabotnari/message-broker`](https://hub.docker.com/r/mariaelenabotnari/message-broker) | `mariaelenabotnari/message-broker:4.0.0` | `8600` (HTTP), `Internal (8601)` (gRPC) | Service queues for the Gateway, gRPC relay between services, durable topic queues, load balancing and circuit breakers |
+| **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:4.0.0` | `Internal (8080)` | Player identity, progression, inventory, and trades |
+| **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:4.0.0` | `Internal (8080), WebSocket 3003-3005` | Game sessions, day/night cycle, and timed player actions |
+| **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:4.0.0` | `Internal (4001)` | Zombie type definitions, spawned instances, and special actions |
+| **Resource Service** | [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service) | `costinloredana/resource-service:4.0.0` | `Internal (4002)` | Resource types, player balances, nodes, and idempotent transactions |
+| **Base Service** | [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service) | `cristi150404/base-service:4.0.0` | `Internal (5003)` | Player bases, barricades, facilities, and decorations |
+| **Crafting Service** | [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service) | `cristi150404/crafting-service:4.0.0` | `Internal (5004)` | Recipes, unlock conditions, and crafting sagas |
+
+### Monitoring
+
+The compose also starts Prometheus, Loki, Alloy and Grafana (`monitoring/`), so the state of the services can be watched while the system runs:
+
+| Tool | Where | What |
+|---|---|---|
+| **Grafana** | [http://localhost:3000](http://localhost:3000) (`admin` / `GRAFANA_ADMIN_PASSWORD`, default `admin`) | The dashboard *In Kahoots with the Undead: services* (`monitoring/grafana/dashboards/kahoots.json`), provisioned on startup with the two data sources below |
+| **Prometheus** | [http://localhost:9090](http://localhost:9090) | Scrapes every 10 s: the Message Broker (`GET /metrics`: requests per route, deliveries per service and outcome, delivery latency, reroutes, request threads, queue depth, open circuit breakers, requests in flight per instance) and every replica of Player, Game, Base, Crafting, Zombie and Resource Service (`GET /metrics`: request counts and durations per route and status; Resource Service also its gather / spend / refund outcomes), found through Docker's DNS (`monitoring/prometheus/prometheus.yml`) |
+| **Loki + Alloy** | through Grafana (*Explore* or the dashboard's log panels) | Alloy reads the stdout of every container from the Docker socket and labels each line with its compose `service` and `container`; the services log one JSON object per line, so the panels filter by `level`, `requestId`, `targetService`, ... |
+
+The dashboard shows, among others, the requests per second of the broker, the deliveries per service and their p95 latency, the requests in flight per instance (what the broker's load balancer looks at), the requests rerouted after a circuit breaker tripped, the open breakers, the Player and Game Service request rate, latency and 5xx rate per replica, the same for Base, Crafting, Zombie and Resource Service, Resource Service's gather / spend / refund outcomes (applied, idempotent replays, insufficient resources, depleted nodes), how many Zombie and Resource replicas are up and reach their database, and the logs of every service with their warnings and errors.
 
 ---
 
@@ -1830,7 +2123,7 @@ Both images are multi-stage Node.js 20 builds that run as the non-root `node` us
 
 | | Zombie Service | Resource Service |
 |---|---|---|
-| **Image** | `costinloredana/zombie-service:3.0.0` (`node:20-alpine`) | `costinloredana/resource-service:3.0.0` (`node:20-slim` + OpenSSL for Prisma) |
+| **Image** | `costinloredana/zombie-service:4.0.0` (`node:20-alpine`) | `costinloredana/resource-service:4.0.0` (`node:20-slim` + OpenSSL for Prisma) |
 | **Database** | MongoDB 8 (`mongo:8`) | PostgreSQL 17 (`postgres:17-alpine`) |
 | **Required env** | `MONGO_URI`, e.g. `mongodb://zombie-db:27017/zombie_db` | `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, or a single `DATABASE_URL` that takes precedence over them |
 | **Optional env** | `PORT` (default `4001`) | `PORT` (default `4002`) |
@@ -1843,11 +2136,11 @@ The service exits on startup if its database is unreachable, so start it only af
 
 # Zombie Service
 docker run -d --name zombie-db --network kahoots-net mongo:8
-docker run -d --name zombie-service --network kahoots-net -p 4001:4001   -e MONGO_URI=mongodb://zombie-db:27017/zombie_db   costinloredana/zombie-service:3.0.0
+docker run -d --name zombie-service --network kahoots-net -p 4001:4001   -e MONGO_URI=mongodb://zombie-db:27017/zombie_db   costinloredana/zombie-service:4.0.0
 
 # Resource Service
 docker run -d --name resource-db --network kahoots-net   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=resource_db postgres:17-alpine
-docker run -d --name resource-service --network kahoots-net -p 4002:4002   -e POSTGRES_HOST=resource-db -e POSTGRES_PORT=5432 -e POSTGRES_USER=postgres   -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=resource_db   costinloredana/resource-service:3.0.0
+docker run -d --name resource-service --network kahoots-net -p 4002:4002   -e POSTGRES_HOST=resource-db -e POSTGRES_PORT=5432 -e POSTGRES_USER=postgres   -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=resource_db   costinloredana/resource-service:4.0.0
 ```
 
 If a container exits right away, the database probably wasn't ready yet. Wait a few seconds and run `docker start zombie-service` or `docker start resource-service`.
@@ -1944,14 +2237,16 @@ curl -s http://localhost:8000/api/sessions -H "$AUTH"
 curl -s http://localhost:8000/api/base -H "$AUTH"
 curl -s http://localhost:8000/api/recipes/definitions -H "$AUTH"
 
-# Zombie Service types, then spawn instances for a cycle
+# Zombie Service types (spawning is Game Service's job, POST /api/sessions/{id}/zombies/spawn; the Zombie Service
+# route is not available through the Gateway and answers 404 route_not_found)
 curl -s http://localhost:8000/api/zombie-types -H "$AUTH"
-curl -s -X POST http://localhost:8000/api/zombies/spawn -H "$AUTH" -H "Content-Type: application/json" -d '{"cycleId":"cyc_1","worldZoneId":"zoneZero","spawnCount":3,"typeWeights":{"professor":0.5,"tourist":0.5}}'
+curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:8000/api/zombies/spawn -H "$AUTH" -H "Content-Type: application/json" -d '{}'
 
-# Resource Service types, nodes and an idempotent gather (run it twice: the second returns "already_applied")
+# Resource Service types, nodes and a player's balances (gathering is applied by Game Service through the broker;
+# POST /api/gather is not available through the Gateway)
 curl -s http://localhost:8000/api/resource-types -H "$AUTH"
 curl -s http://localhost:8000/api/nodes/node_1 -H "$AUTH"
-curl -s -X POST http://localhost:8000/api/gather -H "$AUTH" -H "Content-Type: application/json" -d '{"idempotencyKey":"verify_1","playerId":"p_1","nodeId":"node_1","resourceType":"wood","amount":5}'
+curl -s http://localhost:8000/api/inventory/p_1 -H "$AUTH"
 
 # Without a token the Gateway answers 401 missing_token
 curl -s http://localhost:8000/api/sessions

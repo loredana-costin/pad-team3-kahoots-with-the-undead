@@ -159,7 +159,7 @@ services:
 
   # --- Microservices (using uploaded DockerHub images) ---
   discovery-service:
-    image: mariaelenabotnari/service-discovery:3.0.0
+    image: mariaelenabotnari/service-discovery:4.0.0
     container_name: discovery-service
     restart: always
     environment:
@@ -168,8 +168,38 @@ services:
       ALERT_DISCORD_WEBHOOK_URL: ${ALERT_DISCORD_WEBHOOK_URL:-}
       ALERT_TELEGRAM_BOT_TOKEN: ${ALERT_TELEGRAM_BOT_TOKEN:-}
       ALERT_TELEGRAM_CHAT_ID: ${ALERT_TELEGRAM_CHAT_ID:-}
+    ports:
+      - "8500:8500"
     expose:
       - "8500"
+    networks:
+      - kahoots-network
+
+  # The Gateway sends every request to the broker's service queues over HTTP (8600) and the services call
+  # each other through it over gRPC (8601); it looks the instances up in Service Discovery. 8600 is published
+  # for the demo: the log download (X-Admin-Key) and the Postman event requests, which publish on a topic.
+  message-broker:
+    image: mariaelenabotnari/message-broker:4.0.0
+    container_name: message-broker
+    restart: always
+    environment:
+      PORT: 8600
+      GRPC_PORT: 8601
+      SERVICE_DISCOVERY_URL: http://discovery-service:8500
+      JWT_SECRET: team-compose-development-secret-at-least-32-chars
+      # Key for GET /logs/download; the download is off while it is empty (set it in .env, never commit it).
+      LOGS_ADMIN_KEY: ${LOGS_ADMIN_KEY:-}
+      # Durable queues: undelivered events and dead letters survive restarts in this volume.
+      QUEUE_STORE_PATH: /app/data/messages.db
+    volumes:
+      - broker_data:/app/data
+    ports:
+      - "8600:8600"
+    expose:
+      - "8601"
+    depends_on:
+      discovery-service:
+        condition: service_healthy
     networks:
       - kahoots-network
 
@@ -177,7 +207,7 @@ services:
   # serve any request. Each registers its own address with Service Discovery; the Gateway reads it
   # to spread requests over them, and each replica looks up World Service there for its ExamPassed events.
   exam-service:
-    image: mariaelenabotnari/exam-service:3.0.0
+    image: mariaelenabotnari/exam-service:4.0.0
     restart: always
     deploy:
       replicas: 3
@@ -191,6 +221,9 @@ services:
       DB_NAME: exam_db
       DATABASE_URL: "postgresql://postgres:postgres@exam-db:5432/exam_db?schema=public"
       DISCOVERY_URL: http://discovery-service:8500
+      BROKER_URL: http://message-broker:8600
+      BROKER_GRPC_URL: message-broker:8601
+      JWT_SECRET: team-compose-development-secret-at-least-32-chars
     expose:
       - "3000"
     depends_on:
@@ -204,7 +237,7 @@ services:
   # No container_name: 3 replicas share world-db, where zones and rooms live, so any replica can serve
   # any request. Each registers its own address with Service Discovery, which the Gateway and Exam Service read.
   world-service:
-    image: mariaelenabotnari/world-service:3.0.0
+    image: mariaelenabotnari/world-service:4.0.0
     restart: always
     deploy:
       replicas: 3
@@ -218,6 +251,8 @@ services:
       DB_NAME: world_db
       DATABASE_URL: "postgresql://postgres:postgres@world-db:5432/world_db?schema=public"
       DISCOVERY_URL: http://discovery-service:8500
+      BROKER_URL: http://message-broker:8600
+      JWT_SECRET: team-compose-development-secret-at-least-32-chars
     expose:
       - "3001"
     depends_on:
@@ -231,7 +266,7 @@ services:
   # No container_name: 3 replicas share player-db, and each registers its own address with
   # Service Discovery, which the Gateway reads to spread requests over them (round robin).
   player-service:
-    image: andrei045/player-service:3.1.0
+    image: andrei045/player-service:4.0.0
     restart: always
     deploy:
       replicas: 3
@@ -255,7 +290,7 @@ services:
   # No container_name: 3 replicas share game-db, where sessions, actions and socket tickets live,
   # so any replica can serve any request. Each registers its own address with Service Discovery.
   game-service:
-    image: andrei045/game-service:3.1.0
+    image: andrei045/game-service:4.0.0
     restart: always
     deploy:
       replicas: 3
@@ -268,7 +303,10 @@ services:
       Services__Resource: http://gateway-service:8000
       Services__Base: http://gateway-service:8000
       Services__Exam: http://gateway-service:8000
-      # Signs Game Service's own calls through the Gateway; same secret as Player Service and the Gateway.
+      # Calls to the other services go to the message broker over gRPC (Broker.Relay); the Services__* URLs
+      # above are the fallback of an image without broker support.
+      Broker__Url: http://message-broker:8601
+      # Signs Game Service's own calls through the broker; same secret as Player Service, the Gateway and the broker.
       Jwt__Secret: "team-compose-development-secret-at-least-32-chars"
       Jwt__Issuer: player-service
       Jwt__Audience: kahoots-with-the-undead
@@ -286,6 +324,8 @@ services:
         condition: service_healthy
       discovery-service:
         condition: service_healthy
+      message-broker:
+        condition: service_healthy
     networks:
       - kahoots-network
 
@@ -293,7 +333,7 @@ services:
   # Service Discovery, which the Gateway reads to spread requests over them (round robin).
   # Idempotency keys and the table bootstrap are safe across replicas (resource-service #248, #249).
   resource-service:
-    image: costinloredana/resource-service:3.0.0
+    image: costinloredana/resource-service:4.0.0
     deploy:
       replicas: 3
     restart: always
@@ -319,7 +359,7 @@ services:
   # No container_name: 3 replicas share zombie-db, and each registers its own address with
   # Service Discovery, which the Gateway reads to spread requests over them (round robin).
   zombie-service:
-    image: costinloredana/zombie-service:3.0.0
+    image: costinloredana/zombie-service:4.0.0
     deploy:
       replicas: 3
     restart: always
@@ -339,7 +379,7 @@ services:
       - kahoots-network
 
   base-service:
-    image: cristi150404/base-service:3.0.0
+    image: cristi150404/base-service:4.0.0
     # No container_name: 3 replicas share the base-db database, and each registers its own address
     # with Service Discovery, which the Gateway reads to spread requests over them (round robin).
     deploy:
@@ -355,10 +395,15 @@ services:
       Services__Resource: http://gateway-service:8000
       Services__Player: http://gateway-service:8000
       Services__World: http://gateway-service:8000
-      # Signs the service token the Gateway accepts; same value as the Gateway's JWT_SECRET.
+      # Calls to the other services go to the message broker over gRPC (Broker.Relay), and events are
+      # published on its topics; the Services__* URLs above are the fallback when Broker__Url is empty.
+      Broker__Url: http://message-broker:8601
+      # Signs the service token the broker accepts; same value as the Gateway's and the broker's JWT_SECRET.
       Jwt__Secret: team-compose-development-secret-at-least-32-chars
       ASPNETCORE_ENVIRONMENT: Development
       Discovery__Url: http://discovery-service:8500
+      # Key for GET /logs/download; the download is off while it is empty (set it in .env, never commit it).
+      Logs__AdminKey: ${LOGS_ADMIN_KEY:-}
     expose:
       - "5003"
     depends_on:
@@ -366,11 +411,13 @@ services:
         condition: service_healthy
       discovery-service:
         condition: service_healthy
+      message-broker:
+        condition: service_healthy
     networks:
       - kahoots-network
 
   crafting-service:
-    image: cristi150404/crafting-service:3.0.0
+    image: cristi150404/crafting-service:4.0.0
     # No container_name: 3 replicas share the crafting-db database, and each registers its own address
     # with Service Discovery, which the Gateway reads to spread requests over them (round robin).
     deploy:
@@ -387,10 +434,15 @@ services:
       Services__Player: http://gateway-service:8000
       Services__Exam: http://gateway-service:8000
       Services__World: http://gateway-service:8000
-      # Signs the service token the Gateway accepts; same value as the Gateway's JWT_SECRET.
+      # Calls to the other services go to the message broker over gRPC (Broker.Relay), and events are
+      # published on its topics; the Services__* URLs above are the fallback when Broker__Url is empty.
+      Broker__Url: http://message-broker:8601
+      # Signs the service token the broker accepts; same value as the Gateway's and the broker's JWT_SECRET.
       Jwt__Secret: team-compose-development-secret-at-least-32-chars
       ASPNETCORE_ENVIRONMENT: Development
       Discovery__Url: http://discovery-service:8500
+      # Key for GET /logs/download; the download is off while it is empty (set it in .env, never commit it).
+      Logs__AdminKey: ${LOGS_ADMIN_KEY:-}
     expose:
       - "5004"
     depends_on:
@@ -398,11 +450,13 @@ services:
         condition: service_healthy
       discovery-service:
         condition: service_healthy
+      message-broker:
+        condition: service_healthy
     networks:
       - kahoots-network
 
   gateway-service:
-    image: mariaelenabotnari/gateway-service:3.0.0
+    image: mariaelenabotnari/gateway-service:4.0.0
     container_name: gateway-service
     restart: always
     environment:
@@ -420,12 +474,84 @@ services:
       # a service with no registered instance falls back to its *_SERVICE_URL above.
       DISCOVERY_URL: http://discovery-service:8500
       DISCOVERY_SERVICES: zombie-service,resource-service,base-service,crafting-service,player-service,game-service,exam-service,world-service
+      # Every request goes to the broker's queue of the target service; the broker balances and breaks circuits.
+      BROKER_URL: http://message-broker:8600
     ports:
       - "8000:8000"
+    depends_on:
+      message-broker:
+        condition: service_healthy
+    networks:
+      - kahoots-network
+
+  # --- Monitoring: Prometheus scrapes the metrics, Alloy ships the container logs to Loki, Grafana shows both ---
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    container_name: prometheus
+    restart: always
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=2d
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - kahoots-network
+
+  loki:
+    image: grafana/loki:3.4.2
+    container_name: loki
+    restart: always
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki_data:/loki
+    expose:
+      - "3100"
+    networks:
+      - kahoots-network
+
+  alloy:
+    image: grafana/alloy:v1.8.1
+    container_name: alloy
+    restart: always
+    command:
+      - run
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./monitoring/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      # Read-only access to the Docker socket, to find the containers and read their logs.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+    networks:
+      - kahoots-network
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    container_name: grafana
+    restart: always
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - loki
     networks:
       - kahoots-network
 
 volumes:
+  broker_data:
+    driver: local
   base_postgres_data:
     driver: local
   crafting_postgres_data:
@@ -441,6 +567,12 @@ volumes:
   resource_postgres_data:
     driver: local
   zombie_mongo_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  loki_data:
+    driver: local
+  grafana_data:
     driver: local
 
 networks:
