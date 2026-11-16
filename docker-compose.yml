@@ -184,6 +184,11 @@ services:
     <<: *redis-cache-common
     container_name: redis-cache-3
 
+  redis-cache-4:
+    <<: *redis-cache-common
+    container_name: redis-cache-4
+    profiles: ["cache-scale"]
+
   # --- Microservices (using uploaded DockerHub images) ---
   discovery-service:
     image: mariaelenabotnari/service-discovery:4.0.0
