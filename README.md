@@ -2089,6 +2089,20 @@ The compose also starts Prometheus, Loki, Alloy and Grafana (`monitoring/`), so 
 
 The dashboard shows, among others, the requests per second of the broker, the deliveries per service and their p95 latency, the requests in flight per instance (what the broker's load balancer looks at), the requests rerouted after a circuit breaker tripped, the open breakers, the Player and Game Service request rate, latency and 5xx rate per replica, the same for Base, Crafting, Zombie and Resource Service, Resource Service's gather / spend / refund outcomes (applied, idempotent replays, insufficient resources, depleted nodes), how many Zombie and Resource replicas are up and reach their database, and the logs of every service with their warnings and errors.
 
+### Cache
+
+The compose includes a shared Redis cache container (`redis-cache`, `redis:7-alpine`) wired to Exam Service and World Service (`REDIS_URL=redis://:${REDIS_PASSWORD}@redis-cache:6379`, `CACHE_ENABLED=true`):
+
+- **Purpose & Eviction Policy:** Provides fast in-memory caching for domain read paths without persistence (`--save "" --appendonly no`, no volume). It runs with `--maxmemory-policy volatile-lru` so only keys with a TTL can be evicted when memory reaches `REDIS_MAXMEMORY`, ensuring small namespace-version keys stored without a TTL are never evicted. The cache is optional — services start and operate normally even if `redis-cache` is unavailable.
+- **Internal Only:** No host port is published; `redis-cache:6379` is reachable only on the internal `kahoots-network` Docker network.
+- **Topology:** The cache runs as a single node for now.
+- **Key Namespace Rule:** Because the Redis instance is shared, every service must prefix all of its keys with its own service name followed by a colon (e.g. `exam-service:*`, `world-service:*`).
+- **No Global Flush:** No service may ever run `FLUSHALL` or `FLUSHDB`.
+- **Inspecting the Cache:** To list keys for a service inside the running container:
+  ```bash
+  docker compose exec redis-cache redis-cli -a "$REDIS_PASSWORD" --scan --pattern "world-service:*"
+  ```
+
 ---
 
 ### System Requirements & Prerequisites
