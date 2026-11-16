@@ -157,6 +157,22 @@ services:
     networks:
       - kahoots-network
 
+  # --- Shared Cache (internal only, no persistence) ---
+  redis-cache:
+    image: redis:7-alpine
+    container_name: redis-cache
+    command: redis-server --requirepass ${REDIS_PASSWORD} --maxmemory ${REDIS_MAXMEMORY} --maxmemory-policy volatile-lru --save "" --appendonly no
+    restart: unless-stopped
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - kahoots-network
+
   # --- Microservices (using uploaded DockerHub images) ---
   discovery-service:
     image: mariaelenabotnari/service-discovery:4.0.0
@@ -224,6 +240,8 @@ services:
       BROKER_URL: http://message-broker:8600
       BROKER_GRPC_URL: message-broker:8601
       JWT_SECRET: team-compose-development-secret-at-least-32-chars
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis-cache:6379
+      CACHE_ENABLED: "true"
     expose:
       - "3000"
     depends_on:
@@ -253,6 +271,8 @@ services:
       DISCOVERY_URL: http://discovery-service:8500
       BROKER_URL: http://message-broker:8600
       JWT_SECRET: team-compose-development-secret-at-least-32-chars
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis-cache:6379
+      CACHE_ENABLED: "true"
     expose:
       - "3001"
     depends_on:
@@ -277,6 +297,8 @@ services:
       Jwt__Audience: kahoots-with-the-undead
       ASPNETCORE_ENVIRONMENT: Development
       Discovery__Url: http://discovery-service:8500
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis-cache:6379
+      CACHE_ENABLED: "true"
     expose:
       - "8080"
     depends_on:
@@ -315,6 +337,8 @@ services:
       # 3003-3005; tickets are shared in game-db, so the replica on 3003 accepts any of them.
       WebSocket__PublicBaseUrl: ws://localhost:3003
       Discovery__Url: http://discovery-service:8500
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis-cache:6379
+      CACHE_ENABLED: "true"
     ports:
       - "3003-3005:8081"
     expose:
@@ -345,6 +369,8 @@ services:
       POSTGRES_PASSWORD: ${RESOURCE_DB_PASSWORD:-postgres}
       POSTGRES_DB: resource_db
       DISCOVERY_URL: http://discovery-service:8500
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis-cache:6379
+      CACHE_ENABLED: "true"
     # Internal only: reachable through the gateway on :8000
     expose:
       - "4002"
@@ -367,6 +393,8 @@ services:
       PORT: 4001
       MONGO_URI: "mongodb://zombie-db:27017/zombie_db"
       DISCOVERY_URL: http://discovery-service:8500
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis-cache:6379
+      CACHE_ENABLED: "true"
     # Internal only: reachable through the gateway on :8000
     expose:
       - "4001"
@@ -404,6 +432,8 @@ services:
       Discovery__Url: http://discovery-service:8500
       # Key for GET /logs/download; the download is off while it is empty (set it in .env, never commit it).
       Logs__AdminKey: ${LOGS_ADMIN_KEY:-}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis-cache:6379
+      CACHE_ENABLED: "true"
     expose:
       - "5003"
     depends_on:
@@ -443,6 +473,8 @@ services:
       Discovery__Url: http://discovery-service:8500
       # Key for GET /logs/download; the download is off while it is empty (set it in .env, never commit it).
       Logs__AdminKey: ${LOGS_ADMIN_KEY:-}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis-cache:6379
+      CACHE_ENABLED: "true"
     expose:
       - "5004"
     depends_on:
