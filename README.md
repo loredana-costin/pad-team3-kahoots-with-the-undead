@@ -2091,17 +2091,45 @@ The dashboard shows, among others, the requests per second of the broker, the de
 
 ### Cache
 
-The compose includes a shared Redis cache container (`redis-cache`, `redis:7-alpine`) wired to all domain services (`exam-service`, `world-service`, `player-service`, `game-service`, `resource-service`, `zombie-service`, `base-service`, and `crafting-service`) with `REDIS_URL=redis://:${REDIS_PASSWORD}@redis-cache:6379` and `CACHE_ENABLED=true`:
+The compose includes three standalone Redis cache nodes (`redis-cache-1`, `redis-cache-2`, `redis-cache-3`, `redis:7-alpine`) wired to the domain services (`exam-service`, `world-service`, `player-service`, `game-service`, `resource-service`, `zombie-service`, `base-service`, and `crafting-service`) with `REDIS_NODES`, `REDIS_VNODES=${REDIS_VNODES:-160}`, `CACHE_ENABLED=true`, and `CACHE_DEBUG_HEADERS=${CACHE_DEBUG_HEADERS:-false}`:
 
-- **Purpose & Eviction Policy:** Provides fast in-memory caching for domain read paths without persistence (`--save "" --appendonly no`, no volume). It runs with `--maxmemory-policy volatile-lru` so only keys with a TTL can be evicted when memory reaches `REDIS_MAXMEMORY`, ensuring small namespace-version keys stored without a TTL are never evicted. The cache is optional — services start and operate normally even if `redis-cache` is unavailable.
-- **Internal Only:** No host port is published; `redis-cache:6379` is reachable only on the internal `kahoots-network` Docker network.
-- **Topology:** The cache runs as a single node for now.
-- **Key Namespace Rule:** Because the Redis instance is shared across all services, every service must prefix all of its keys with its own service name followed by a colon (e.g. `exam-service:*`, `world-service:*`, `player-service:*`, `game-service:*`, `resource-service:*`, `zombie-service:*`, `base-service:*`, `crafting-service:*`).
+- **Topology & Client-Side Sharding:** The three nodes are standalone Redis instances (no Redis Cluster mode, no Sentinel, no replicas). Sharding is performed in the services using consistent hashing over a virtual-node ring (`REDIS_VNODES`, default `160`).
+- **Purpose & Eviction Policy:** Provides fast in-memory caching for domain read paths without persistence (`--save "" --appendonly no`, no volumes). Each node runs with `--maxmemory ${REDIS_MAXMEMORY}` (default `64mb`) and `--maxmemory-policy volatile-lru` so only keys with a TTL can be evicted, ensuring small namespace-version keys stored without a TTL are never evicted. The cache is optional — services have no `depends_on` health condition on the Redis nodes and operate normally even if a node is unavailable.
+- **Internal Only:** No host ports are published; `redis-cache-1:6379`, `redis-cache-2:6379`, and `redis-cache-3:6379` are reachable only on the internal `kahoots-network` Docker network.
+- **Key Namespace Rule:** Every service must prefix all of its keys with its own service name followed by a colon (e.g. `exam-service:*`, `world-service:*`, `player-service:*`, `game-service:*`, `resource-service:*`, `zombie-service:*`, `base-service:*`, `crafting-service:*`).
 - **No Global Flush:** No service may ever run `FLUSHALL` or `FLUSHDB`.
-- **Inspecting the Cache:** To list keys for a service inside the running container:
+- **Inspecting the Shards:** To check the key count or scan keys across the three nodes:
   ```bash
-  docker compose exec redis-cache redis-cli -a "$REDIS_PASSWORD" --scan --pattern "world-service:*"
+  for n in 1 2 3; do docker compose exec redis-cache-$n redis-cli -a "$REDIS_PASSWORD" dbsize; done
+  for n in 1 2 3; do docker compose exec redis-cache-$n redis-cli -a "$REDIS_PASSWORD" --scan --pattern "world-service:*"; done
   ```
+- **Scale-Up Demonstration (`redis-cache-4`):** An optional fourth node (`redis-cache-4`) is defined under the `cache-scale` profile so it does not start during normal runs.
+  1. Start the fourth node:
+     ```bash
+     docker compose --profile cache-scale up -d redis-cache-4
+     ```
+  2. Create a local `docker-compose.override.yml` (git-ignored, never committed) overriding `REDIS_NODES` with all four nodes (and optionally enabling `CACHE_DEBUG_HEADERS=true` for the demo):
+     ```yaml
+     services:
+       exam-service:
+         environment:
+           REDIS_NODES: redis://:${REDIS_PASSWORD}@redis-cache-1:6379,redis://:${REDIS_PASSWORD}@redis-cache-2:6379,redis://:${REDIS_PASSWORD}@redis-cache-3:6379,redis://:${REDIS_PASSWORD}@redis-cache-4:6379
+           CACHE_DEBUG_HEADERS: "true"
+       world-service:
+         environment:
+           REDIS_NODES: redis://:${REDIS_PASSWORD}@redis-cache-1:6379,redis://:${REDIS_PASSWORD}@redis-cache-2:6379,redis://:${REDIS_PASSWORD}@redis-cache-3:6379,redis://:${REDIS_PASSWORD}@redis-cache-4:6379
+           CACHE_DEBUG_HEADERS: "true"
+     ```
+  3. Restart `exam-service` and `world-service` so they pick up the 4-node ring:
+     ```bash
+     docker compose up -d exam-service world-service
+     ```
+  4. **How to revert to 3 nodes:** Remove the local `docker-compose.override.yml`, restart the two services, and stop/remove `redis-cache-4`:
+     ```bash
+     rm docker-compose.override.yml
+     docker compose up -d exam-service world-service
+     docker compose --profile cache-scale rm -sf redis-cache-4
+     ```
 
 ---
 
