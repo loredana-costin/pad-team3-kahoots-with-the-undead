@@ -240,6 +240,8 @@ services:
       BROKER_URL: http://message-broker:8600
       BROKER_GRPC_URL: message-broker:8601
       JWT_SECRET: team-compose-development-secret-at-least-32-chars
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis-cache:6379
+      CACHE_ENABLED: "true"
     expose:
       - "3000"
     depends_on:
@@ -269,6 +271,8 @@ services:
       DISCOVERY_URL: http://discovery-service:8500
       BROKER_URL: http://message-broker:8600
       JWT_SECRET: team-compose-development-secret-at-least-32-chars
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis-cache:6379
+      CACHE_ENABLED: "true"
     expose:
       - "3001"
     depends_on:
