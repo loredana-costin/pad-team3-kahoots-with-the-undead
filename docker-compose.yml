@@ -1,3 +1,17 @@
+x-redis-cache: &redis-cache-common
+  image: redis:7-alpine
+  command: redis-server --requirepass ${REDIS_PASSWORD} --maxmemory ${REDIS_MAXMEMORY} --maxmemory-policy volatile-lru --save "" --appendonly no
+  restart: unless-stopped
+  environment:
+    REDISCLI_AUTH: ${REDIS_PASSWORD}
+  healthcheck:
+    test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+    interval: 5s
+    timeout: 3s
+    retries: 5
+  networks:
+    - kahoots-network
+
 services:
   # --- PostgreSQL Databases ---
   exam-db:
@@ -157,21 +171,18 @@ services:
     networks:
       - kahoots-network
 
-  # --- Shared Cache (internal only, no persistence) ---
-  redis-cache:
-    image: redis:7-alpine
-    container_name: redis-cache
-    command: redis-server --requirepass ${REDIS_PASSWORD} --maxmemory ${REDIS_MAXMEMORY} --maxmemory-policy volatile-lru --save "" --appendonly no
-    restart: unless-stopped
-    environment:
-      REDISCLI_AUTH: ${REDIS_PASSWORD}
-    healthcheck:
-      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    networks:
-      - kahoots-network
+  # --- Shared Cache (3 standalone nodes, internal only, no persistence; sharded by the services) ---
+  redis-cache-1:
+    <<: *redis-cache-common
+    container_name: redis-cache-1
+
+  redis-cache-2:
+    <<: *redis-cache-common
+    container_name: redis-cache-2
+
+  redis-cache-3:
+    <<: *redis-cache-common
+    container_name: redis-cache-3
 
   # --- Microservices (using uploaded DockerHub images) ---
   discovery-service:
