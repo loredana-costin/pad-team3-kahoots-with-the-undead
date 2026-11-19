@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d",
     "name": "Exam Service",
-    "description": "Postman Collection for testing Exam Service through the Gateway: exam CRUD, queries and validation rules, attempts (start, submit, abandon, retry eligibility), the ExamPassed notification result (unlockPending) and the player endpoints (exams, courses, progress, achievements).",
+    "description": "Postman Collection for testing Exam Service (v5.1.0) through the Gateway: exam CRUD, queries and validation rules, attempts (start, submit, abandon, retry eligibility), player endpoints (exams, courses, progress, achievements), and Saga Participant endpoints (/exams/sagas/*).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -43,6 +43,21 @@
     {
       "key": "abandonAttemptId",
       "value": ""
+    },
+    {
+      "key": "examDirectUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "brokerServiceJwt",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "sagaId",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
@@ -1592,6 +1607,646 @@
               ]
             },
             "description": "The path player id must match X-Player-Id, which the Gateway sets from the token."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Saga Participant (v5.1.0)",
+      "description": "Tests Exam Service Saga participant endpoints (/exams/sagas/*) orchestrated by Message Broker: access rules, reserve-achievement, release-achievement (including tombstones and late reserve rejection), confirm-achievement, and GET /exams/sagas/:sagaId.",
+      "item": [
+        {
+          "name": "Mint Message Broker service token",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'message-broker', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('brokerServiceJwt', header + '.' + payload + '.' + signature);",
+                  "pm.collectionVariables.set('sagaId', 'pm-exam-saga-' + Date.now().toString(36));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Message Broker service token minted', () => {",
+                  "    pm.expect(pm.collectionVariables.get('brokerServiceJwt').split('.')).to.have.length(3);",
+                  "    pm.expect(pm.collectionVariables.get('sagaId')).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Mints an HS256 service JWT with sub=message-broker and generates a fresh sagaId for this run.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Exam Service health (direct, internal) - sagas, cache & replication (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Reports sagas, cache, and databaseReplication blocks', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.service).to.eql('exam-service');",
+                  "    pm.expect(json.database).to.eql('up');",
+                  "    pm.expect(json).to.have.property('sagas');",
+                  "    pm.expect(json.sagas).to.have.keys(['enabled', 'started', 'reserved', 'confirmed', 'released', 'reconciled']);",
+                  "    pm.expect(json).to.have.property('cache');",
+                  "    pm.expect(json).to.have.property('databaseReplication');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{examDirectUrl}}/health",
+              "host": [
+                "{{examDirectUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Direct internal health check verifying the v5.1.0 sagas block alongside cache and databaseReplication.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reserve Achievement - player token rejected (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Service token required', () => pm.expect(pm.response.json().error).to.eql('forbidden'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Saga-Id",
+                "value": "{{sagaId}}-auth"
+              },
+              {
+                "key": "X-Saga-Step",
+                "value": "reserve-achievement"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/exams/sagas/reserve-achievement",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exams",
+                "sagas",
+                "reserve-achievement"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"playerId\": \"{{playerId}}\",\n  \"achievementId\": \"Survived Mathematics\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Verifies that a player JWT without X-Service-Name is rejected with 403."
+          },
+          "response": []
+        },
+        {
+          "name": "Reserve Achievement - missing saga headers (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Validation failed', () => pm.expect(pm.response.json().error).to.eql('validation_failed'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/exams/sagas/reserve-achievement",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exams",
+                "sagas",
+                "reserve-achievement"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"playerId\": \"{{playerId}}\",\n  \"achievementId\": \"Survived Mathematics\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Verifies that missing X-Saga-Id / X-Saga-Step headers return 400 validation_failed.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{brokerServiceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reserve Achievement - unknown achievement (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Non-retryable achievement_not_found', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.ok).to.be.false;",
+                  "    pm.expect(json.reason).to.eql('achievement_not_found');",
+                  "    pm.expect(json.retryable).to.be.false;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Saga-Id",
+                "value": "{{sagaId}}-unknown"
+              },
+              {
+                "key": "X-Saga-Step",
+                "value": "reserve-achievement"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/exams/sagas/reserve-achievement",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exams",
+                "sagas",
+                "reserve-achievement"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"playerId\": \"{{playerId}}\",\n  \"achievementId\": \"Unknown Achievement\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Verifies 404 achievement_not_found when achievement does not exist.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{brokerServiceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reserve Achievement - condition not met (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Condition not met', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.ok).to.be.false;",
+                  "    pm.expect(json.reason).to.eql('condition_not_met');",
+                  "    pm.expect(json.retryable).to.be.false;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Saga-Id",
+                "value": "{{sagaId}}-notmet"
+              },
+              {
+                "key": "X-Saga-Step",
+                "value": "reserve-achievement"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/exams/sagas/reserve-achievement",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exams",
+                "sagas",
+                "reserve-achievement"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"playerId\": \"{{ghostPlayerId}}\",\n  \"achievementId\": \"Survived Mathematics\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Verifies 409 condition_not_met for a player who has not passed all exams in the category.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{brokerServiceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Release Achievement - unknown step writes tombstone (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Tombstone recorded with released=false', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.ok).to.be.true;",
+                  "    pm.expect(json.released).to.be.false;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Saga-Id",
+                "value": "{{sagaId}}-tomb"
+              },
+              {
+                "key": "X-Saga-Step",
+                "value": "reserve-achievement"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/exams/sagas/release-achievement",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exams",
+                "sagas",
+                "release-achievement"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"playerId\": \"{{playerId}}\",\n  \"achievementId\": \"Survived Mathematics\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Compensating an unknown (sagaId, step) writes a COMPENSATED tombstone so any late reserve is rejected.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{brokerServiceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reserve Achievement - late reserve after release rejected (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Already compensated', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.ok).to.be.false;",
+                  "    pm.expect(json.reason).to.eql('already_compensated');",
+                  "    pm.expect(json.retryable).to.be.false;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Saga-Id",
+                "value": "{{sagaId}}-tomb"
+              },
+              {
+                "key": "X-Saga-Step",
+                "value": "reserve-achievement"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/exams/sagas/reserve-achievement",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exams",
+                "sagas",
+                "reserve-achievement"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"playerId\": \"{{playerId}}\",\n  \"achievementId\": \"Survived Mathematics\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Verifies that a late reserve arriving after release-achievement is rejected with 409 already_compensated.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{brokerServiceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Confirm Achievement - not reserved (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Not reserved', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.ok).to.be.false;",
+                  "    pm.expect(json.reason).to.eql('not_reserved');",
+                  "    pm.expect(json.retryable).to.be.false;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Saga-Id",
+                "value": "{{sagaId}}-nores"
+              },
+              {
+                "key": "X-Saga-Step",
+                "value": "confirm-achievement"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/exams/sagas/confirm-achievement",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exams",
+                "sagas",
+                "confirm-achievement"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"playerId\": \"{{playerId}}\",\n  \"achievementId\": \"Survived Mathematics\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Verifies 409 not_reserved when confirm-achievement is called without a PENDING reservation.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{brokerServiceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Inspect Saga Steps - found (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Returns recorded steps for sagaId', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.sagaId).to.eql(pm.collectionVariables.get('sagaId') + '-tomb');",
+                  "    pm.expect(json.steps).to.be.an('array').and.not.be.empty;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/exams/sagas/{{sagaId}}-tomb",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exams",
+                "sagas",
+                "{{sagaId}}-tomb"
+              ]
+            },
+            "description": "Inspects saga_step_log entries for a known sagaId (verifies /exams/sagas/:sagaId is not shadowed by /exams/:examId).",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{brokerServiceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Inspect Saga Steps - not found (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Returns saga_not_found', () => pm.expect(pm.response.json().error).to.eql('saga_not_found'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/exams/sagas/non-existent-saga-{{runId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exams",
+                "sagas",
+                "non-existent-saga-{{runId}}"
+              ]
+            },
+            "description": "Returns 404 saga_not_found for an unknown sagaId.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{brokerServiceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
           },
           "response": []
         }
