@@ -94,6 +94,21 @@ images or later (the team compose still runs 4.0.0, where these requests fail). 
 - checks a committed steal, `400` invalid loot, `404` for an unknown transaction, and that the participants'
   `/api/tx/...` endpoints are not reachable through the Gateway.
 
+The Zombie collection's **Sagas (the Message Broker as coordinator)** folder runs the same two actions as
+long-running sagas, and also needs the **5.0.0** images or later. It starts them on the broker
+(`POST {{brokerUrl}}/sagas` with a service token), so it works whatever the Gateway's `COORDINATION_MODE` is; with
+`COORDINATION_MODE=saga`, `POST /api/zombies/{id}/cure` and `/steal` on the Gateway start the same sagas. It:
+
+- spawns two Infected Zombies and a Tourist Zombie, and gives the player exactly the cure requirement;
+- runs a cure that completes, checked through the Gateway (`GET {{baseUrl}}/api/sagas/{sagaId}`), in the inventory
+  and in the broker (the first step's answer fed the second);
+- runs a cure the player can't pay for, which is compensated (the cure undone);
+- runs a steal that completes, and a steal by a zombie that isn't a Tourist, which is compensated (the food refunded);
+- lists the compensated sagas, and checks `400` for an unknown saga, `404` for an unknown saga id, and that the saga
+  step routes (`/api/zombies/{id}/saga/...`) are not reachable through the Gateway.
+
+Each request that reads a saga's outcome waits 1.5 s first, as the saga runs in the broker after it was started.
+
 Requests are numbered and share state through collection variables, so run the whole
 collection rather than firing requests individually - later requests depend on ids captured
 by earlier ones.
