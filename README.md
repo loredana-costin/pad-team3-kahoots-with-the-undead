@@ -38,9 +38,94 @@ Two rules apply across every state-changing endpoint that moves resources, items
 - **Idempotency keys.** Any endpoint that deducts something (`POST /api/gather`, `POST /api/spend`, `POST /api/refund`, `POST /api/craft`, trade endpoints) requires an `idempotencyKey`. The receiving service persists a transaction record keyed on it; a repeated call with the same key returns the original result instead of re-applying the effect. This is what makes reconnects and duplicate completion events safe.
 - **Sagas for multi-service writes.** Some actions span two databases with no shared transaction (e.g. crafting deducts resources in Resource Service's database *and* adds an item in Player Service's database). These are implemented as a saga: if the second step fails after the first succeeded, the initiating service (Crafting Service, Base Service) issues a compensating call to undo the first step, rather than leaving the two databases inconsistent.
 
+- **Two-Phase Commits for actions that must change two databases together** (from the 5.0.0 images). Curing an Infected Zombie and a Tourist Zombie's steal change Zombie Service's MongoDB and Resource Service's PostgreSQL at once. The Gateway coordinates them as a Two-Phase Commit: both services first reserve their part and vote, and only then are both told to commit (or both to abort), so the two databases never disagree. See [Two-Phase Commit](#two-phase-commit).
+
 No service is ever a passive shared datastore for another — every read of another domain's data goes through that domain's own API, never a shared schema or cross-service SQL join.
 
 The full communication contract — every endpoint, its payload, and its response — is documented per service below in each service's "Exposed/Consumed API Endpoints" and "Message Queue Events" sections.
+
+## Two-Phase Commit
+
+*From the 5.0.0 images of the Gateway, Zombie Service and Resource Service.*
+
+Two player actions change two services' databases at once:
+
+| Action | Zombie Service (MongoDB) | Resource Service (PostgreSQL) |
+|---|---|---|
+| Cure an Infected Zombie | the zombie is marked cured | the zombie type's `cureRequirement` is spent |
+| A Tourist Zombie steals | the loot is recorded on the zombie | the loot is taken from the player |
+
+The **Gateway is the coordinator** and the two services are the **participants**:
+
+```
+player ── POST /api/zombies/z_1/cure ──▶ Gateway (coordinator)
+  phase 1   prepare ──▶ Zombie Service     checks the zombie, locks it, votes commit (+ cureRequirement)
+            prepare ──▶ Resource Service   holds the cost on the balance, votes commit
+  decision  commit, written to the Gateway's transaction log
+  phase 2   commit ──▶ Zombie Service      zombie cured, unlocked
+            commit ──▶ Resource Service    cost spent
+```
+
+1. **Prepare.** Each participant checks it can do its part, reserves it and votes `commit`, or votes `abort` with a reason. Zombie Service locks the zombie (its special action and other transactions are refused while it is locked). Resource Service holds the cost: the resources stay on the balance but nothing else can spend them. A participant that doesn't answer in time counts as an `abort` vote.
+2. **Decide.** `commit` only if both voted `commit`. The decision is written to the Gateway's transaction log (SQLite, on a volume) before either participant hears it.
+3. **Commit or abort.** The decision is sent to both participants and retried until they acknowledge it. Every participant step is idempotent on the `txId`, so a repeated message is harmless.
+
+**Failures.**
+
+- If the Gateway crashes before deciding, its recovery task aborts the transaction when it restarts: no decision was written, so nothing can have been committed.
+- If it crashes after deciding, the recovery sends the decision again.
+- A participant releases a reservation that gets no decision within 60 s (`TX_HOLD_TIMEOUT_SECONDS`), so a lost coordinator can't lock a zombie or a balance forever.
+- Zombie Service's MongoDB has no multi-document transactions, so it makes every step an atomic conditional update of one document. See the zombie-service README.
+
+The participants' endpoints (`/api/tx/{txId}/...`) are not reachable through the Gateway; only the coordinator calls them, through the Message Broker's service queues.
+
+### Endpoints answered by the Gateway
+
+**`POST /api/zombies/{instanceId}/cure`** *(Consumed by players)*
+
+No body; the player is the one in the token.
+
+**`POST /api/zombies/{instanceId}/steal`** *(Consumed by players)*
+
+The loot is taken from the player in the token. `loot` is 1 to 20 entries with a positive `amount`.
+
+```json
+{ "loot": [{ "resourceType": "food", "amount": 3 }] }
+```
+
+Response — 200 OK, the transaction committed (`state` is `committing` while a participant has yet to acknowledge; the outcome is already final):
+```json
+{
+  "txId": "tx_8965d2e2403a4fce94ae5b400672e0ef",
+  "action": "cure",
+  "playerId": "p_44",
+  "instanceId": "z_169c0e38",
+  "loot": [],
+  "costs": [{ "resourceType": "chemicals", "amount": 2 }],
+  "state": "committed",
+  "decision": "commit",
+  "reason": null,
+  "participants": {
+    "zombie-service": { "vote": "commit", "voteReason": null, "ack": "committed" },
+    "resource-service": { "vote": "commit", "voteReason": null, "ack": "committed" }
+  },
+  "createdAt": "2026-11-22T15:08:43.011Z",
+  "updatedAt": "2026-11-22T15:08:43.025Z"
+}
+```
+
+409 Conflict — the transaction was aborted. The body has the same fields, plus `error` and the `reason`:
+- a participant's abort reason: `already_cured`, `not_curable`, `not_a_tourist`, `zombie_busy`, `zombie_not_found` or `insufficient_resources` (with `detail.missing`);
+- or `zombie_unavailable` / `resource_unavailable` when a participant couldn't be reached.
+```json
+{ "error": "transaction_aborted", "message": "The transaction was aborted: insufficient_resources.", "txId": "tx_...", "state": "aborted", "decision": "abort", "reason": "insufficient_resources", "detail": { "missing": { "chemicals": 1 } }, "participants": { "zombie-service": { "vote": "commit", "voteReason": null, "ack": "aborted" }, "resource-service": { "vote": "abort", "voteReason": "insufficient_resources", "ack": "aborted" } } }
+```
+
+400 Bad Request — `invalid_body` (invalid `instanceId` or `loot`). 403 Forbidden — `player_token_required` (a service token).
+
+**`GET /api/tx/{txId}`** *(Consumed by players)*
+
+The transaction, in the shape above, with its current `state` (`preparing`, `committing`, `aborting`, `committed`, `aborted`). 404 Not Found — `tx_not_found`, also for another player's transaction.
 
 ---
 # Technologies & Communication Patterns
@@ -64,6 +149,7 @@ The diagram illustrates the microservices architecture for the **In Kahoots with
 - **Message Broker.** It hands each request to one registered instance, balancing by service load (instances in critical load last, fewest requests in flight first). It keeps a circuit breaker per instance: when a breaker trips, the request is rerouted to the next instance and the tripped instance is removed from Service Discovery. Load balancing and circuit breaking are no longer the Gateway's job.
 - **Service-to-service calls.** Game Service (World, Exam, Zombie, Resource, Base), Base Service (Resource, Player, World) and Crafting Service (Resource, Player, Exam, World) call the other services through the broker over gRPC (`Broker.Relay`). Base and Crafting coordinate their spend-and-apply sagas this way. Resource Service and Zombie Service never call outward. The one direct call left is Exam Service → World Service (`ExamPassed`, HTTP to an instance found in Service Discovery).
 - **Events.** Services publish with `Broker.Publish`. The broker delivers a copy to every service subscribed to the topic in Service Discovery as `POST /events/{topic}`. Base Service (`BaseDefenseChanged`) and Crafting Service (`RecipeUnlocked`) already publish. Player, Game, Base and Crafting Service are subscribed to `ExamPassed`, `CourseCompleted`, `AchievementUnlocked`, `ExamFailed` and `ZoneUnlocked`, but Exam and World Service (3.0.0) don't publish on the broker yet.
+- **Two-Phase Commit** (from 5.0.0). The Gateway also coordinates the Two-Phase Commits that cure an Infected Zombie or let a Tourist Zombie steal, calling Zombie and Resource Service's `/api/tx/...` endpoints through their broker queues, with its transaction log on a volume (see [Two-Phase Commit](#two-phase-commit)).
 - **Service Discovery** (`:8500`) holds every replica's registration and topics. It polls each instance's `/health` to set its load status and sends alerts to Discord / Telegram.
 - **Replicas.** Every domain service runs 3 replicas that share that service's own database.
 - **Monitoring.** Prometheus scrapes the broker and the Player, Game, Base and Crafting replicas, Alloy ships every container's logs to Loki, and Grafana shows both.
@@ -74,7 +160,7 @@ Every request to the Gateway (`http://localhost:8000`) needs `Authorization: Bea
 
 Services calling through the Gateway present a service token signed with the same secret (`"kind": "service"`); the Gateway forwards its subject as `X-Service-Name` instead of player headers. The secret is `JWT_SECRET` on the Gateway and `Jwt__Secret` on Player and Game Service; all three must match.
 
-Service-to-service calls do not go through the Gateway any more: Game Service reaches World, Exam, Zombie, Resource and Base Service through the Message Broker over gRPC (`Broker.Relay`, see the message-broker README), with the same service token in the call metadata. The routes only the services call are therefore not available through the Gateway, which answers `404` and `{ "error": "route_not_found", "message": "This route is only for the services and is not available through the gateway." }` whatever token the request carries: `PATCH /api/players/{id}/progression`, `POST /api/players/{id}/inventory/items`, `POST /api/players/{id}/achievements`, `/api/players/events`, `/api/sessions/events`, `POST /exams/start`, `POST /exams/{attemptId}/submit`, `POST /exams/{attemptId}/abandon`, `GET /exams/{examId}/retryEligibility`, `POST /api/zombies/spawn`, `POST /api/zombies/{id}/special-action`, `POST /api/inventory/{playerId}`, `POST /api/gather`, `POST /api/spend`, `POST /api/refund`, `POST /api/base/{id}/barricade` and `POST /api/base/{id}/facilities`. The Postman collections get a token first and send it on every request.
+Service-to-service calls do not go through the Gateway any more: Game Service reaches World, Exam, Zombie, Resource and Base Service through the Message Broker over gRPC (`Broker.Relay`, see the message-broker README), with the same service token in the call metadata. The routes only the services call are therefore not available through the Gateway, which answers `404` and `{ "error": "route_not_found", "message": "This route is only for the services and is not available through the gateway." }` whatever token the request carries: `PATCH /api/players/{id}/progression`, `POST /api/players/{id}/inventory/items`, `POST /api/players/{id}/achievements`, `/api/players/events`, `/api/sessions/events`, `POST /exams/start`, `POST /exams/{attemptId}/submit`, `POST /exams/{attemptId}/abandon`, `GET /exams/{examId}/retryEligibility`, `POST /api/zombies/spawn`, `POST /api/zombies/{id}/special-action`, `POST /api/inventory/{playerId}`, `POST /api/gather`, `POST /api/spend`, `POST /api/refund`, `POST /api/base/{id}/barricade` and `POST /api/base/{id}/facilities`. The Two-Phase Commit participant endpoints (`POST /api/tx/{txId}/prepare`, `/commit`, `/abort` on Zombie and Resource Service) are not proxied at all: `/api/tx/...` is answered by the Gateway itself. The Postman collections get a token first and send it on every request.
 
 ---
 ## **1. Player Service**
@@ -866,7 +952,7 @@ Owns the persistent definitions and short-lived instance state of zombies.
 
 ### **Consumed API Endpoints**
 
-None. Zombie Service never calls other services; Game Service coordinates anything that follows from a zombie action (e.g. calling Resource Service for a steal or a cure).
+None. Zombie Service never calls other services. Game Service coordinates what follows from most zombie actions; a cure and a Tourist Zombie's steal, which also change Resource Service's database, are Two-Phase Commits coordinated by the Gateway (see [Two-Phase Commit](#two-phase-commit)).
 
 ### **Exposed API Endpoints**
 
@@ -1009,6 +1095,65 @@ Response — 200 OK (one example per category):
 ```json
 { "error": "not_found", "message": "Zombie instance not found. It may not have been spawned yet." }
 ```
+409 Conflict — from 5.0.0, the zombie is locked by a Two-Phase Commit in progress (`zombie_busy`), or it was cured (`zombie_cured`):
+```json
+{ "error": "zombie_busy", "message": "This zombie is held by a transaction in progress; try again shortly." }
+```
+
+**`POST /api/tx/{txId}/prepare`** *(Consumed by the Gateway, Two-Phase Commit coordinator — from 5.0.0)*
+
+Checks the zombie can take the action and locks it for the transaction.
+
+- A cure needs an Infected Zombie of a curable type that isn't cured yet.
+- A steal needs a Tourist Zombie.
+
+`loot` is required for a steal and not allowed for a cure. A repeated prepare answers the same vote (`status`: `already_prepared`, `already_committed` or `already_aborted`).
+
+Payload
+```json
+{ "action": "cure", "instanceId": "z_169c0e38", "playerId": "p_44" }
+```
+```json
+{ "action": "steal", "instanceId": "z_4ede2728", "playerId": "p_44", "loot": [{ "resourceType": "food", "amount": 3 }] }
+```
+
+Response — 200 OK, vote commit (a cure also returns the type's `cureRequirement`):
+```json
+{ "txId": "tx_8965d2e2403a4fce94ae5b400672e0ef", "vote": "commit", "state": "prepared", "status": "prepared", "expiresAt": "2026-11-22T15:09:43.011Z", "cureRequirement": { "resourceType": "chemicals", "amount": 2 } }
+```
+Response — 200 OK, vote abort (`abortReason`: `zombie_not_found`, `not_curable`, `already_cured`, `not_a_tourist` or `zombie_busy`):
+```json
+{ "txId": "tx_8965d2e2403a4fce94ae5b400672e0ef", "vote": "abort", "state": "aborted", "status": "rejected", "abortReason": "already_cured" }
+```
+400 Bad Request — `invalid_body`. 409 Conflict — `tx_mismatch`: the `txId` was prepared for another action, zombie, player or loot.
+
+**`POST /api/tx/{txId}/commit`** *(Consumed by the Gateway — from 5.0.0)*
+
+Saves the cure (`curedAt`, `curedBy`) or the loot on the zombie and unlocks it. No body.
+
+Response — 200 OK:
+```json
+{ "txId": "tx_8965d2e2403a4fce94ae5b400672e0ef", "state": "committed", "status": "committed" }
+```
+`status` is `already_committed` for a repeated commit. 404 Not Found — `tx_not_found`: never prepared here. 409 Conflict — `tx_aborted`, with the `abortReason` (`coordinator`, `expired`, a vote's reason).
+
+**`POST /api/tx/{txId}/abort`** *(Consumed by the Gateway — from 5.0.0)*
+
+Unlocks the zombie unchanged. No body. An abort for a `txId` never prepared here is remembered (`abortReason: "aborted_before_prepare"`), so a prepare arriving late votes abort.
+
+Response — 200 OK:
+```json
+{ "txId": "tx_8965d2e2403a4fce94ae5b400672e0ef", "state": "aborted", "status": "aborted", "abortReason": "coordinator" }
+```
+`status` is `already_aborted` for a repeated abort. 409 Conflict — `tx_committed`.
+
+**`GET /api/tx/{txId}`** *(Consumed by the Gateway, for its recovery — from 5.0.0)*
+
+Response — 200 OK:
+```json
+{ "txId": "tx_8965d2e2403a4fce94ae5b400672e0ef", "state": "committed", "action": "cure", "instanceId": "z_169c0e38", "playerId": "p_44", "loot": [], "abortReason": null, "expiresAt": null, "createdAt": "2026-11-22T15:08:43.011Z", "updatedAt": "2026-11-22T15:08:43.020Z" }
+```
+404 Not Found — `tx_not_found`.
 
 ---
 
@@ -1021,6 +1166,7 @@ Owns the university's resource economy independently from the physical map.
 - Player resource inventories/balances.
 - Resource node state (how much is available at a given gatherable location).
 - The full transaction/idempotency ledger for every resource change.
+- Two-Phase Commit holds: resources reserved by a prepared transaction (from 5.0.0).
 
 ### **DockerHub Image**
 - **Repository:** [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service)
@@ -1190,6 +1336,57 @@ Duplicate Response (200 OK)
   "newBalance": { "wood": 13, "metal": 5 }
 }
 ```
+
+**`POST /api/tx/{txId}/prepare`** *(Consumed by the Gateway, Two-Phase Commit coordinator — from 5.0.0)*
+
+Reserves the costs on the player's balance (a hold) and votes.
+
+- **What a hold does:** held resources stay in the balance, but neither `/api/spend` nor another prepare can use them. `/api/spend` answers `402` if only held resources are left.
+- **Body:** the same as `/api/spend`, without `idempotencyKey`.
+- **Repeats:** a repeated prepare answers the same vote (`status`: `already_prepared`, `already_committed` or `already_aborted`).
+
+Payload
+```json
+{ "playerId": "p_44", "reason": "cure_infected_zombie", "costs": [{ "resourceType": "chemicals", "amount": 2 }] }
+```
+
+Response — 200 OK, vote commit:
+```json
+{ "txId": "tx_8965d2e2403a4fce94ae5b400672e0ef", "vote": "commit", "state": "prepared", "status": "prepared", "expiresAt": "2026-11-22T15:09:43.011Z" }
+```
+Response — 200 OK, vote abort (nothing is held):
+```json
+{ "txId": "tx_8965d2e2403a4fce94ae5b400672e0ef", "vote": "abort", "state": "aborted", "status": "rejected_insufficient", "abortReason": "insufficient_resources", "missing": { "chemicals": 1 } }
+```
+400 Bad Request — `invalid_body`. 409 Conflict — `tx_mismatch`: the `txId` was prepared for another player or other costs.
+
+**`POST /api/tx/{txId}/commit`** *(Consumed by the Gateway — from 5.0.0)*
+
+Deducts the held costs. No body.
+
+Response — 200 OK:
+```json
+{ "txId": "tx_8965d2e2403a4fce94ae5b400672e0ef", "state": "committed", "status": "committed", "newBalance": { "chemicals": 1 } }
+```
+`status` is `already_committed` for a repeated commit. 404 Not Found — `tx_not_found`. 409 Conflict — `tx_aborted`, with the `abortReason` (`coordinator`, `insufficient_resources`, `aborted_before_prepare`, `expired`).
+
+**`POST /api/tx/{txId}/abort`** *(Consumed by the Gateway — from 5.0.0)*
+
+Releases the hold; the balance is untouched. No body. An abort for a `txId` never prepared here is remembered (`aborted_before_prepare`), so a late prepare votes abort.
+
+Response — 200 OK:
+```json
+{ "txId": "tx_8965d2e2403a4fce94ae5b400672e0ef", "state": "aborted", "status": "aborted", "abortReason": "coordinator" }
+```
+`status` is `already_aborted` for a repeated abort. 409 Conflict — `tx_committed`.
+
+**`GET /api/tx/{txId}`** *(Consumed by the Gateway, for its recovery — from 5.0.0)*
+
+Response — 200 OK:
+```json
+{ "txId": "tx_8965d2e2403a4fce94ae5b400672e0ef", "state": "prepared", "playerId": "p_44", "reason": "cure_infected_zombie", "costs": [{ "resourceType": "chemicals", "amount": 2 }], "abortReason": null, "expiresAt": "2026-11-22T15:09:43.011Z", "createdAt": "2026-11-22T15:08:43.011Z", "updatedAt": "2026-11-22T15:08:43.011Z" }
+```
+404 Not Found — `tx_not_found`.
 
 ---
 
