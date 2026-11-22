@@ -36,7 +36,7 @@ Every service owns a **database** — no service reads or writes another service
 Two rules apply across every state-changing endpoint that moves resources, items, or currency-like values:
 
 - **Idempotency keys.** Any endpoint that deducts something (`POST /api/gather`, `POST /api/spend`, `POST /api/refund`, `POST /api/craft`, trade endpoints) requires an `idempotencyKey`. The receiving service persists a transaction record keyed on it; a repeated call with the same key returns the original result instead of re-applying the effect. This is what makes reconnects and duplicate completion events safe.
-- **Sagas for multi-service writes.** Some actions span two databases with no shared transaction (e.g. crafting deducts resources in Resource Service's database *and* adds an item in Player Service's database). These are implemented as a saga: if the second step fails after the first succeeded, the initiating service (Crafting Service, Base Service) issues a compensating call to undo the first step, rather than leaving the two databases inconsistent.
+- **Sagas for multi-service writes.** Some actions span two databases with no shared transaction (e.g. crafting deducts resources in Resource Service's database *and* adds an item in Player Service's database). These are implemented as a saga: if the second step fails after the first succeeded, the initiating service (Crafting Service, Base Service) issues a compensating call to undo the first step, rather than leaving the two databases inconsistent. From the 5.0.0 images, curing an Infected Zombie and a Tourist Zombie's steal can also run as **long-running sagas coordinated by the Message Broker**, which keeps every saga in a durable store and compensates the done steps in reverse order (see [Sagas](#sagas)).
 
 - **Two-Phase Commits for actions that must change two databases together** (from the 5.0.0 images). Curing an Infected Zombie and a Tourist Zombie's steal change Zombie Service's MongoDB and Resource Service's PostgreSQL at once. The Gateway coordinates them as a Two-Phase Commit: both services first reserve their part and vote, and only then are both told to commit (or both to abort), so the two databases never disagree. See [Two-Phase Commit](#two-phase-commit).
 
@@ -128,6 +128,86 @@ Response — 200 OK, the transaction committed (`state` is `committing` while a 
 The transaction, in the shape above, with its current `state` (`preparing`, `committing`, `aborting`, `committed`, `aborted`). 404 Not Found — `tx_not_found`, also for another player's transaction.
 
 ---
+## Sagas
+
+*From the 5.0.0 images of the Message Broker, the Gateway, Zombie Service and Resource Service.*
+
+The two actions of the [Two-Phase Commit](#two-phase-commit) can instead run as **long-running sagas, coordinated by the Message Broker**. The Gateway's `COORDINATION_MODE` picks one: `2pc` (the default) or `saga`. The endpoints players call are the same either way.
+
+| Saga | Step 1 (action ↔ compensation) | Step 2 (action ↔ compensation) |
+|---|---|---|
+| `cure-zombie` | Zombie Service: `cure` ↔ `uncure` (returns the cure requirement) | Resource Service: `POST /api/spend` of the cure requirement ↔ `POST /api/refund` with `compensates` |
+| `steal-resources` | Resource Service: `POST /api/spend` of the loot ↔ `POST /api/refund` with `compensates` | Zombie Service: `record-loot` ↔ `return-loot` |
+
+```
+player ── POST /api/zombies/z_1/cure ──▶ Gateway ── POST /sagas ──▶ Message Broker (saga coordinator)
+◀── 202 { sagaId }                                                   │ saved in the saga store (SQLite, volume)
+                                                                     ├─ cure ──▶ Zombie Service      ok (+ cureRequirement)
+                                                                     ├─ pay  ──▶ Resource Service    402 refused
+                                                                     └─ uncure ─▶ Zombie Service     compensated
+player ── GET /api/sagas/{sagaId} ──▶ Gateway ──▶ broker     { "state": "compensated", ... }
+```
+
+- **Steps.** The broker runs the steps one after the other, through its service queues' delivery (Service Discovery, load balancing, circuit breakers). Each step commits at once in its own service: nothing is locked, unlike the Two-Phase Commit.
+- **Failures.**
+  - A step the service refuses (`4xx`) is not applied.
+  - A step that can't be reached or answers `5xx` is retried with backoff. If it still fails, it may or may not have been applied, so it is compensated too.
+  - On a failure, the steps already done are **compensated in reverse order**, each retried until it succeeds. A compensation that keeps failing ends the saga `failed`, and an operator resumes it with `POST /sagas/{sagaId}/retry` on the broker.
+- **Durability.** Every transition is saved before the broker acts on it. After a restart, the broker resumes every unfinished saga from its last recorded step; this was tested by killing the broker in the middle of a step.
+- **Idempotency.** The step id (`{sagaId}:{step}`) is the idempotency key of every step and compensation, so sending one again applies it once.
+- **Compensations are always safe.** A compensation undoes only what its own step did, and succeeds even when there is nothing to undo. It also cancels its step, so a step that was lost and arrives after its compensation is refused (`409 spend_cancelled` / `step_cancelled`) instead of applying something nobody undoes.
+
+### Two-Phase Commit or saga?
+
+| | Two-Phase Commit (`COORDINATION_MODE=2pc`) | Saga (`COORDINATION_MODE=saga`) |
+|---|---|---|
+| Coordinator | Gateway, transaction log in SQLite | Message Broker, saga store in SQLite |
+| Consistency | Atomic: both databases change together, or neither | Eventual: each step commits at once; compensations undo the done steps after a failure |
+| While it runs | The zombie is locked and the cost held: other actions on them wait | Nothing is locked; another action can see a half-done saga |
+| A participant is slow or down | The prepare times out and everything aborts; reservations expire after 60 s | The step is retried with backoff, possibly for long; the saga waits in the store |
+| Coordinator crash | Undecided transactions are aborted at restart; decided ones are resent | The saga resumes from its last recorded step |
+| Answer to the player | `200` / `409` once decided | `202` at once; `GET /api/sagas/{sagaId}` for the outcome |
+| Participant API | `prepare` / `commit` / `abort` on `/api/tx/{txId}` | One action and one compensation per step |
+| Good for | Short actions that must never be seen half-done | Long-running actions across services that can't hold locks |
+
+### Endpoints answered by the Gateway
+
+In `saga` mode, `POST /api/zombies/{instanceId}/cure` and `POST /api/zombies/{instanceId}/steal` take the same input as in the Two-Phase Commit (validated before the broker is called).
+
+Response — 202 Accepted, with `Location: /api/sagas/{sagaId}`; the saga runs in the broker:
+```json
+{
+  "sagaId": "saga_8469fbab58dd44e0961ed397d413edf8",
+  "saga": "cure-zombie",
+  "state": "running",
+  "input": { "playerId": "p_44", "instanceId": "z_0bcad5d9" },
+  "failure": null,
+  "steps": [
+    { "step": "cure", "service": "zombie-service", "state": "pending", "attempts": 0 },
+    { "step": "pay", "service": "resource-service", "state": "pending", "attempts": 0 }
+  ],
+  "createdAt": "2026-11-22T17:20:01.112Z",
+  "updatedAt": "2026-11-22T17:20:01.112Z",
+  "statusUrl": "/api/sagas/saga_8469fbab58dd44e0961ed397d413edf8"
+}
+```
+
+Error responses:
+
+- 502 `broker_unreachable` / 504 `downstream_timeout` when the broker can't be reached.
+- The broker's own errors as it gives them.
+- 503 `saga_coordinator_unavailable` without `BROKER_URL`.
+
+**`GET /api/sagas/{sagaId}`** *(Consumed by players)*
+
+The saga in the shape above, with its current state and, when a step failed, the failure (e.g. `{ "step": "pay", "status": 402, "error": "rejected_insufficient", "missing": { "chemicals": 1 } }`).
+
+- Saga `state`: `running`, `compensating`, `completed`, `compensated` or `failed`.
+- Step `state`: `pending`, `running`, `succeeded`, `failed`, `unknown`, `skipped`, `compensating`, `compensated` or `compensation_failed`.
+- 404 Not Found — `saga_not_found`, also for another player's saga.
+
+---
+
 # Technologies & Communication Patterns
 ---
 
@@ -150,6 +230,7 @@ The diagram illustrates the microservices architecture for the **In Kahoots with
 - **Service-to-service calls.** Game Service (World, Exam, Zombie, Resource, Base), Base Service (Resource, Player, World) and Crafting Service (Resource, Player, Exam, World) call the other services through the broker over gRPC (`Broker.Relay`). Base and Crafting coordinate their spend-and-apply sagas this way. Resource Service and Zombie Service never call outward. The one direct call left is Exam Service → World Service (`ExamPassed`, HTTP to an instance found in Service Discovery).
 - **Events.** Services publish with `Broker.Publish`. The broker delivers a copy to every service subscribed to the topic in Service Discovery as `POST /events/{topic}`. Base Service (`BaseDefenseChanged`) and Crafting Service (`RecipeUnlocked`) already publish. Player, Game, Base and Crafting Service are subscribed to `ExamPassed`, `CourseCompleted`, `AchievementUnlocked`, `ExamFailed` and `ZoneUnlocked`, but Exam and World Service (3.0.0) don't publish on the broker yet.
 - **Two-Phase Commit** (from 5.0.0). The Gateway also coordinates the Two-Phase Commits that cure an Infected Zombie or let a Tourist Zombie steal, calling Zombie and Resource Service's `/api/tx/...` endpoints through their broker queues, with its transaction log on a volume (see [Two-Phase Commit](#two-phase-commit)).
+- **Sagas** (from 5.0.0). With the Gateway's `COORDINATION_MODE=saga`, the Message Broker coordinates the cure and steal sagas instead: it runs each step on Zombie and Resource Service and compensates the done steps when one fails, with its saga store on its data volume (see [Sagas](#sagas)).
 - **Service Discovery** (`:8500`) holds every replica's registration and topics. It polls each instance's `/health` to set its load status and sends alerts to Discord / Telegram.
 - **Replicas.** Every domain service runs 3 replicas that share that service's own database.
 - **Monitoring.** Prometheus scrapes the broker and the Player, Game, Base and Crafting replicas, Alloy ships every container's logs to Loki, and Grafana shows both.
@@ -160,7 +241,7 @@ Every request to the Gateway (`http://localhost:8000`) needs `Authorization: Bea
 
 Services calling through the Gateway present a service token signed with the same secret (`"kind": "service"`); the Gateway forwards its subject as `X-Service-Name` instead of player headers. The secret is `JWT_SECRET` on the Gateway and `Jwt__Secret` on Player and Game Service; all three must match.
 
-Service-to-service calls do not go through the Gateway any more: Game Service reaches World, Exam, Zombie, Resource and Base Service through the Message Broker over gRPC (`Broker.Relay`, see the message-broker README), with the same service token in the call metadata. The routes only the services call are therefore not available through the Gateway, which answers `404` and `{ "error": "route_not_found", "message": "This route is only for the services and is not available through the gateway." }` whatever token the request carries: `PATCH /api/players/{id}/progression`, `POST /api/players/{id}/inventory/items`, `POST /api/players/{id}/achievements`, `/api/players/events`, `/api/sessions/events`, `POST /exams/start`, `POST /exams/{attemptId}/submit`, `POST /exams/{attemptId}/abandon`, `GET /exams/{examId}/retryEligibility`, `POST /api/zombies/spawn`, `POST /api/zombies/{id}/special-action`, `POST /api/inventory/{playerId}`, `POST /api/gather`, `POST /api/spend`, `POST /api/refund`, `POST /api/base/{id}/barricade` and `POST /api/base/{id}/facilities`. The Two-Phase Commit participant endpoints (`POST /api/tx/{txId}/prepare`, `/commit`, `/abort` on Zombie and Resource Service) are not proxied at all: `/api/tx/...` is answered by the Gateway itself. The Postman collections get a token first and send it on every request.
+Service-to-service calls do not go through the Gateway any more: Game Service reaches World, Exam, Zombie, Resource and Base Service through the Message Broker over gRPC (`Broker.Relay`, see the message-broker README), with the same service token in the call metadata. The routes only the services call are therefore not available through the Gateway, which answers `404` and `{ "error": "route_not_found", "message": "This route is only for the services and is not available through the gateway." }` whatever token the request carries: `PATCH /api/players/{id}/progression`, `POST /api/players/{id}/inventory/items`, `POST /api/players/{id}/achievements`, `/api/players/events`, `/api/sessions/events`, `POST /exams/start`, `POST /exams/{attemptId}/submit`, `POST /exams/{attemptId}/abandon`, `GET /exams/{examId}/retryEligibility`, `POST /api/zombies/spawn`, `POST /api/zombies/{id}/special-action`, `POST /api/inventory/{playerId}`, `POST /api/gather`, `POST /api/spend`, `POST /api/refund`, `POST /api/base/{id}/barricade` and `POST /api/base/{id}/facilities`. The Two-Phase Commit participant endpoints (`POST /api/tx/{txId}/prepare`, `/commit`, `/abort` on Zombie and Resource Service) are not proxied at all: `/api/tx/...` is answered by the Gateway itself. Nor are Zombie Service's saga steps (`/api/zombies/{id}/saga/...`), which only the Message Broker calls. The Postman collections get a token first and send it on every request.
 
 ---
 ## **1. Player Service**
@@ -1155,6 +1236,55 @@ Response — 200 OK:
 ```
 404 Not Found — `tx_not_found`.
 
+**`POST /api/zombies/{instanceId}/saga/cure`** *(Consumed by the Message Broker's saga coordinator — from 5.0.0)*
+
+The `cure` step of `cure-zombie`: cures an Infected Zombie of a curable type for the step.
+
+Payload
+```json
+{ "stepId": "saga_acec4a7c:cure", "playerId": "p_44" }
+```
+
+Response — 200 OK. `cureRequirement` is for the broker's next step; `status` is `already_cured_by_step` for a repeated step:
+```json
+{ "stepId": "saga_acec4a7c:cure", "instanceId": "z_feb38327", "status": "cured", "cureRequirement": { "resourceType": "chemicals", "amount": 2 } }
+```
+
+Errors:
+
+- 409 Conflict — `not_curable`, `already_cured`, `zombie_busy` (held by a Two-Phase Commit) or `step_cancelled` (the step was already compensated).
+- 404 — `zombie_not_found`.
+- 400 — `invalid_body`.
+
+**`POST /api/zombies/{instanceId}/saga/record-loot`** *(Consumed by the Message Broker's saga coordinator — from 5.0.0)*
+
+The `record-loot` step of `steal-resources`: adds the loot to a Tourist Zombie, as `{ txId: <stepId>, playerId, resources, stolenAt }`.
+
+```json
+{ "stepId": "saga_b81d:record-loot", "playerId": "p_44", "loot": [{ "resourceType": "food", "amount": 3 }] }
+```
+
+Response — 200 OK, `{ "stepId": "saga_b81d:record-loot", "instanceId": "z_45bac9c3", "status": "recorded" }` (`already_recorded` for a repeated step).
+
+Errors:
+
+- 409 Conflict — `not_a_tourist`, `zombie_busy` or `step_cancelled`.
+- 404 — `zombie_not_found`.
+- 400 — `invalid_body`.
+
+**`POST /api/zombies/{instanceId}/saga/uncure`** and **`POST /api/zombies/{instanceId}/saga/return-loot`** *(Consumed by the Message Broker's saga coordinator — from 5.0.0)*
+
+The compensations: they revert only what their step id did (the cure, the loot entry), and record the step as compensated in the same atomic update, so the step is refused if it arrives afterwards.
+
+```json
+{ "stepId": "saga_acec4a7c:cure" }
+```
+
+Response — always 200 OK (also for an expired zombie), with `status` `uncured` / `returned`, or `nothing_to_undo`:
+```json
+{ "stepId": "saga_acec4a7c:cure", "instanceId": "z_feb38327", "status": "uncured" }
+```
+
 ---
 
 ## **6. Resource Service**
@@ -1274,15 +1404,17 @@ Payload
 { "idempotencyKey": "spend_p44_barricade_room9", "playerId": "p_44", "reason": "barricade", "costs": [ { "resourceType": "wood", "amount": 5 }, { "resourceType": "metal", "amount": 2 } ] }
 ```
 
-Success Response (200 OK)
+Success Response (200 OK) — from 5.0.0 it also returns the `costs` deducted, summed per resource type:
 ```json
-{ "status": "applied", "newBalance": { "wood": 5, "metal": 2 } }
+{ "status": "applied", "newBalance": { "wood": 5, "metal": 2 }, "costs": { "wood": 5, "metal": 2 } }
 ```
 
 Duplicate Response (200 OK)
 ```json
-{ "status": "already_applied", "newBalance": { "wood": 5, "metal": 2 } }
+{ "status": "already_applied", "newBalance": { "wood": 5, "metal": 2 }, "costs": { "wood": 5, "metal": 2 } }
 ```
+
+409 Conflict — from 5.0.0, `spend_cancelled`: a saga already compensated this spend before it arrived (see [Sagas](#sagas)).
 
 Error Response (402 Payment Required) — nothing is deducted and the key isn't stored, so the same key can be retried later:
 ```json
@@ -1336,6 +1468,18 @@ Duplicate Response (200 OK)
   "newBalance": { "wood": 13, "metal": 5 }
 }
 ```
+
+**Refund as a saga compensation** *(Consumed by the Message Broker's saga coordinator — from 5.0.0)*
+
+With `compensates`, the `idempotencyKey` of the spend it undoes, the refund is safe whatever happened to that spend. It holds the lock of both keys, so a spend and its compensation arriving at the same moment on different instances can't interleave.
+
+```json
+{ "idempotencyKey": "saga_acec4a7c:take:refund", "playerId": "p_44", "reason": "saga_compensation", "costs": [{ "resourceType": "food", "amount": 3 }], "compensates": "saga_acec4a7c:take" }
+```
+
+- The spend was applied: the costs are credited back once. Response 200 OK `{ "status": "refunded", "newBalance": { "food": 5 }, "compensates": "saga_acec4a7c:take" }`.
+- The spend never happened (refused, lost, or still on its way): nothing is credited, and the spend's key is cancelled, so the spend is refused if it arrives later (`409 spend_cancelled`). Response 200 OK `{ "status": "nothing_to_refund", "compensates": "saga_acec4a7c:take" }`.
+- 409 Conflict — `refund_mismatch`: `compensates` names a spend of another player or other costs, or a key that isn't a spend.
 
 **`POST /api/tx/{txId}/prepare`** *(Consumed by the Gateway, Two-Phase Commit coordinator — from 5.0.0)*
 
@@ -1960,7 +2104,7 @@ Carries every request inside the system. The Gateway sends each player request t
 - A **circuit breaker** per instance: 3 failures (`5xx`, timeout, unreachable) within the timeout × 3.5 window trip it. The request that tripped it is **rerouted** to the next instance, and the tripped instance is removed from Service Discovery.
 - A request thread per request (`X-Broker-Thread`), with a limit on concurrent requests (`503 too_many_concurrent_requests`).
 
-It keeps no database: the queues live in memory, and events still waiting when it stops are lost. Its own README (`message-broker/README.md`) documents every endpoint, header, error and setting; this section is the contract the other services rely on.
+Its durable store (SQLite on its data volume) keeps the topic events until they are delivered, the dead letter channel, and (from 5.0.0) the sagas it coordinates. Its own README (`message-broker/README.md`) documents every endpoint, header, error and setting; this section is the contract the other services rely on.
 
 ### **DockerHub Image**
 - **Repository:** [`mariaelenabotnari/message-broker`](https://hub.docker.com/r/mariaelenabotnari/message-broker)
@@ -2027,6 +2171,18 @@ Response (202 Accepted)
 ```
 
 Delivery to a subscriber is `POST /events/{topic}` on one of its instances, with the envelope `{ "messageId", "topic", "publisher", "publishedAt", "payload" }`. A `2xx` means delivered, and a `4xx` means refused for good. A `5xx`, timeout or unreachable instance is retried after `TOPIC_RETRY_DELAY_SECONDS` (1 s, doubling), up to `TOPIC_DELIVERY_MAX_ATTEMPTS` (3) attempts. Subscribers use `messageId` to ignore an event delivered twice.
+
+**`POST /sagas`**, **`GET /sagas/{sagaId}`**, **`GET /sagas?state=&saga=&limit=`**, **`POST /sagas/{sagaId}/retry`** *(Consumed by the Gateway, development team — from 5.0.0)*
+
+The saga coordinator (see [Sagas](#sagas)). Service token required.
+
+`POST /sagas` starts `cure-zombie` (input `{ playerId, instanceId }`) or `steal-resources` (input `{ playerId, instanceId, loot }`). It answers 202 Accepted with the saga and `Location: /sagas/{sagaId}`, or 400 `invalid_saga`.
+
+```json
+{ "saga": "steal-resources", "input": { "playerId": "p_44", "instanceId": "z_9", "loot": [{ "resourceType": "food", "amount": 3 }] } }
+```
+
+`GET /sagas/{sagaId}` returns the saga with its `state`, the `context` the steps built, the `failure`, and every step's `state`, `attempts`, `result` and errors (404 `saga_not_found`). `GET /sagas` lists the newest. `POST /sagas/{sagaId}/retry` resumes the compensations of a `failed` saga (409 `saga_not_failed` otherwise).
 
 **`GET /topics`** *(Consumed by development team)*
 
