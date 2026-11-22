@@ -108,6 +108,48 @@
       "value": "",
       "type": "string",
       "description": "Set by 'Spawn a Tourist Zombie'."
+    },
+    {
+      "key": "sagaInfectedA",
+      "value": "",
+      "type": "string",
+      "description": "Set by 'Spawn 2 Infected Zombies and a Tourist': cured by the completed saga."
+    },
+    {
+      "key": "sagaInfectedB",
+      "value": "",
+      "type": "string",
+      "description": "Set by 'Spawn 2 Infected Zombies and a Tourist': used by the compensated sagas."
+    },
+    {
+      "key": "sagaTouristId",
+      "value": "",
+      "type": "string",
+      "description": "Set by 'Spawn 2 Infected Zombies and a Tourist'."
+    },
+    {
+      "key": "sagaCureId",
+      "value": "",
+      "type": "string",
+      "description": "Set by 'Start a cure-zombie Saga (202)'."
+    },
+    {
+      "key": "sagaUnpaidId",
+      "value": "",
+      "type": "string",
+      "description": "Set by 'Start a cure-zombie Saga the Player Can't Pay For (202)'."
+    },
+    {
+      "key": "sagaStealId",
+      "value": "",
+      "type": "string",
+      "description": "Set by 'Start a steal-resources Saga (202)'."
+    },
+    {
+      "key": "sagaRefundId",
+      "value": "",
+      "type": "string",
+      "description": "Set by 'Start a Steal by a Zombie That Isn't a Tourist (202)'."
     }
   ],
   "auth": {
@@ -2139,6 +2181,969 @@
               ]
             },
             "description": "Only the coordinator calls the participants' prepare / commit / abort; the Gateway does not proxy them."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Sagas (the Message Broker as coordinator)",
+      "description": "The same two actions as the Two-Phase Commit folder, as long-running sagas coordinated by the Message Broker: started with POST {{brokerUrl}}/sagas (or, with the Gateway's COORDINATION_MODE=saga, POST /api/zombies/{id}/cure and /steal) and followed with GET {{baseUrl}}/api/sagas/{sagaId}. Needs the 5.0.0 images or later.",
+      "item": [
+        {
+          "name": "Spawn 2 Infected Zombies and a Tourist (through the Message Broker)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for game-service, which the message broker requires (it calls this route in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'game-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', function () { pm.response.to.have.status(201); });",
+                  "pm.test('Two infected zombies', function () {",
+                  "  const zombies = pm.response.json().zombies;",
+                  "  pm.expect(zombies).to.have.lengthOf(2);",
+                  "  pm.collectionVariables.set('sagaInfectedA', zombies[0].instanceId);",
+                  "  pm.collectionVariables.set('sagaInfectedB', zombies[1].instanceId);",
+                  "  pm.collectionVariables.set('infectedTypeId', zombies[0].typeId);",
+                  "});",
+                  "const claims = JSON.parse(atob(pm.variables.get('jwt').split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));",
+                  "pm.collectionVariables.set('playerId', claims.sub);",
+                  "pm.sendRequest({",
+                  "  url: pm.variables.get('brokerUrl') + '/queues/zombie-service/api/zombies/spawn',",
+                  "  method: 'POST',",
+                  "  header: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + pm.collectionVariables.get('serviceJwt') },",
+                  "  body: { mode: 'raw', raw: JSON.stringify({ cycleId: 'cyc_saga', worldZoneId: 'zone_saga', spawnCount: 1, typeWeights: { tourist: 1 } }) },",
+                  "}, function (err, res) {",
+                  "  pm.test('And a Tourist Zombie', function () {",
+                  "    pm.expect(err).to.eql(null);",
+                  "    pm.collectionVariables.set('sagaTouristId', res.json().zombies[0].instanceId);",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/zombies/spawn",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "zombies",
+                "spawn"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cycleId\": \"cyc_saga\",\n  \"worldZoneId\": \"zone_saga\",\n  \"spawnCount\": 2,\n  \"typeWeights\": { \"infected\": 1 }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get the Cure Requirement of the Spawned Type",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Curable, with a cure requirement', function () {",
+                  "  const type = pm.response.json();",
+                  "  pm.expect(type.curable).to.eql(true);",
+                  "  pm.collectionVariables.set('cureResource', type.cureRequirement.resourceType);",
+                  "  pm.collectionVariables.set('cureAmount', type.cureRequirement.amount);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/zombie-types/{{infectedTypeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "zombie-types",
+                "{{infectedTypeId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Give the Player Exactly the Cure Requirement",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "{{playerId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resources\": { \"{{cureResource}}\": {{cureAmount}} }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Start a cure-zombie Saga (202)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 202', function () { pm.response.to.have.status(202); });",
+                  "const saga = pm.response.json();",
+                  "pm.collectionVariables.set('sagaCureId', saga.sagaId);",
+                  "pm.test('Started, followed at its Location', function () {",
+                  "  pm.expect(saga.saga).to.eql('cure-zombie');",
+                  "  pm.expect(pm.response.headers.get('Location')).to.eql('/sagas/' + saga.sagaId);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/sagas",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "sagas"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"saga\": \"cure-zombie\",\n  \"input\": {\n    \"playerId\": \"{{playerId}}\",\n    \"instanceId\": \"{{sagaInfectedA}}\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "The broker runs the steps after answering: cure on Zombie Service (it returns the cure requirement), then pay on Resource Service. With COORDINATION_MODE=saga, POST {{baseUrl}}/api/zombies/{id}/cure on the Gateway starts the same saga."
+          },
+          "response": []
+        },
+        {
+          "name": "Follow the Saga Through the Gateway (completed)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The saga runs in the broker after it was started; give it a moment to finish.",
+                  "setTimeout(() => {}, 1500);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Completed: cured, then paid', function () {",
+                  "  const saga = pm.response.json();",
+                  "  pm.expect(saga.state).to.eql('completed');",
+                  "  pm.expect(saga.steps.map(s => s.step + ':' + s.state)).to.eql(['cure:succeeded', 'pay:succeeded']);",
+                  "  pm.expect(saga).to.not.have.property('context');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/sagas/{{sagaCureId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sagas",
+                "{{sagaCureId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "The Cure Was Paid in Resource Service",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('The cure requirement was spent', function () {",
+                  "  pm.expect(pm.response.json().resources[pm.collectionVariables.get('cureResource')]).to.eql(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "{{playerId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "The Saga in the Message Broker",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('The first step\\'s answer fed the second one', function () {",
+                  "  const saga = pm.response.json();",
+                  "  pm.expect(saga.context.cureRequirement.resourceType).to.eql(pm.collectionVariables.get('cureResource'));",
+                  "  pm.expect(saga.steps[0].result.status).to.eql('cured');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/sagas/{{sagaCureId}}",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "sagas",
+                "{{sagaCureId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Start a cure-zombie Saga the Player Can't Pay For (202)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 202', function () { pm.response.to.have.status(202); });",
+                  "const saga = pm.response.json();",
+                  "pm.collectionVariables.set('sagaUnpaidId', saga.sagaId);",
+                  "pm.test('Started, followed at its Location', function () {",
+                  "  pm.expect(saga.saga).to.eql('cure-zombie');",
+                  "  pm.expect(pm.response.headers.get('Location')).to.eql('/sagas/' + saga.sagaId);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/sagas",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "sagas"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"saga\": \"cure-zombie\",\n  \"input\": {\n    \"playerId\": \"{{playerId}}\",\n    \"instanceId\": \"{{sagaInfectedB}}\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "The cure requirement was spent by the previous saga: pay is refused, so the cure is compensated (uncure)."
+          },
+          "response": []
+        },
+        {
+          "name": "Follow It (compensated: the cure was undone)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The saga runs in the broker after it was started; give it a moment to finish.",
+                  "setTimeout(() => {}, 1500);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Compensated: pay refused, cure undone', function () {",
+                  "  const saga = pm.response.json();",
+                  "  pm.expect(saga.state).to.eql('compensated');",
+                  "  pm.expect(saga.steps.map(s => s.step + ':' + s.state)).to.eql(['cure:compensated', 'pay:failed']);",
+                  "  pm.expect(saga.failure.error).to.eql('rejected_insufficient');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/sagas/{{sagaUnpaidId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sagas",
+                "{{sagaUnpaidId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Give the Player 5 Food",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "{{playerId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resources\": { \"food\": 5 }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Start a steal-resources Saga (202)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 202', function () { pm.response.to.have.status(202); });",
+                  "const saga = pm.response.json();",
+                  "pm.collectionVariables.set('sagaStealId', saga.sagaId);",
+                  "pm.test('Started, followed at its Location', function () {",
+                  "  pm.expect(saga.saga).to.eql('steal-resources');",
+                  "  pm.expect(pm.response.headers.get('Location')).to.eql('/sagas/' + saga.sagaId);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/sagas",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "sagas"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"saga\": \"steal-resources\",\n  \"input\": {\n    \"playerId\": \"{{playerId}}\",\n    \"instanceId\": \"{{sagaTouristId}}\",\n    \"loot\": [\n      {\n        \"resourceType\": \"food\",\n        \"amount\": 3\n      }\n    ]\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Follow the Steal (completed)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The saga runs in the broker after it was started; give it a moment to finish.",
+                  "setTimeout(() => {}, 1500);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Completed: taken, then recorded as loot', function () {",
+                  "  pm.expect(pm.response.json().steps.map(s => s.step + ':' + s.state)).to.eql(['take:succeeded', 'record-loot:succeeded']);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/sagas/{{sagaStealId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sagas",
+                "{{sagaStealId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "The Loot Was Taken in Resource Service",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('5 - 3 = 2 food left', function () { pm.expect(pm.response.json().resources.food).to.eql(2); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "{{playerId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Start a Steal by a Zombie That Isn't a Tourist (202)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 202', function () { pm.response.to.have.status(202); });",
+                  "const saga = pm.response.json();",
+                  "pm.collectionVariables.set('sagaRefundId', saga.sagaId);",
+                  "pm.test('Started, followed at its Location', function () {",
+                  "  pm.expect(saga.saga).to.eql('steal-resources');",
+                  "  pm.expect(pm.response.headers.get('Location')).to.eql('/sagas/' + saga.sagaId);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/sagas",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "sagas"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"saga\": \"steal-resources\",\n  \"input\": {\n    \"playerId\": \"{{playerId}}\",\n    \"instanceId\": \"{{sagaInfectedB}}\",\n    \"loot\": [\n      {\n        \"resourceType\": \"food\",\n        \"amount\": 2\n      }\n    ]\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "take succeeds on Resource Service, record-loot is refused (not_a_tourist), so the food taken is refunded."
+          },
+          "response": []
+        },
+        {
+          "name": "Follow It (compensated: the food was refunded)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The saga runs in the broker after it was started; give it a moment to finish.",
+                  "setTimeout(() => {}, 1500);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Compensated: take refunded, record-loot refused', function () {",
+                  "  const saga = pm.response.json();",
+                  "  pm.expect(saga.state).to.eql('compensated');",
+                  "  pm.expect(saga.steps.map(s => s.step + ':' + s.state)).to.eql(['take:compensated', 'record-loot:failed']);",
+                  "  pm.expect(saga.failure.error).to.eql('not_a_tourist');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/sagas/{{sagaRefundId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sagas",
+                "{{sagaRefundId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "The Food Was Refunded",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Still 2 food', function () { pm.expect(pm.response.json().resources.food).to.eql(2); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "{{playerId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List the Compensated Sagas in the Message Broker",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Both compensated sagas of this run are listed', function () {",
+                  "  const ids = pm.response.json().sagas.map(s => s.sagaId);",
+                  "  pm.expect(ids).to.include(pm.collectionVariables.get('sagaUnpaidId'));",
+                  "  pm.expect(ids).to.include(pm.collectionVariables.get('sagaRefundId'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/sagas?state=compensated&limit=50",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "sagas"
+              ],
+              "query": [
+                {
+                  "key": "state",
+                  "value": "compensated"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Start an Unknown Saga (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', function () { pm.response.to.have.status(400); });",
+                  "pm.test('invalid_saga', function () { pm.expect(pm.response.json().error).to.eql('invalid_saga'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/sagas",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "sagas"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"saga\": \"dance\",\n  \"input\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Follow an Unknown Saga (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404', function () { pm.response.to.have.status(404); });",
+                  "pm.test('saga_not_found', function () { pm.expect(pm.response.json().error).to.eql('saga_not_found'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/sagas/saga_does_not_exist",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sagas",
+                "saga_does_not_exist"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saga Step Routes Through the Gateway - Not Exposed (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404', function () { pm.response.to.have.status(404); });",
+                  "pm.test('route_not_found', function () { pm.expect(pm.response.json().error).to.eql('route_not_found'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/zombies/{{sagaInfectedB}}/saga/cure",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "zombies",
+                "{{sagaInfectedB}}",
+                "saga",
+                "cure"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stepId\": \"postman:cure\",\n  \"playerId\": \"{{playerId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Only the broker's saga coordinator calls the saga steps; a player can't cure a zombie without paying."
           },
           "response": []
         }
