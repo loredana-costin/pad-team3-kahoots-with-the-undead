@@ -109,6 +109,19 @@ long-running sagas, and also needs the **5.0.0** images or later. It starts them
 
 Each request that reads a saga's outcome waits 1.5 s first, as the saga runs in the broker after it was started.
 
+The Zombie and Resource collections' **Cache (Redis, sharded with consistent hashing)** folders check the Redis cache,
+and need the **5.0.0** images or later. The Zombie folder uses a zombie type it creates, and the Resource folder an
+inventory it creates. Each folder:
+
+- reads it twice: `X-Cache: MISS`, then `HIT` from the same node (`X-Cache-Node`, chosen by the consistent-hashing
+  ring), with the Gateway's `X-Auth-Cache: HIT` for the already verified token;
+- changes it (`PUT`), then checks that the next read is a `MISS` with the new value, never the cached one, and the one
+  after it a `HIT`;
+- deletes it and checks the `404`.
+
+The cache headers are only sent with `CACHE_DEBUG_HEADERS=true` in `.env`. Without them, the cache checks show as
+skipped and only the answers are checked.
+
 Requests are numbered and share state through collection variables, so run the whole
 collection rather than firing requests individually - later requests depend on ids captured
 by earlier ones.

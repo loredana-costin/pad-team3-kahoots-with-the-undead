@@ -540,6 +540,12 @@ services:
       DISCOVERY_SERVICES: zombie-service,resource-service,base-service,crafting-service,player-service,game-service,exam-service,world-service
       # Every request goes to the broker's queue of the target service; the broker balances and breaks circuits.
       BROKER_URL: http://message-broker:8600
+      # The verified tokens (authentication data) are cached in the shared Redis nodes, sharded with consistent
+      # hashing like the services' keys (from the 5.0.0 image; the 4.0.0 image ignores these).
+      REDIS_NODES: redis://:${REDIS_PASSWORD}@redis-cache-1:6379,redis://:${REDIS_PASSWORD}@redis-cache-2:6379,redis://:${REDIS_PASSWORD}@redis-cache-3:6379
+      REDIS_VNODES: ${REDIS_VNODES:-160}
+      CACHE_ENABLED: "true"
+      CACHE_DEBUG_HEADERS: ${CACHE_DEBUG_HEADERS:-false}
     ports:
       - "8000:8000"
     depends_on:

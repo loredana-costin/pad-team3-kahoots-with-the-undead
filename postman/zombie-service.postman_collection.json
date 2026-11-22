@@ -150,6 +150,14 @@
       "value": "",
       "type": "string",
       "description": "Set by 'Start a Steal by a Zombie That Isn't a Tourist (202)'."
+    },
+    {
+      "key": "cacheTypeId",
+      "value": ""
+    },
+    {
+      "key": "cacheNode",
+      "value": ""
     }
   ],
   "auth": {
@@ -3145,6 +3153,374 @@
             },
             "description": "Only the broker's saga coordinator calls the saga steps; a player can't cure a zombie without paying."
           },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Cache (Redis, sharded with consistent hashing)",
+      "description": "Needs the 5.0.0 images. GET /api/zombie-types/{typeId} is cached in the team's Redis nodes, and a change to a type invalidates it. Run the compose with CACHE_DEBUG_HEADERS=true to check X-Cache (MISS / HIT), X-Cache-Node (the Redis node the consistent-hashing ring chose) and the Gateway's X-Auth-Cache; without them, those checks are skipped.",
+      "item": [
+        {
+          "name": "Create a zombie type to cache",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category\": \"tourist\",\n  \"name\": \"Cached Exchange Student {{$randomInt}}{{$randomInt}}\",\n  \"baseHealth\": 15,\n  \"attackStrength\": 1,\n  \"moveSpeed\": 2.0,\n  \"perceptionRadius\": 8,\n  \"specialAbility\": \"steal_xp\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/zombie-types",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "zombie-types"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', function () { pm.response.to.have.status(201); });",
+                  "pm.collectionVariables.set('cacheTypeId', pm.response.json().typeId);"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Get the type - first read (MISS)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/zombie-types/{{cacheTypeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "zombie-types",
+                "{{cacheTypeId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The cache debug headers are on only with CACHE_DEBUG_HEADERS=true (and the 5.0.0 images); without them the",
+                  "// cache checks are skipped and only the answer is checked.",
+                  "const cacheCheck = (name, expected) => {",
+                  "  const outcome = pm.response.headers.get('X-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)(name, function () {",
+                  "    pm.expect(outcome).to.eql(expected);",
+                  "    const node = pm.response.headers.get('X-Cache-Node');",
+                  "    pm.expect(node).to.match(/^[\\w.-]+:\\d+$/);",
+                  "    if (expected === 'HIT') { pm.expect(node).to.eql(pm.collectionVariables.get('cacheNode')); }",
+                  "    pm.collectionVariables.set('cacheNode', node);",
+                  "  });",
+                  "};",
+                  "const authCacheCheck = () => {",
+                  "  const outcome = pm.response.headers.get('X-Auth-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)('The Gateway served the token from its cache (X-Auth-Cache: HIT)', function () {",
+                  "    pm.expect(outcome).to.eql('HIT');",
+                  "  });",
+                  "};",
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('baseHealth is 15', function () { pm.expect(pm.response.json().baseHealth).to.eql(15); });",
+                  "cacheCheck('Read from MongoDB and stored (X-Cache: MISS)', 'MISS');"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Get the type again (HIT)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/zombie-types/{{cacheTypeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "zombie-types",
+                "{{cacheTypeId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The cache debug headers are on only with CACHE_DEBUG_HEADERS=true (and the 5.0.0 images); without them the",
+                  "// cache checks are skipped and only the answer is checked.",
+                  "const cacheCheck = (name, expected) => {",
+                  "  const outcome = pm.response.headers.get('X-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)(name, function () {",
+                  "    pm.expect(outcome).to.eql(expected);",
+                  "    const node = pm.response.headers.get('X-Cache-Node');",
+                  "    pm.expect(node).to.match(/^[\\w.-]+:\\d+$/);",
+                  "    if (expected === 'HIT') { pm.expect(node).to.eql(pm.collectionVariables.get('cacheNode')); }",
+                  "    pm.collectionVariables.set('cacheNode', node);",
+                  "  });",
+                  "};",
+                  "const authCacheCheck = () => {",
+                  "  const outcome = pm.response.headers.get('X-Auth-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)('The Gateway served the token from its cache (X-Auth-Cache: HIT)', function () {",
+                  "    pm.expect(outcome).to.eql('HIT');",
+                  "  });",
+                  "};",
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Same answer', function () { pm.expect(pm.response.json().baseHealth).to.eql(15); });",
+                  "cacheCheck('Served from the same Redis node (X-Cache: HIT)', 'HIT');",
+                  "authCacheCheck();"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Update the type (invalidates the cache)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"baseHealth\": 77\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/zombie-types/{{cacheTypeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "zombie-types",
+                "{{cacheTypeId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Get the type after the update (MISS, never the stale value)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/zombie-types/{{cacheTypeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "zombie-types",
+                "{{cacheTypeId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The cache debug headers are on only with CACHE_DEBUG_HEADERS=true (and the 5.0.0 images); without them the",
+                  "// cache checks are skipped and only the answer is checked.",
+                  "const cacheCheck = (name, expected) => {",
+                  "  const outcome = pm.response.headers.get('X-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)(name, function () {",
+                  "    pm.expect(outcome).to.eql(expected);",
+                  "    const node = pm.response.headers.get('X-Cache-Node');",
+                  "    pm.expect(node).to.match(/^[\\w.-]+:\\d+$/);",
+                  "    if (expected === 'HIT') { pm.expect(node).to.eql(pm.collectionVariables.get('cacheNode')); }",
+                  "    pm.collectionVariables.set('cacheNode', node);",
+                  "  });",
+                  "};",
+                  "const authCacheCheck = () => {",
+                  "  const outcome = pm.response.headers.get('X-Auth-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)('The Gateway served the token from its cache (X-Auth-Cache: HIT)', function () {",
+                  "    pm.expect(outcome).to.eql('HIT');",
+                  "  });",
+                  "};",
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('The new baseHealth, not the cached one', function () { pm.expect(pm.response.json().baseHealth).to.eql(77); });",
+                  "cacheCheck('Read from MongoDB again after the change (X-Cache: MISS)', 'MISS');"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Get the type again (HIT with the new value)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/zombie-types/{{cacheTypeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "zombie-types",
+                "{{cacheTypeId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The cache debug headers are on only with CACHE_DEBUG_HEADERS=true (and the 5.0.0 images); without them the",
+                  "// cache checks are skipped and only the answer is checked.",
+                  "const cacheCheck = (name, expected) => {",
+                  "  const outcome = pm.response.headers.get('X-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)(name, function () {",
+                  "    pm.expect(outcome).to.eql(expected);",
+                  "    const node = pm.response.headers.get('X-Cache-Node');",
+                  "    pm.expect(node).to.match(/^[\\w.-]+:\\d+$/);",
+                  "    if (expected === 'HIT') { pm.expect(node).to.eql(pm.collectionVariables.get('cacheNode')); }",
+                  "    pm.collectionVariables.set('cacheNode', node);",
+                  "  });",
+                  "};",
+                  "const authCacheCheck = () => {",
+                  "  const outcome = pm.response.headers.get('X-Auth-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)('The Gateway served the token from its cache (X-Auth-Cache: HIT)', function () {",
+                  "    pm.expect(outcome).to.eql('HIT');",
+                  "  });",
+                  "};",
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('baseHealth is 77', function () { pm.expect(pm.response.json().baseHealth).to.eql(77); });",
+                  "cacheCheck('Served from the cache (X-Cache: HIT)', 'HIT');"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Delete the cached type",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/zombie-types/{{cacheTypeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "zombie-types",
+                "{{cacheTypeId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 204', function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Get the deleted type (404, an error is never cached)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/zombie-types/{{cacheTypeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "zombie-types",
+                "{{cacheTypeId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The cache debug headers are on only with CACHE_DEBUG_HEADERS=true (and the 5.0.0 images); without them the",
+                  "// cache checks are skipped and only the answer is checked.",
+                  "const cacheCheck = (name, expected) => {",
+                  "  const outcome = pm.response.headers.get('X-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)(name, function () {",
+                  "    pm.expect(outcome).to.eql(expected);",
+                  "    const node = pm.response.headers.get('X-Cache-Node');",
+                  "    pm.expect(node).to.match(/^[\\w.-]+:\\d+$/);",
+                  "    if (expected === 'HIT') { pm.expect(node).to.eql(pm.collectionVariables.get('cacheNode')); }",
+                  "    pm.collectionVariables.set('cacheNode', node);",
+                  "  });",
+                  "};",
+                  "const authCacheCheck = () => {",
+                  "  const outcome = pm.response.headers.get('X-Auth-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)('The Gateway served the token from its cache (X-Auth-Cache: HIT)', function () {",
+                  "    pm.expect(outcome).to.eql('HIT');",
+                  "  });",
+                  "};",
+                  "pm.test('Status is 404', function () { pm.response.to.have.status(404); });",
+                  "pm.test('No cache outcome on an error', function () { pm.expect(pm.response.headers.get('X-Cache')).to.not.eql('HIT'); });"
+                ]
+              }
+            }
+          ],
           "response": []
         }
       ]
