@@ -81,6 +81,19 @@ folder, **Monitoring**, reads `GET /metrics` of one replica through the broker's
 scrapes; the team compose does not publish the services' ports) and checks that the Gateway does not
 expose it.
 
+The Zombie collection's **Two-Phase Commit (the Gateway as coordinator)** folder runs the transactions the Gateway
+coordinates across Zombie and Resource Service, and needs the Gateway, Zombie Service and Resource Service **5.0.0**
+images or later (the team compose still runs 4.0.0, where these requests fail). It:
+
+- spawns two Infected Zombies and a Tourist Zombie through the broker;
+- gives the test player exactly the spawned type's cure requirement;
+- cures one zombie (`200`, both participants committed), then checks the inventory and each participant's side
+  through the broker (`GET {{brokerUrl}}/queues/{service}/api/tx/{{txId}}`);
+- checks the aborts: `already_cured`, `insufficient_resources` with the zombie released, `not_a_tourist`, and stealing
+  more than the player has;
+- checks a committed steal, `400` invalid loot, `404` for an unknown transaction, and that the participants'
+  `/api/tx/...` endpoints are not reachable through the Gateway.
+
 Requests are numbered and share state through collection variables, so run the whole
 collection rather than firing requests individually - later requests depend on ids captured
 by earlier ones.

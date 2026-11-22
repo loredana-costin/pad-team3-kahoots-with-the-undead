@@ -54,6 +54,60 @@
     {
       "key": "serviceJwt",
       "value": ""
+    },
+    {
+      "key": "playerId",
+      "value": "",
+      "type": "string",
+      "description": "The test player's id (the player token's subject), set by 'Spawn 2 Infected Zombies'."
+    },
+    {
+      "key": "infectedA",
+      "value": "",
+      "type": "string",
+      "description": "Set by 'Spawn 2 Infected Zombies': the zombie that gets cured."
+    },
+    {
+      "key": "infectedB",
+      "value": "",
+      "type": "string",
+      "description": "Set by 'Spawn 2 Infected Zombies': the zombie whose cure is aborted."
+    },
+    {
+      "key": "infectedTypeId",
+      "value": "",
+      "type": "string",
+      "description": "Set by 'Spawn 2 Infected Zombies'."
+    },
+    {
+      "key": "cureResource",
+      "value": "",
+      "type": "string",
+      "description": "Set by 'Get the Cure Requirement of the Spawned Type'."
+    },
+    {
+      "key": "cureAmount",
+      "value": "",
+      "type": "string",
+      "description": "Set by 'Get the Cure Requirement of the Spawned Type'."
+    },
+    {
+      "key": "txId",
+      "value": "",
+      "type": "string",
+      "description": "Set by 'Cure an Infected Zombie (200 committed)'."
+    },
+    {
+      "key": "abortedTxId",
+      "value": "",
+      "type": "string",
+      "description": "Set by 'Cure Without Enough Resources (409 insufficient_resources)'."
+    },
+    {
+      "key": "touristId",
+      "value": "",
+      "type": "string",
+      "description": "Set by 'Spawn a Tourist Zombie'."
     }
   ],
   "auth": {
@@ -1186,6 +1240,907 @@
               }
             }
           ]
+        }
+      ]
+    },
+    {
+      "name": "Two-Phase Commit (the Gateway as coordinator)",
+      "description": "Curing an Infected Zombie and a Tourist Zombie's steal change Zombie Service's and Resource Service's databases together, as a Two-Phase Commit coordinated by the Gateway (POST /api/zombies/{id}/cure and /steal). Needs the Gateway, Zombie Service and Resource Service 5.0.0 images or later.",
+      "item": [
+        {
+          "name": "Spawn 2 Infected Zombies (through the Message Broker)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for game-service, which the message broker requires (it calls this route in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'game-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', function () { pm.response.to.have.status(201); });",
+                  "pm.test('Two infected zombies', function () {",
+                  "  const zombies = pm.response.json().zombies;",
+                  "  pm.expect(zombies).to.have.lengthOf(2);",
+                  "  zombies.forEach(z => pm.expect(z.category).to.eql('infected'));",
+                  "  pm.collectionVariables.set('infectedA', zombies[0].instanceId);",
+                  "  pm.collectionVariables.set('infectedB', zombies[1].instanceId);",
+                  "  pm.collectionVariables.set('infectedTypeId', zombies[0].typeId);",
+                  "});",
+                  "// The player the Gateway will act for: the subject of the player token.",
+                  "const claims = JSON.parse(atob(pm.variables.get('jwt').split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));",
+                  "pm.collectionVariables.set('playerId', claims.sub);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/zombies/spawn",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "zombies",
+                "spawn"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cycleId\": \"cyc_2pc\",\n  \"worldZoneId\": \"zone_2pc\",\n  \"spawnCount\": 2,\n  \"typeWeights\": { \"infected\": 1 }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Two Infected Zombies for the cure transactions, spawned the way Game Service does it (the Gateway refuses this route)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get the Cure Requirement of the Spawned Type",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('The type is curable and has a cure requirement', function () {",
+                  "  const type = pm.response.json();",
+                  "  pm.expect(type.curable).to.eql(true);",
+                  "  pm.collectionVariables.set('cureResource', type.cureRequirement.resourceType);",
+                  "  pm.collectionVariables.set('cureAmount', type.cureRequirement.amount);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/zombie-types/{{infectedTypeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "zombie-types",
+                "{{infectedTypeId}}"
+              ]
+            },
+            "description": "Spawned zombies get a random infected type, so the cost is read from the type."
+          },
+          "response": []
+        },
+        {
+          "name": "Give the Player Exactly the Cure Requirement",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "{{playerId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resources\": { \"{{cureResource}}\": {{cureAmount}} }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Cure an Infected Zombie (200 committed)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "const tx = pm.response.json();",
+                  "pm.collectionVariables.set('txId', tx.txId);",
+                  "pm.test('Committed', function () {",
+                  "  pm.expect(tx.state).to.eql('committed');",
+                  "  pm.expect(tx.decision).to.eql('commit');",
+                  "  pm.expect(tx.playerId).to.eql(pm.collectionVariables.get('playerId'));",
+                  "});",
+                  "pm.test('Both participants voted commit and acknowledged it', function () {",
+                  "  ['zombie-service', 'resource-service'].forEach(s => {",
+                  "    pm.expect(tx.participants[s].vote).to.eql('commit');",
+                  "    pm.expect(tx.participants[s].ack).to.eql('committed');",
+                  "  });",
+                  "});",
+                  "pm.test('The cost is the zombie type\\'s cure requirement', function () {",
+                  "  pm.expect(tx.costs).to.eql([{ resourceType: pm.collectionVariables.get('cureResource'), amount: Number(pm.collectionVariables.get('cureAmount')) }]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/zombies/{{infectedA}}/cure",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "zombies",
+                "{{infectedA}}",
+                "cure"
+              ]
+            },
+            "description": "The Gateway coordinates a Two-Phase Commit: Zombie Service prepares (locks the zombie, returns the cure requirement), Resource Service prepares (holds the cost), then both commit."
+          },
+          "response": []
+        },
+        {
+          "name": "The Cure Was Paid in Resource Service",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('The cure requirement was spent', function () {",
+                  "  pm.expect(pm.response.json().resources[pm.collectionVariables.get('cureResource')]).to.eql(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "{{playerId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get the Transaction",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Committed, as the cure answered', function () {",
+                  "  pm.expect(pm.response.json().txId).to.eql(pm.collectionVariables.get('txId'));",
+                  "  pm.expect(pm.response.json().state).to.eql('committed');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/tx/{{txId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tx",
+                "{{txId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Zombie Service's Side of the Transaction (through the Message Broker)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Committed cure of that zombie', function () {",
+                  "  const tx = pm.response.json();",
+                  "  pm.expect(tx.state).to.eql('committed');",
+                  "  pm.expect(tx.action).to.eql('cure');",
+                  "  pm.expect(tx.instanceId).to.eql(pm.collectionVariables.get('infectedA'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/tx/{{txId}}",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "tx",
+                "{{txId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Participant endpoint, only reachable through the broker (the Gateway does not proxy /api/tx/... to the services)."
+          },
+          "response": []
+        },
+        {
+          "name": "Resource Service's Side of the Transaction (through the Message Broker)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Committed hold of the cure requirement', function () {",
+                  "  const tx = pm.response.json();",
+                  "  pm.expect(tx.state).to.eql('committed');",
+                  "  pm.expect(tx.playerId).to.eql(pm.collectionVariables.get('playerId'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/tx/{{txId}}",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "tx",
+                "{{txId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Cure the Same Zombie Again (409 already_cured)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 409', function () { pm.response.to.have.status(409); });",
+                  "pm.test('Aborted: Zombie Service voted abort, Resource Service was never asked', function () {",
+                  "  const tx = pm.response.json();",
+                  "  pm.expect(tx.error).to.eql('transaction_aborted');",
+                  "  pm.expect(tx.reason).to.eql('already_cured');",
+                  "  pm.expect(tx.participants).to.have.all.keys('zombie-service');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/zombies/{{infectedA}}/cure",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "zombies",
+                "{{infectedA}}",
+                "cure"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Cure Without Enough Resources (409 insufficient_resources)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 409', function () { pm.response.to.have.status(409); });",
+                  "const tx = pm.response.json();",
+                  "pm.collectionVariables.set('abortedTxId', tx.txId);",
+                  "pm.test('Aborted by Resource Service, with what is missing', function () {",
+                  "  pm.expect(tx.reason).to.eql('insufficient_resources');",
+                  "  pm.expect(tx.detail.missing).to.be.an('object');",
+                  "  pm.expect(tx.participants['resource-service'].vote).to.eql('abort');",
+                  "});",
+                  "pm.test('Zombie Service had voted commit and was told to abort', function () {",
+                  "  pm.expect(tx.participants['zombie-service'].vote).to.eql('commit');",
+                  "  pm.expect(tx.participants['zombie-service'].ack).to.eql('aborted');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/zombies/{{infectedB}}/cure",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "zombies",
+                "{{infectedB}}",
+                "cure"
+              ]
+            },
+            "description": "The cure requirement was spent by the previous cure, so Resource Service votes abort and the zombie Zombie Service had locked is released."
+          },
+          "response": []
+        },
+        {
+          "name": "The Aborted Cure Released the Zombie (through the Message Broker)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Aborted by the coordinator', function () {",
+                  "  pm.expect(pm.response.json().state).to.eql('aborted');",
+                  "  pm.expect(pm.response.json().abortReason).to.eql('coordinator');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/tx/{{abortedTxId}}",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "tx",
+                "{{abortedTxId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Spawn a Tourist Zombie (through the Message Broker)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', function () { pm.response.to.have.status(201); });",
+                  "pm.test('One tourist zombie', function () {",
+                  "  const zombie = pm.response.json().zombies[0];",
+                  "  pm.expect(zombie.category).to.eql('tourist');",
+                  "  pm.collectionVariables.set('touristId', zombie.instanceId);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/zombies/spawn",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "zombies",
+                "spawn"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cycleId\": \"cyc_2pc\",\n  \"worldZoneId\": \"zone_2pc\",\n  \"spawnCount\": 1,\n  \"typeWeights\": { \"tourist\": 1 }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Give the Player 5 Food",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "{{playerId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resources\": { \"food\": 5 }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "A Tourist Zombie Steals (200 committed)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Committed in both participants', function () {",
+                  "  const tx = pm.response.json();",
+                  "  pm.expect(tx.state).to.eql('committed');",
+                  "  pm.expect(tx.loot).to.eql([{ resourceType: 'food', amount: 3 }]);",
+                  "  pm.expect(tx.participants['zombie-service'].ack).to.eql('committed');",
+                  "  pm.expect(tx.participants['resource-service'].ack).to.eql('committed');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/zombies/{{touristId}}/steal",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "zombies",
+                "{{touristId}}",
+                "steal"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"loot\": [{ \"resourceType\": \"food\", \"amount\": 3 }]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "The Loot Was Taken in Resource Service",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('5 - 3 = 2 food left', function () { pm.expect(pm.response.json().resources.food).to.eql(2); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "{{playerId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Steal More Than the Player Has (409 insufficient_resources)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 409', function () { pm.response.to.have.status(409); });",
+                  "pm.test('Aborted, 3 food missing', function () {",
+                  "  pm.expect(pm.response.json().reason).to.eql('insufficient_resources');",
+                  "  pm.expect(pm.response.json().detail.missing).to.eql({ food: 3 });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/zombies/{{touristId}}/steal",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "zombies",
+                "{{touristId}}",
+                "steal"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"loot\": [{ \"resourceType\": \"food\", \"amount\": 5 }]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Steal With a Zombie That Isn't a Tourist (409 not_a_tourist)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 409', function () { pm.response.to.have.status(409); });",
+                  "pm.test('Aborted by Zombie Service', function () { pm.expect(pm.response.json().reason).to.eql('not_a_tourist'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/zombies/{{infectedB}}/steal",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "zombies",
+                "{{infectedB}}",
+                "steal"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"loot\": [{ \"resourceType\": \"food\", \"amount\": 1 }]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Steal - Invalid Loot (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', function () { pm.response.to.have.status(400); });",
+                  "pm.test('invalid_body', function () { pm.expect(pm.response.json().error).to.eql('invalid_body'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/zombies/{{touristId}}/steal",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "zombies",
+                "{{touristId}}",
+                "steal"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"loot\": [{ \"resourceType\": \"food\", \"amount\": 0 }]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get an Unknown Transaction (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404', function () { pm.response.to.have.status(404); });",
+                  "pm.test('tx_not_found', function () { pm.expect(pm.response.json().error).to.eql('tx_not_found'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/tx/tx_does_not_exist",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tx",
+                "tx_does_not_exist"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Participant Endpoints Through the Gateway - Not Exposed (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404', function () { pm.response.to.have.status(404); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/tx/{{txId}}/abort",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tx",
+                "{{txId}}",
+                "abort"
+              ]
+            },
+            "description": "Only the coordinator calls the participants' prepare / commit / abort; the Gateway does not proxy them."
+          },
+          "response": []
         }
       ]
     },
