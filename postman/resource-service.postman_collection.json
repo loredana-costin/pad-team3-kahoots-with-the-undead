@@ -72,6 +72,10 @@
     {
       "key": "serviceJwt",
       "value": ""
+    },
+    {
+      "key": "cacheNode",
+      "value": ""
     }
   ],
   "auth": {
@@ -1474,6 +1478,402 @@
               }
             }
           ]
+        }
+      ]
+    },
+    {
+      "name": "Cache (Redis, sharded with consistent hashing)",
+      "description": "Needs the 5.0.0 images. GET /api/inventory/{playerId} is cached in the team's Redis nodes, and every committed change to that player's balance invalidates it. Run the compose with CACHE_DEBUG_HEADERS=true to check X-Cache (MISS / HIT), X-Cache-Node and the Gateway's X-Auth-Cache; without them, those checks are skipped.",
+      "item": [
+        {
+          "name": "Create an inventory to cache (through the Message Broker)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/inventory/{{playerId}}",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "inventory",
+                "{{playerId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "The Gateway refuses this route, which only game-service calls in the system, so the collection sends it to resource-service through the message broker's queue ({{brokerUrl}}/queues/resource-service/...) with a game-service service token."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for game-service, which the message broker requires (it calls this route in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'game-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);",
+                  "",
+                  "// Use a fresh player (and fresh spend/refund keys) on every run. The gather/spend/refund",
+                  "// requests later in this collection re-create the player's inventory after 'Delete Inventory',",
+                  "// so a fixed playerId would make this request return 409 on the next run.",
+                  "const runId = Date.now();",
+                  "pm.collectionVariables.set('playerId', 'p_' + runId);",
+                  "pm.collectionVariables.set('spendIdempotencyKey', 'spend_barricade_' + runId);",
+                  "pm.collectionVariables.set('refundIdempotencyKey', 'refund_craft_' + runId);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 201', function () { pm.response.to.have.status(201); });",
+                  "pm.test('Resources start empty', function () {",
+                  "  pm.expect(pm.response.json().resources).to.eql({});",
+                  "});",
+                  "pm.test('Delivered by the message broker from the service queue', function () {",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Queue')).to.eql('resource-service');",
+                  "    pm.expect(pm.response.headers.get('X-Broker-Instance')).to.include('resource-service');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Get the inventory - first read (MISS)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "{{playerId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The cache debug headers are on only with CACHE_DEBUG_HEADERS=true (and the 5.0.0 images); without them the",
+                  "// cache checks are skipped and only the answer is checked.",
+                  "const cacheCheck = (name, expected) => {",
+                  "  const outcome = pm.response.headers.get('X-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)(name, function () {",
+                  "    pm.expect(outcome).to.eql(expected);",
+                  "    const node = pm.response.headers.get('X-Cache-Node');",
+                  "    pm.expect(node).to.match(/^[\\w.-]+:\\d+$/);",
+                  "    if (expected === 'HIT') { pm.expect(node).to.eql(pm.collectionVariables.get('cacheNode')); }",
+                  "    pm.collectionVariables.set('cacheNode', node);",
+                  "  });",
+                  "};",
+                  "const authCacheCheck = () => {",
+                  "  const outcome = pm.response.headers.get('X-Auth-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)('The Gateway served the token from its cache (X-Auth-Cache: HIT)', function () {",
+                  "    pm.expect(outcome).to.eql('HIT');",
+                  "  });",
+                  "};",
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Empty', function () { pm.expect(pm.response.json().resources).to.eql({}); });",
+                  "cacheCheck('Read from PostgreSQL and stored (X-Cache: MISS)', 'MISS');"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Get the inventory again (HIT)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "{{playerId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The cache debug headers are on only with CACHE_DEBUG_HEADERS=true (and the 5.0.0 images); without them the",
+                  "// cache checks are skipped and only the answer is checked.",
+                  "const cacheCheck = (name, expected) => {",
+                  "  const outcome = pm.response.headers.get('X-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)(name, function () {",
+                  "    pm.expect(outcome).to.eql(expected);",
+                  "    const node = pm.response.headers.get('X-Cache-Node');",
+                  "    pm.expect(node).to.match(/^[\\w.-]+:\\d+$/);",
+                  "    if (expected === 'HIT') { pm.expect(node).to.eql(pm.collectionVariables.get('cacheNode')); }",
+                  "    pm.collectionVariables.set('cacheNode', node);",
+                  "  });",
+                  "};",
+                  "const authCacheCheck = () => {",
+                  "  const outcome = pm.response.headers.get('X-Auth-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)('The Gateway served the token from its cache (X-Auth-Cache: HIT)', function () {",
+                  "    pm.expect(outcome).to.eql('HIT');",
+                  "  });",
+                  "};",
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Still empty', function () { pm.expect(pm.response.json().resources).to.eql({}); });",
+                  "cacheCheck('Served from the same Redis node (X-Cache: HIT)', 'HIT');",
+                  "authCacheCheck();"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Set the balances (invalidates the player's inventory)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resources\": {\n    \"wood\": 5,\n    \"food\": 8\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "{{playerId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Get the inventory after the change (MISS, never the stale balance)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "{{playerId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The cache debug headers are on only with CACHE_DEBUG_HEADERS=true (and the 5.0.0 images); without them the",
+                  "// cache checks are skipped and only the answer is checked.",
+                  "const cacheCheck = (name, expected) => {",
+                  "  const outcome = pm.response.headers.get('X-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)(name, function () {",
+                  "    pm.expect(outcome).to.eql(expected);",
+                  "    const node = pm.response.headers.get('X-Cache-Node');",
+                  "    pm.expect(node).to.match(/^[\\w.-]+:\\d+$/);",
+                  "    if (expected === 'HIT') { pm.expect(node).to.eql(pm.collectionVariables.get('cacheNode')); }",
+                  "    pm.collectionVariables.set('cacheNode', node);",
+                  "  });",
+                  "};",
+                  "const authCacheCheck = () => {",
+                  "  const outcome = pm.response.headers.get('X-Auth-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)('The Gateway served the token from its cache (X-Auth-Cache: HIT)', function () {",
+                  "    pm.expect(outcome).to.eql('HIT');",
+                  "  });",
+                  "};",
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('The new balances, not the cached empty ones', function () { pm.expect(pm.response.json().resources).to.eql({ wood: 5, food: 8 }); });",
+                  "cacheCheck('Read from PostgreSQL again after the change (X-Cache: MISS)', 'MISS');"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Get the inventory again (HIT with the new balances)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "{{playerId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The cache debug headers are on only with CACHE_DEBUG_HEADERS=true (and the 5.0.0 images); without them the",
+                  "// cache checks are skipped and only the answer is checked.",
+                  "const cacheCheck = (name, expected) => {",
+                  "  const outcome = pm.response.headers.get('X-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)(name, function () {",
+                  "    pm.expect(outcome).to.eql(expected);",
+                  "    const node = pm.response.headers.get('X-Cache-Node');",
+                  "    pm.expect(node).to.match(/^[\\w.-]+:\\d+$/);",
+                  "    if (expected === 'HIT') { pm.expect(node).to.eql(pm.collectionVariables.get('cacheNode')); }",
+                  "    pm.collectionVariables.set('cacheNode', node);",
+                  "  });",
+                  "};",
+                  "const authCacheCheck = () => {",
+                  "  const outcome = pm.response.headers.get('X-Auth-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)('The Gateway served the token from its cache (X-Auth-Cache: HIT)', function () {",
+                  "    pm.expect(outcome).to.eql('HIT');",
+                  "  });",
+                  "};",
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('wood 5, food 8', function () { pm.expect(pm.response.json().resources).to.eql({ wood: 5, food: 8 }); });",
+                  "cacheCheck('Served from the cache (X-Cache: HIT)', 'HIT');"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Delete the cached inventory",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "{{playerId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 204', function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Get the deleted inventory (404, never the cached one)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/{{playerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "{{playerId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The cache debug headers are on only with CACHE_DEBUG_HEADERS=true (and the 5.0.0 images); without them the",
+                  "// cache checks are skipped and only the answer is checked.",
+                  "const cacheCheck = (name, expected) => {",
+                  "  const outcome = pm.response.headers.get('X-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)(name, function () {",
+                  "    pm.expect(outcome).to.eql(expected);",
+                  "    const node = pm.response.headers.get('X-Cache-Node');",
+                  "    pm.expect(node).to.match(/^[\\w.-]+:\\d+$/);",
+                  "    if (expected === 'HIT') { pm.expect(node).to.eql(pm.collectionVariables.get('cacheNode')); }",
+                  "    pm.collectionVariables.set('cacheNode', node);",
+                  "  });",
+                  "};",
+                  "const authCacheCheck = () => {",
+                  "  const outcome = pm.response.headers.get('X-Auth-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)('The Gateway served the token from its cache (X-Auth-Cache: HIT)', function () {",
+                  "    pm.expect(outcome).to.eql('HIT');",
+                  "  });",
+                  "};",
+                  "pm.test('Status is 404', function () { pm.response.to.have.status(404); });"
+                ]
+              }
+            }
+          ],
+          "response": []
         }
       ]
     },

@@ -2444,12 +2444,12 @@ The dashboard shows, among others, the requests per second of the broker, the de
 
 ### Cache
 
-The compose includes three standalone Redis cache nodes (`redis-cache-1`, `redis-cache-2`, `redis-cache-3`, `redis:7-alpine`) wired to the domain services (`exam-service`, `world-service`, `player-service`, `game-service`, `resource-service`, `zombie-service`, `base-service`, and `crafting-service`) with `REDIS_NODES`, `REDIS_VNODES=${REDIS_VNODES:-160}`, `CACHE_ENABLED=true`, and `CACHE_DEBUG_HEADERS=${CACHE_DEBUG_HEADERS:-false}`:
+The compose includes three standalone Redis cache nodes (`redis-cache-1`, `redis-cache-2`, `redis-cache-3`, `redis:7-alpine`) wired to the domain services (`exam-service`, `world-service`, `player-service`, `game-service`, `resource-service`, `zombie-service`, `base-service`, and `crafting-service`) and to the `gateway-service` with `REDIS_NODES`, `REDIS_VNODES=${REDIS_VNODES:-160}`, `CACHE_ENABLED=true`, and `CACHE_DEBUG_HEADERS=${CACHE_DEBUG_HEADERS:-false}`:
 
 - **Topology & Client-Side Sharding:** The three nodes are standalone Redis instances (no Redis Cluster mode, no Sentinel, no replicas). Sharding is performed in the services using consistent hashing over a virtual-node ring (`REDIS_VNODES`, default `160`).
 - **Purpose & Eviction Policy:** Provides fast in-memory caching for domain read paths without persistence (`--save "" --appendonly no`, no volumes). Each node runs with `--maxmemory ${REDIS_MAXMEMORY}` (default `64mb`) and `--maxmemory-policy volatile-lru` so only keys with a TTL can be evicted, ensuring small namespace-version keys stored without a TTL are never evicted. The cache is optional — services have no `depends_on` health condition on the Redis nodes and operate normally even if a node is unavailable.
 - **Internal Only:** No host ports are published; `redis-cache-1:6379`, `redis-cache-2:6379`, and `redis-cache-3:6379` are reachable only on the internal `kahoots-network` Docker network.
-- **Key Namespace Rule:** Every service must prefix all of its keys with its own service name followed by a colon (e.g. `exam-service:*`, `world-service:*`, `player-service:*`, `game-service:*`, `resource-service:*`, `zombie-service:*`, `base-service:*`, `crafting-service:*`).
+- **Key Namespace Rule:** Every service must prefix all of its keys with its own service name followed by a colon (e.g. `exam-service:*`, `world-service:*`, `player-service:*`, `game-service:*`, `resource-service:*`, `zombie-service:*`, `base-service:*`, `crafting-service:*`, `gateway-service:*`).
 - **No Global Flush:** No service may ever run `FLUSHALL` or `FLUSHDB`.
 - **Inspecting the Shards:** To check the key count or scan keys across the three nodes:
   ```bash
@@ -2483,6 +2483,84 @@ The compose includes three standalone Redis cache nodes (`redis-cache-1`, `redis
      docker compose up -d exam-service world-service
      docker compose --profile cache-scale rm -sf redis-cache-4
      ```
+  The same override works for `zombie-service`, `resource-service` and `gateway-service`: add them to `docker-compose.override.yml` and to both `docker compose up -d` commands. With `CACHE_DEBUG_HEADERS=true`, `X-Cache-Node` then shows the keys that moved to `redis-cache-4`.
+
+#### What Zombie Service, Resource Service and the Gateway cache
+
+From the 5.0.0 images, these three services cache the answers below. They follow the team rules above: every key starts with the service's name, nothing is ever flushed, and a Redis node that fails or is slow (`CACHE_COMMAND_TIMEOUT_MS`, 200 ms) is a miss, logged once and skipped for 10 s, while the answer comes from the database.
+
+| Service | Cached | Lives | Invalidated by |
+|---|---|---|---|
+| **Zombie Service** | `GET /api/zombie-types` (per `category`), `GET /api/zombie-types/{typeId}` | 300 s | creating, updating or deleting a type |
+| **Resource Service** | `GET /api/resource-types`, `GET /api/resource-types/{id}` | 300 s | creating, updating or deleting a type |
+| | `GET /api/inventory/{playerId}` | 300 s | any committed change to that player's balance: gather, spend, refund (saga compensations too), a Two-Phase Commit's commit, `POST` / `PUT` / `DELETE /api/inventory/{playerId}` |
+| | `GET /api/nodes/{nodeId}` | 300 s | a gather from that node |
+| **Gateway** (authentication data) | the claims of every token it verified | until the token expires, at most 300 s | the token's expiry |
+
+- **Invalidation by version, never by deleting.** Each namespace (`zombie-types`, `resource-types`, `inventory:{playerId}`, `node:{nodeId}`) has a version key without a TTL, `<service>:<namespace>:version`, and its entries are keyed `<service>:<namespace>:v<version>:<key>`.
+  - A change increments the version once its database transaction has committed, so every entry of that namespace is read from the database again. The old entries are never read again and expire on their TTL.
+  - A GET reads the version *before* the database. A GET that read a balance just before a spend therefore stores it under the version the spend already left behind, so a stale answer is never served. This was tested with 2 Resource Service instances, 40 spends and 80 reads sent at once: every cached balance then matched PostgreSQL.
+  - `volatile-lru` (above) never evicts a version key, as it has no TTL.
+- **The Gateway's tokens.**
+  - The key is `gateway-service:auth:token:<HMAC-SHA256(JWT_SECRET, token)>`, so the token is never stored and a key can't be computed without the secret.
+  - Only a token the Gateway verified (signature, issuer, audience, expiry) is stored, and the key covers the whole token, signature included. A forged or altered token therefore never hits: it is verified and refused (`401`) as before.
+  - An expired entry is never served.
+- **Seeing it.**
+  - With `CACHE_DEBUG_HEADERS=true`, the cached GETs answer `X-Cache: HIT | MISS | BYPASS` and `X-Cache-Node: <host:port>`, and the Gateway adds `X-Auth-Cache: HIT | MISS | BYPASS` to every authenticated answer. Both pass through the Gateway.
+  - The Gateway's `GET /status` reports `cache`: each node's state, and the counts of hits, misses, bypasses, stored tokens and node errors.
+  - Zombie and Resource Service export `kahoots_cache_requests_total`.
+  - The Postman folders **Cache (Redis, sharded with consistent hashing)** of the Zombie and Resource collections check MISS → HIT, the node, and the invalidation (see `postman/README.md`).
+
+#### Consistent hashing (research)
+
+The three Redis nodes are standalone. Nothing in Redis decides which node holds a key, so every service computes it itself, and every service must agree. This section explains the choice of consistent hashing.
+
+**Why not `hash(key) % N`.**
+- With modulo hashing, a key keeps its node when the node count changes only if `h % N` equals `h % (N+1)`.
+- Going from 3 to 4 nodes, only about 1/4 of the keys stay, and the other **~3/4 move**.
+- For a cache, a moved key is a miss. Adding a node would therefore send most reads to the databases at once, the moment more cache capacity was meant to help.
+
+**The ring** (Karger et al., 1997, as in Amazon Dynamo, Cassandra, and memcached's *ketama* clients).
+- Hashes are positions on a ring of 2³² values.
+- Every node is placed on the ring at `hash(node)`, and a key belongs to the first node at or after `hash(key)`, wrapping around.
+- **A new node** takes only the arc between its predecessor and itself. About **1/(N+1)** of the keys move, all of them to the new node, and no key moves between the old nodes.
+- **A node that leaves** gives only its own keys away.
+
+**Virtual nodes.**
+- With one point per node, the arcs are very uneven: one node can own far more than 1/N. A departing node also gives its whole load to the single next node.
+- Each node is therefore placed `REDIS_VNODES` times (160, the number ketama uses), at `hash("<host:port>#0")` … `hash("<host:port>#159")`.
+- The many small arcs average out: the 3 nodes each hold 1/3 of the keys within ±5%.
+- A departing node's arcs are scattered, so its keys spread over all the remaining nodes.
+
+**Our implementation.**
+- Zombie and Resource Service use `src/cache/hashRing.ts`, and the Gateway uses `app/services/hashRing.py`.
+- A position is the first 4 bytes of the MD5 of the string, read big-endian. The points are sorted once, and a lookup is a binary search: O(log(N·V)).
+- A node is named by its `host:port`, never by its password or its place in `REDIS_NODES`. The order of the list therefore doesn't matter.
+- The Python ring places keys exactly like the TypeScript ring, and a Gateway test checks this.
+- The tests measure the behaviour on 20,000 to 30,000 keys:
+
+| | 3 → 4 nodes, keys moved | Where they go | Share per node (3 nodes) |
+|---|---|---|---|
+| `hash % N` | ~75% | all over | even |
+| Consistent hashing, 160 virtual nodes | ~25% (≈ 1/4) | all to the new node | 1/3 ± 5% |
+
+**Compared with Redis Cluster.** Redis Cluster also avoids `% N` over the nodes, in a different way:
+- It has a fixed **16384 hash slots**: a key's slot is `CRC16(key) mod 16384`, and each master owns a set of slots.
+- Because the slot count never changes, a key never changes slot. Scaling moves whole slots, *with their data*, from one master to another (`MIGRATING` / `IMPORTING`).
+- Clients follow `MOVED` / `ASK` redirections. Replicas and failover come with the cluster, and `{hash tags}` keep related keys in one slot for multi-key commands.
+
+| | Our ring (client-side) | Redis Cluster (server-side) |
+|---|---|---|
+| Who maps a key to a node | each service (the same ring in Node.js and Python) | the cluster (slot table); clients cache it and follow `MOVED` / `ASK` |
+| Adding a node | about 1/(N+1) of the keys miss once and are reloaded from the database | slots are migrated with their data, so nothing is lost |
+| Node failure | its keys miss (answered from the database) until it returns | a replica is promoted |
+| Multi-key operations | not across nodes | within a slot (`{hash tags}`) |
+| Runs on | plain standalone `redis:7-alpine` nodes | cluster mode, ≥ 3 masters (with replicas for failover) |
+
+We chose the ring because this is a cache:
+- A moved or lost key only costs one database read.
+- The versioned keys never need a multi-key transaction.
+- Redis Cluster's slot migration, replicas and failover are aimed at Redis as a primary store, and would add operational weight the team compose doesn't need.
 
 ---
 
