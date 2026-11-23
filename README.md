@@ -1153,7 +1153,7 @@ Owns the persistent definitions and short-lived instance state of zombies.
 
 ### **DockerHub Image**
 - **Repository:** [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service)
-- **Image Tag:** `costinloredana/zombie-service:4.0.0`
+- **Image Tag:** `costinloredana/zombie-service:5.0.0`
 - **Default Port:** `Internal only (4001), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
@@ -1162,7 +1162,7 @@ None. Zombie Service never calls other services. Game Service coordinates what f
 
 ### **Exposed API Endpoints**
 
-Every error response has the shape `{ "error": "<code>", "message": "<reason>" }`.
+Every error response has the shape `{ "error": "<code>", "message": "<reason>" }`. From 5.0.0, any endpoint that reaches the database answers `503` with `Retry-After: 2` and `{ "error": "database_unavailable", "message": "The database is failing over to a new primary. Retry in a few seconds." }` while no node is the primary (see [Database replication and failover](#database-replication-and-failover-zombie-service-resource-service)).
 
 **`GET /health`** *(Consumed by Docker healthcheck)*
 
@@ -1170,6 +1170,57 @@ Response
 ```json
 { "status": "ok", "service": "zombie-service" }
 ```
+
+**`GET /status`** *(Consumed by development team)*
+
+Describes the running instance. Unlike `GET /health`, it also checks that MongoDB answers (a `ping` command, up to 2 s), and from 5.0.0 it reports the replicated database and the cache.
+
+Response — 200 OK
+```json
+{
+  "status": "ok",
+  "service": "zombie-service",
+  "version": "5.0.0",
+  "startedAt": "2026-11-23T09:12:03.418Z",
+  "uptimeSeconds": 42.317,
+  "timestamp": "2026-11-23T09:12:45.735Z",
+  "dependencies": { "database": "ok" },
+  "replication": {
+    "mode": "replicaSet",
+    "replicaSet": "rs0",
+    "primary": "zombie-db-1:27017",
+    "members": [
+      { "host": "zombie-db-1:27017", "role": "primary" },
+      { "host": "zombie-db-2:27017", "role": "secondary" },
+      { "host": "zombie-db-3:27017", "role": "secondary" }
+    ],
+    "primaryChanges": 0
+  },
+  "cache": {
+    "enabled": true,
+    "vnodes": 160,
+    "ttlSeconds": 300,
+    "nodes": [
+      { "node": "redis-cache-1:6379", "up": true },
+      { "node": "redis-cache-2:6379", "up": true },
+      { "node": "redis-cache-3:6379", "up": true }
+    ]
+  }
+}
+```
+
+503 Service Unavailable — the same body with `"status": "degraded"` and `"dependencies": { "database": "unreachable" }` when MongoDB does not answer within 2 s.
+
+| Field | Description |
+|---|---|
+| `version` | The `package.json` version, the same one the DockerHub image is tagged with |
+| `dependencies.database` | `ok` or `unreachable` |
+| `replication.mode` | `replicaSet`, or `standalone` for a single `mongod` |
+| `replication.replicaSet` | The replica set's name (`rs0`) |
+| `replication.primary` | The node the service writes to; `null` while a failover is in progress |
+| `replication.members` | Each node's `role`: `primary`, `secondary` or `unreachable` |
+| `replication.primaryChanges` | The failovers this instance has followed since it started |
+| `cache` | `{ "enabled": false }`, or the virtual nodes per Redis node, the TTL and each node's state (`up: false` while it is skipped after a failure). The cache never makes the status `degraded` |
 
 **`GET /metrics`** *(Consumed by Prometheus)*
 
@@ -1425,7 +1476,7 @@ Owns the university's resource economy independently from the physical map.
 
 ### **DockerHub Image**
 - **Repository:** [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service)
-- **Image Tag:** `costinloredana/resource-service:4.0.0`
+- **Image Tag:** `costinloredana/resource-service:5.0.0`
 - **Default Port:** `Internal only (4002), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
@@ -1434,7 +1485,7 @@ None. Resource Service never calls other services. Node state is stored in its o
 
 ### **Exposed API Endpoints**
 
-Errors use the shape `{ "error": "<code>", "message": "<reason>" }` (`invalid_body` / `invalid_resource_type` for 400, `not_found` for 404, `resource_type_exists` / `inventory_exists` for 409). The only exception is the 402 from `/api/spend`, shown below.
+Errors use the shape `{ "error": "<code>", "message": "<reason>" }` (`invalid_body` / `invalid_resource_type` for 400, `not_found` for 404, `resource_type_exists` / `inventory_exists` for 409). The only exception is the 402 from `/api/spend`, shown below. From 5.0.0, any endpoint that reaches the database answers `503` with `Retry-After: 2` and `{ "error": "database_unavailable", "message": "The database is failing over to a new primary. Retry in a few seconds." }` while no node is the primary (see [Database replication and failover](#database-replication-and-failover-zombie-service-resource-service)).
 
 **`GET /health`** *(Consumed by Docker healthcheck)*
 
@@ -1442,6 +1493,57 @@ Response
 ```json
 { "status": "ok", "service": "resource-service" }
 ```
+
+**`GET /status`** *(Consumed by development team)*
+
+Describes the running instance. Unlike `GET /health`, it also checks that PostgreSQL answers (`SELECT 1`, up to 2 s), and from 5.0.0 it reports the replicated database and the cache.
+
+Response — 200 OK
+```json
+{
+  "status": "ok",
+  "service": "resource-service",
+  "version": "5.0.0",
+  "startedAt": "2026-11-23T09:12:03.418Z",
+  "uptimeSeconds": 42.317,
+  "timestamp": "2026-11-23T09:12:45.735Z",
+  "dependencies": { "database": "ok" },
+  "replication": {
+    "mode": "replicated",
+    "primary": "resource-db-1:5432",
+    "members": [
+      { "host": "resource-db-1:5432", "role": "primary" },
+      { "host": "resource-db-2:5432", "role": "standby" },
+      { "host": "resource-db-3:5432", "role": "standby" }
+    ],
+    "primaryChanges": 0,
+    "lastCheckedAt": "2026-11-23T09:12:44.102Z"
+  },
+  "cache": {
+    "enabled": true,
+    "vnodes": 160,
+    "ttlSeconds": 300,
+    "nodes": [
+      { "node": "redis-cache-1:6379", "up": true },
+      { "node": "redis-cache-2:6379", "up": true },
+      { "node": "redis-cache-3:6379", "up": true }
+    ]
+  }
+}
+```
+
+503 Service Unavailable — the same body with `"status": "degraded"` and `"dependencies": { "database": "unreachable" }` when PostgreSQL does not answer within 2 s.
+
+| Field | Description |
+|---|---|
+| `version` | The `package.json` version, the same one the DockerHub image is tagged with |
+| `dependencies.database` | `ok` or `unreachable` |
+| `replication.mode` | `replicated` with `DATABASE_HOSTS`, or `single` for `DATABASE_URL`'s host only |
+| `replication.lastCheckedAt` | When the nodes were last checked (every 2 s, and at once after a connection error) |
+| `replication.primary` | The node the service writes to; `null` while a failover is in progress |
+| `replication.members` | Each node's `role`: `primary`, `standby` or `unreachable` |
+| `replication.primaryChanges` | The failovers this instance has followed since it started |
+| `cache` | `{ "enabled": false }`, or the virtual nodes per Redis node, the TTL and each node's state (`up: false` while it is skipped after a failure). The cache never makes the status `degraded` |
 
 **`GET /metrics`** *(Consumed by Prometheus)*
 
@@ -2550,8 +2652,8 @@ The microservices are containerized and published on DockerHub:
 | **Message Broker** | [`mariaelenabotnari/message-broker`](https://hub.docker.com/r/mariaelenabotnari/message-broker) | `mariaelenabotnari/message-broker:4.0.0` | `8600` (HTTP), `Internal (8601)` (gRPC) | Service queues for the Gateway, gRPC relay between services, durable topic queues, load balancing and circuit breakers |
 | **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:5.0.0` | `Internal (8080)` | Player identity, progression, inventory, and trades |
 | **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:5.0.0` | `Internal (8080), WebSocket 3003-3005` | Game sessions, day/night cycle, and timed player actions |
-| **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:4.0.0` | `Internal (4001)` | Zombie type definitions, spawned instances, and special actions |
-| **Resource Service** | [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service) | `costinloredana/resource-service:4.0.0` | `Internal (4002)` | Resource types, player balances, nodes, and idempotent transactions |
+| **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:5.0.0` | `Internal (4001)` | Zombie type definitions, spawned instances, and special actions |
+| **Resource Service** | [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service) | `costinloredana/resource-service:5.0.0` | `Internal (4002)` | Resource types, player balances, nodes, and idempotent transactions |
 | **Base Service** | [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service) | `cristi150404/base-service:4.0.0` | `Internal (5003)` | Player bases, barricades, facilities, and decorations |
 | **Crafting Service** | [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service) | `cristi150404/crafting-service:4.0.0` | `Internal (5004)` | Recipes, unlock conditions, and crafting sagas |
 
@@ -2716,7 +2818,7 @@ The clusters start on new volumes (`player_db_{1,2,3}_data`, `game_db_{1,2,3}_da
 
 ### Database replication and failover (Zombie Service, Resource Service)
 
-Zombie Service and Resource Service also run on three database nodes each, with automatic failover (from the **5.0.0** images; the 4.0.0 images connect to node 1 only).
+Zombie Service and Resource Service also run on three database nodes each, with automatic failover (from the **5.0.0** images, which the team compose runs).
 
 | | Zombie Service | Resource Service |
 |---|---|---|
@@ -2851,7 +2953,7 @@ Both images are multi-stage Node.js 20 builds that run as the non-root `node` us
 
 | | Zombie Service | Resource Service |
 |---|---|---|
-| **Image** | `costinloredana/zombie-service:4.0.0` (`node:20-alpine`) | `costinloredana/resource-service:4.0.0` (`node:20-slim` + OpenSSL for Prisma) |
+| **Image** | `costinloredana/zombie-service:5.0.0` (`node:20-alpine`) | `costinloredana/resource-service:5.0.0` (`node:20-slim` + OpenSSL for Prisma) |
 | **Database** | MongoDB 8 (`mongo:8`) | PostgreSQL 17 (`postgres:17-alpine`) |
 | **Required env** | `MONGO_URI`, e.g. `mongodb://zombie-db:27017/zombie_db` | `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, or a single `DATABASE_URL` that takes precedence over them |
 | **Optional env** | `PORT` (default `4001`) | `PORT` (default `4002`) |
@@ -2864,11 +2966,11 @@ The service exits on startup if its database is unreachable, so start it only af
 
 # Zombie Service
 docker run -d --name zombie-db --network kahoots-net mongo:8
-docker run -d --name zombie-service --network kahoots-net -p 4001:4001   -e MONGO_URI=mongodb://zombie-db:27017/zombie_db   costinloredana/zombie-service:4.0.0
+docker run -d --name zombie-service --network kahoots-net -p 4001:4001   -e MONGO_URI=mongodb://zombie-db:27017/zombie_db   costinloredana/zombie-service:5.0.0
 
 # Resource Service
 docker run -d --name resource-db --network kahoots-net   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=resource_db postgres:17-alpine
-docker run -d --name resource-service --network kahoots-net -p 4002:4002   -e POSTGRES_HOST=resource-db -e POSTGRES_PORT=5432 -e POSTGRES_USER=postgres   -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=resource_db   costinloredana/resource-service:4.0.0
+docker run -d --name resource-service --network kahoots-net -p 4002:4002   -e POSTGRES_HOST=resource-db -e POSTGRES_PORT=5432 -e POSTGRES_USER=postgres   -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=resource_db   costinloredana/resource-service:5.0.0
 ```
 
 If a container exits right away, the database probably wasn't ready yet. Wait a few seconds and run `docker start zombie-service` or `docker start resource-service`.

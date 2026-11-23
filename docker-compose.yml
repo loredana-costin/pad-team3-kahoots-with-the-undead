@@ -824,14 +824,14 @@ services:
   # Service Discovery, which the Gateway reads to spread requests over them (round robin).
   # Idempotency keys and the table bootstrap are safe across replicas (resource-service #248, #249).
   resource-service:
-    image: costinloredana/resource-service:4.0.0
+    image: costinloredana/resource-service:5.0.0
     deploy:
       replicas: 3
     restart: always
     environment:
       PORT: 4002
       # The user, password and database; with DATABASE_HOSTS the service connects to whichever node is the primary
-      # and follows it across failovers (from the 5.0.0 image; the 4.0.0 image uses resource-db-1 only).
+      # and follows it across failovers.
       DATABASE_URL: postgresql://${RESOURCE_DB_USER:-postgres}:${RESOURCE_DB_PASSWORD:-postgres}@resource-db-1:5432/resource_db
       DATABASE_HOSTS: resource-db-1:5432,resource-db-2:5432,resource-db-3:5432
       DISCOVERY_URL: http://discovery-service:8500
@@ -855,7 +855,7 @@ services:
   # No container_name: 3 replicas share the zombie-db replica set, and each registers its own address with
   # Service Discovery, which the Gateway reads to spread requests over them (round robin).
   zombie-service:
-    image: costinloredana/zombie-service:4.0.0
+    image: costinloredana/zombie-service:5.0.0
     deploy:
       replicas: 3
     restart: always
