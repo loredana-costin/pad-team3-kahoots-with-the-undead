@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "c7e5939c-c30c-536f-9542-687980281153",
     "name": "Base Service",
-    "description": "Tests for Base Service (In Kahoots with the Undead, Team 3), run through the Gateway against the real Player, World and Resource Service of the team docker-compose.yml. Run the folders in order: Setup registers a fresh player and grants it resources through Resource Service's refund route, then the base is created, upgraded and deleted. Rollback uses a player id Player Service does not know, so the reward delivery fails and the food is refunded.",
+    "description": "Tests for Base Service (In Kahoots with the Undead, Team 3), run through the Gateway against the real Player, World and Resource Service of the team docker-compose.yml. Run the folders in order: Setup registers a fresh player and grants it resources through Resource Service's refund route, then the base is created, upgraded and deleted. Rollback uses a player id Player Service does not know, so the reward delivery fails and the food is refunded. Folders 8 to 11 cover Lab 5 and need the 5.0.0 image with the compose defaults (Coordination__Mode=2pc); start the compose with CACHE_DEBUG_HEADERS=true for the cache checks.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -63,6 +63,16 @@
     },
     {
       "key": "logsAdminKey",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "cacheNode",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "txId",
       "value": "",
       "type": "string"
     }
@@ -1159,7 +1169,11 @@
                   "});",
                   "pm.test(\"Completed\", function () {",
                   "    const json = pm.response.json();",
-                  "    pm.expect(json).to.eql({ idempotencyKey: 'barricade_' + pm.collectionVariables.get('runId') + '_faf_cab_001', action: 'barricade', status: 'completed' });",
+                  "    pm.expect(json.idempotencyKey).to.eql('barricade_' + pm.collectionVariables.get('runId') + '_faf_cab_001');",
+                  "    pm.expect(json.action).to.eql('barricade');",
+                  "    pm.expect(json.status).to.eql('completed');",
+                  "    // 5.0.0 also says how it was coordinated: mode 2pc with its txId (the compose default), or local.",
+                  "    if (json.mode === '2pc') { pm.expect(json.txId).to.match(/^tx_/); }",
                   "});"
                 ]
               }
@@ -2042,7 +2056,1058 @@
       ]
     },
     {
-      "name": "8. Cleanup",
+      "name": "8. Cache (Redis, sharded with consistent hashing)",
+      "description": "Needs the 5.0.0 image. GET /api/base/{playerId} is cached per player in the team's Redis nodes (keys start with base-service:), and every other request under /api/base/{playerId} invalidates it once it has answered. Run the compose with CACHE_DEBUG_HEADERS=true to check X-Cache (MISS / HIT) and X-Cache-Node; without them, those checks are skipped.",
+      "item": [
+        {
+          "name": "Claim a room (a write: invalidates the player's cached base)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Room claimed\", function () {",
+                  "    pm.expect(pm.response.json()).to.eql({ roomId: 'mainCorridor', barricadeLevel: 0 });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/base/{{playerId}}/rooms",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "base",
+                "{{playerId}}",
+                "rooms"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idempotencyKey\": \"claim_{{runId}}_cache_mainCorridor\",\n  \"roomId\": \"mainCorridor\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get the base - first read (MISS)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The cache debug headers are on only with CACHE_DEBUG_HEADERS=true (and the 5.0.0 image); without them the",
+                  "// cache checks are skipped and only the answer is checked.",
+                  "const cacheCheck = (name, expected) => {",
+                  "  const outcome = pm.response.headers.get('X-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)(name, function () {",
+                  "    pm.expect(outcome).to.eql(expected);",
+                  "    const node = pm.response.headers.get('X-Cache-Node');",
+                  "    pm.expect(node).to.match(/^[\\w.-]+:\\d+$/);",
+                  "    if (expected === 'HIT') { pm.expect(node).to.eql(pm.collectionVariables.get('cacheNode')); }",
+                  "    pm.collectionVariables.set('cacheNode', node);",
+                  "  });",
+                  "};",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"The new room is there\", function () {",
+                  "    pm.expect(pm.response.json().rooms.map(r => r.roomId)).to.include('mainCorridor');",
+                  "});",
+                  "cacheCheck('Read from PostgreSQL and stored (X-Cache: MISS)', 'MISS');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/base/{{playerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "base",
+                "{{playerId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Get the base again (HIT)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The cache debug headers are on only with CACHE_DEBUG_HEADERS=true (and the 5.0.0 image); without them the",
+                  "// cache checks are skipped and only the answer is checked.",
+                  "const cacheCheck = (name, expected) => {",
+                  "  const outcome = pm.response.headers.get('X-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)(name, function () {",
+                  "    pm.expect(outcome).to.eql(expected);",
+                  "    const node = pm.response.headers.get('X-Cache-Node');",
+                  "    pm.expect(node).to.match(/^[\\w.-]+:\\d+$/);",
+                  "    if (expected === 'HIT') { pm.expect(node).to.eql(pm.collectionVariables.get('cacheNode')); }",
+                  "    pm.collectionVariables.set('cacheNode', node);",
+                  "  });",
+                  "};",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Same rooms\", function () {",
+                  "    pm.expect(pm.response.json().rooms.map(r => r.roomId)).to.include('mainCorridor');",
+                  "});",
+                  "cacheCheck('Served from the cache, by the same node (X-Cache: HIT)', 'HIT');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/base/{{playerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "base",
+                "{{playerId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Unclaim the room (invalidates the cached base)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 204\", function () {",
+                  "    pm.response.to.have.status(204);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/base/{{playerId}}/rooms/mainCorridor",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "base",
+                "{{playerId}}",
+                "rooms",
+                "mainCorridor"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Get the base after the change (MISS, never the stale rooms)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The cache debug headers are on only with CACHE_DEBUG_HEADERS=true (and the 5.0.0 image); without them the",
+                  "// cache checks are skipped and only the answer is checked.",
+                  "const cacheCheck = (name, expected) => {",
+                  "  const outcome = pm.response.headers.get('X-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)(name, function () {",
+                  "    pm.expect(outcome).to.eql(expected);",
+                  "    const node = pm.response.headers.get('X-Cache-Node');",
+                  "    pm.expect(node).to.match(/^[\\w.-]+:\\d+$/);",
+                  "    if (expected === 'HIT') { pm.expect(node).to.eql(pm.collectionVariables.get('cacheNode')); }",
+                  "    pm.collectionVariables.set('cacheNode', node);",
+                  "  });",
+                  "};",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"The room is gone\", function () {",
+                  "    pm.expect(pm.response.json().rooms.map(r => r.roomId)).to.not.include('mainCorridor');",
+                  "});",
+                  "cacheCheck('Read from PostgreSQL again (X-Cache: MISS)', 'MISS');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/base/{{playerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "base",
+                "{{playerId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Get the base again (HIT with the new rooms)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The cache debug headers are on only with CACHE_DEBUG_HEADERS=true (and the 5.0.0 image); without them the",
+                  "// cache checks are skipped and only the answer is checked.",
+                  "const cacheCheck = (name, expected) => {",
+                  "  const outcome = pm.response.headers.get('X-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)(name, function () {",
+                  "    pm.expect(outcome).to.eql(expected);",
+                  "    const node = pm.response.headers.get('X-Cache-Node');",
+                  "    pm.expect(node).to.match(/^[\\w.-]+:\\d+$/);",
+                  "    if (expected === 'HIT') { pm.expect(node).to.eql(pm.collectionVariables.get('cacheNode')); }",
+                  "    pm.collectionVariables.set('cacheNode', node);",
+                  "  });",
+                  "};",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Still without the room\", function () {",
+                  "    pm.expect(pm.response.json().rooms.map(r => r.roomId)).to.not.include('mainCorridor');",
+                  "});",
+                  "cacheCheck('Served from the cache (X-Cache: HIT)', 'HIT');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/base/{{playerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "base",
+                "{{playerId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "9. Replication and failover",
+      "description": "Needs the 5.0.0 image (with 4.0.0 the checks are skipped). Reads one replica's GET /status and GET /metrics through the broker's queue: the base-db-1..3 nodes, which one is the primary, and the failovers seen. Writes are synchronous: a commit returns only once a standby has it. To see a failover, run `docker stop base-db-1` and run the folder again about 30 s later: another node is the primary and primaryChanges went up (on the replicas that noticed it). Until the standby is promoted, the service answers 503 database_unavailable with Retry-After: 2.",
+      "item": [
+        {
+          "name": "Replication state (GET /status through the Message Broker)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for game-service, which the message broker requires (Game Service reaches this service through it in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'game-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "const replication = pm.response.json().replication;",
+                  "// The 4.0.0 image has no replication field; the checks need the 5.0.0 image.",
+                  "const check = replication ? pm.test : pm.test.skip;",
+                  "check('The database is replicated (primary + standbys)', function () { pm.expect(replication.mode).to.eql('primary + standbys (repmgr)'); });",
+                  "check('3 nodes, exactly one of them the primary', function () {",
+                  "  pm.expect(replication.nodes.map(n => n.host).sort()).to.eql([\"base-db-1\", \"base-db-2\", \"base-db-3\"]);",
+                  "  const primaries = replication.nodes.filter(n => n.role === 'primary');",
+                  "  pm.expect(primaries).to.have.lengthOf(1);",
+                  "  pm.expect(replication.primary).to.eql(primaries[0].host);",
+                  "});",
+                  "check('The other nodes are standbys, or down while stopped (at least one standby)', function () {",
+                  "  const others = replication.nodes.filter(n => n.host !== replication.primary);",
+                  "  others.forEach(n => pm.expect(n.role).to.be.oneOf(['standby', 'down']));",
+                  "  pm.expect(others.filter(n => n.role === 'standby')).to.not.be.empty;",
+                  "});",
+                  "check('primaryChanges counts the failovers', function () { pm.expect(replication.primaryChanges).to.be.a('number').and.at.least(0); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/base-service/status",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "base-service",
+                "status"
+              ]
+            },
+            "description": "The replication field of GET /status: the primary, each node's role, and the failovers this replica has seen.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Replication metrics (GET /metrics through the Message Broker)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for game-service, which the message broker requires (Game Service reaches this service through it in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'game-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "const text = pm.response.text();",
+                  "const check = text.includes('kahoots_database_has_primary') ? pm.test : pm.test.skip;",
+                  "check('There is a primary to write to', function () { pm.expect(text).to.include('kahoots_database_has_primary 1'); });",
+                  "check('The failovers are counted', function () { pm.expect(text).to.match(/kahoots_database_failovers_total \\d+/); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/base-service/metrics",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "base-service",
+                "metrics"
+              ]
+            },
+            "description": "kahoots_database_has_primary (1 while a node answers as the primary) and kahoots_database_failovers_total.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "10. Two-Phase Commit",
+      "description": "Needs the 5.0.0 image with Coordination__Mode=2pc (the team compose default). A barricade, facility upgrade or decoration is one transaction over base_db and Resource Service: Resource Service holds the cost and votes, and Base Service votes by applying the effect in the decision's database transaction. An abort releases the hold, so nothing is spent. GET /api/base/{playerId}/transactions/{key}/2pc shows each phase.",
+      "item": [
+        {
+          "name": "Barricade the home room again (committed)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Barricade level 2, cost spent\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.roomId).to.eql('faf_cab');",
+                  "    pm.expect(json.barricadeLevel).to.eql(2);",
+                  "    pm.expect(json.resourcesSpent).to.eql({ wood: 5, metal: 2 });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/base/{{playerId}}/barricade",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "base",
+                "{{playerId}}",
+                "barricade"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idempotencyKey\": \"barricade_{{runId}}_faf_cab_2pc\",\n  \"roomId\": \"faf_cab\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "The action ran as a Two-Phase Commit",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Completed, with its txId\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.status).to.eql('completed');",
+                  "    pm.expect(json.mode).to.eql('2pc');",
+                  "    pm.expect(json.txId).to.match(/^tx_/);",
+                  "    pm.collectionVariables.set('txId', json.txId);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/base/{{playerId}}/transactions/barricade_{{runId}}_faf_cab_2pc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "base",
+                "{{playerId}}",
+                "transactions",
+                "barricade_{{runId}}_faf_cab_2pc"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Two-Phase Commit of the barricade (committed)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Both voted commit, Resource Service acknowledged it\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.txId).to.eql(pm.collectionVariables.get('txId'));",
+                  "    pm.expect(json.state).to.eql('committed');",
+                  "    pm.expect(json.decision).to.eql('commit');",
+                  "    pm.expect(json.participants['resource-service']).to.eql({ vote: 'commit', ack: 'committed' });",
+                  "    pm.expect(json.participants['base-service'].vote).to.eql('commit');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/base/{{playerId}}/transactions/barricade_{{runId}}_faf_cab_2pc/2pc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "base",
+                "{{playerId}}",
+                "transactions",
+                "barricade_{{runId}}_faf_cab_2pc",
+                "2pc"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Build an infirmary without chemicals (402, the transaction aborts)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 402\", function () {",
+                  "    pm.response.to.have.status(402);",
+                  "});",
+                  "pm.test(\"Missing chemicals\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.status).to.eql('rejected_insufficient');",
+                  "    pm.expect(json.missing).to.have.property('chemicals');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/base/{{playerId}}/facilities",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "base",
+                "{{playerId}}",
+                "facilities"
+              ]
+            },
+            "description": "The infirmary costs 4 food and 2 chemicals; Setup gave the player no chemicals, so Resource Service votes abort.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idempotencyKey\": \"facility_{{runId}}_infirmary_2pc\",\n  \"facilityType\": \"infirmary\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Two-Phase Commit of the infirmary (aborted)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Resource Service voted abort, the decision is abort\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.state).to.eql('aborted');",
+                  "    pm.expect(json.decision).to.eql('abort');",
+                  "    pm.expect(json.reason).to.eql('insufficient_resources');",
+                  "    pm.expect(json.participants['resource-service'].vote).to.eql('abort');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/base/{{playerId}}/transactions/facility_{{runId}}_infirmary_2pc/2pc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "base",
+                "{{playerId}}",
+                "transactions",
+                "facility_{{runId}}_infirmary_2pc",
+                "2pc"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "The infirmary was not built",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"No infirmary\", function () {",
+                  "    pm.expect(pm.response.json().facilities.map(f => f.facilityType)).to.not.include('infirmary');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/base/{{playerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "base",
+                "{{playerId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Unknown Two-Phase Commit (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 404\", function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});",
+                  "pm.test(\"tx_not_found\", function () {",
+                  "    pm.expect(pm.response.json().reason).to.eql('tx_not_found');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/base/{{playerId}}/transactions/never_sent/2pc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "base",
+                "{{playerId}}",
+                "transactions",
+                "never_sent",
+                "2pc"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "11. Saga steps (through the Message Broker)",
+      "description": "Needs the 5.0.0 image. The apply step of the broker's base-upgrade saga and its compensation, revert (the saga runs with BASE_COORDINATION_MODE=saga: apply on Base Service, then pay on Resource Service, and a barricade answers 202 with the sagaId; GET /api/sagas/{sagaId} shows its progress). Only the broker calls the steps, so the Gateway refuses them (from loredana-costin/gateway-service#31) and the collection sends them through the broker's queue with a service token. A revert always answers 200, also before the step it undoes.",
+      "item": [
+        {
+          "name": "Saga apply through the Gateway - Internal Route (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 404\", function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});",
+                  "pm.test(\"The Gateway does not route it\", function () {",
+                  "    pm.expect(pm.response.json().error).to.eql('route_not_found');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/base/{{playerId}}/saga/apply",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "base",
+                "{{playerId}}",
+                "saga",
+                "apply"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stepId\": \"saga_pm_{{runId}}:apply\",\n  \"idempotencyKey\": \"saga_{{runId}}_never_started\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saga apply without stepId (400)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for message-broker, which the message broker requires (only the broker's saga coordinator calls these steps in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'message-broker', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 400\", function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/base-service/api/base/{{playerId}}/saga/apply",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "base-service",
+                "api",
+                "base",
+                "{{playerId}}",
+                "saga",
+                "apply"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idempotencyKey\": \"saga_{{runId}}_never_started\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saga revert before any step - nothing to revert",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for message-broker, which the message broker requires (only the broker's saga coordinator calls these steps in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'message-broker', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"nothing_to_revert\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.status).to.eql('nothing_to_revert');",
+                  "    pm.expect(json.stepId).to.eql('saga_pm_' + pm.collectionVariables.get('runId') + ':apply');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/base-service/api/base/{{playerId}}/saga/revert",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "base-service",
+                "api",
+                "base",
+                "{{playerId}}",
+                "saga",
+                "revert"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stepId\": \"saga_pm_{{runId}}:apply\",\n  \"idempotencyKey\": \"saga_{{runId}}_never_started\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saga apply for an action Base Service never started (404)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for message-broker, which the message broker requires (only the broker's saga coordinator calls these steps in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'message-broker', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 404\", function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});",
+                  "pm.test(\"transaction_not_found\", function () {",
+                  "    pm.expect(pm.response.json().reason).to.eql('transaction_not_found');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/base-service/api/base/{{playerId}}/saga/apply",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "base-service",
+                "api",
+                "base",
+                "{{playerId}}",
+                "saga",
+                "apply"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stepId\": \"saga_pm_{{runId}}:apply\",\n  \"idempotencyKey\": \"saga_{{runId}}_never_started\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "12. Cleanup",
       "description": "",
       "item": [
         {
