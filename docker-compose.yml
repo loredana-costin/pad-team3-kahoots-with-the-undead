@@ -12,6 +12,37 @@ x-redis-cache: &redis-cache-common
   networks:
     - kahoots-network
 
+x-repmgr-node: &repmgr-node
+  image: bitnamilegacy/postgresql-repmgr:17.6.0
+  restart: always
+  healthcheck:
+    test: ["CMD-SHELL", "PGPASSWORD=postgres pg_isready -h 127.0.0.1 -U postgres"]
+    interval: 5s
+    timeout: 5s
+    retries: 20
+  networks:
+    - kahoots-network
+
+x-player-db-env: &player-db-env
+  POSTGRESQL_USERNAME: postgres
+  POSTGRESQL_PASSWORD: postgres
+  POSTGRESQL_POSTGRES_PASSWORD: postgres
+  POSTGRESQL_DATABASE: player_db
+  REPMGR_PASSWORD: repmgr
+  REPMGR_PRIMARY_HOST: player-db-1
+  REPMGR_PARTNER_NODES: player-db-1,player-db-2,player-db-3
+  REPMGR_PORT_NUMBER: 5432
+
+x-game-db-env: &game-db-env
+  POSTGRESQL_USERNAME: postgres
+  POSTGRESQL_PASSWORD: postgres
+  POSTGRESQL_POSTGRES_PASSWORD: postgres
+  POSTGRESQL_DATABASE: game_db
+  REPMGR_PASSWORD: repmgr
+  REPMGR_PRIMARY_HOST: game-db-1
+  REPMGR_PARTNER_NODES: game-db-1,game-db-2,game-db-3
+  REPMGR_PORT_NUMBER: 5432
+
 services:
   # --- PostgreSQL Databases ---
   exam-db:
@@ -54,45 +85,83 @@ services:
     networks:
       - kahoots-network
 
-  player-db:
-    image: postgres:17-alpine
-    container_name: player-db
-    restart: always
+  # --- Player Service and Game Service databases: one primary and 2 standbys each, with automatic failover ---
+  # repmgr streams the primary's WAL to the standbys. When the primary stops answering, repmgrd on the standbys
+  # elects one and promotes it; the old primary rejoins as a standby when it comes back. The services list all
+  # three nodes and Npgsql connects to whichever is the primary (Target Session Attributes=primary).
+  player-db-1:
+    <<: *repmgr-node
+    container_name: player-db-1
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: player_db
+      <<: *player-db-env
+      REPMGR_NODE_NAME: player-db-1
+      REPMGR_NODE_NETWORK_NAME: player-db-1
     ports:
       - "5435:5432"
     volumes:
-      - player_postgres_data:/var/lib/postgresql/data
+      - player_db_1_data:/bitnami/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d player_db"]
+      test: ["CMD-SHELL", "PGPASSWORD=postgres pg_isready -h 127.0.0.1 -U postgres -d player_db"]
       interval: 5s
       timeout: 5s
-      retries: 5
-    networks:
-      - kahoots-network
+      retries: 20
 
-  game-db:
-    image: postgres:17-alpine
-    container_name: game-db
-    restart: always
+  player-db-2:
+    <<: *repmgr-node
+    container_name: player-db-2
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: game_db
+      <<: *player-db-env
+      REPMGR_NODE_NAME: player-db-2
+      REPMGR_NODE_NETWORK_NAME: player-db-2
+    volumes:
+      - player_db_2_data:/bitnami/postgresql
+
+  player-db-3:
+    <<: *repmgr-node
+    container_name: player-db-3
+    environment:
+      <<: *player-db-env
+      REPMGR_NODE_NAME: player-db-3
+      REPMGR_NODE_NETWORK_NAME: player-db-3
+    volumes:
+      - player_db_3_data:/bitnami/postgresql
+
+  game-db-1:
+    <<: *repmgr-node
+    container_name: game-db-1
+    environment:
+      <<: *game-db-env
+      REPMGR_NODE_NAME: game-db-1
+      REPMGR_NODE_NETWORK_NAME: game-db-1
     ports:
       - "5436:5432"
     volumes:
-      - game_postgres_data:/var/lib/postgresql/data
+      - game_db_1_data:/bitnami/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d game_db"]
+      test: ["CMD-SHELL", "PGPASSWORD=postgres pg_isready -h 127.0.0.1 -U postgres -d game_db"]
       interval: 5s
       timeout: 5s
-      retries: 5
-    networks:
-      - kahoots-network
+      retries: 20
+
+  game-db-2:
+    <<: *repmgr-node
+    container_name: game-db-2
+    environment:
+      <<: *game-db-env
+      REPMGR_NODE_NAME: game-db-2
+      REPMGR_NODE_NETWORK_NAME: game-db-2
+    volumes:
+      - game_db_2_data:/bitnami/postgresql
+
+  game-db-3:
+    <<: *repmgr-node
+    container_name: game-db-3
+    environment:
+      <<: *game-db-env
+      REPMGR_NODE_NAME: game-db-3
+      REPMGR_NODE_NETWORK_NAME: game-db-3
+    volumes:
+      - game_db_3_data:/bitnami/postgresql
 
   resource-db:
     image: postgres:17-alpine
@@ -303,7 +372,7 @@ services:
     networks:
       - kahoots-network
 
-  # No container_name: 3 replicas share player-db, and each registers its own address with
+  # No container_name: 3 replicas share the player-db cluster, and each registers its own address with
   # Service Discovery, which the Gateway reads to spread requests over them (round robin).
   player-service:
     image: andrei045/player-service:4.0.0
@@ -311,7 +380,7 @@ services:
     deploy:
       replicas: 3
     environment:
-      ConnectionStrings__Postgres: "Host=player-db;Port=5432;Database=player_db;Username=postgres;Password=postgres"
+      ConnectionStrings__Postgres: "Host=player-db-1,player-db-2,player-db-3;Port=5432;Database=player_db;Username=postgres;Password=postgres;Target Session Attributes=primary"
       Jwt__Secret: "team-compose-development-secret-at-least-32-chars"
       Jwt__Issuer: player-service
       Jwt__Audience: kahoots-with-the-undead
@@ -324,14 +393,14 @@ services:
     expose:
       - "8080"
     depends_on:
-      player-db:
+      player-db-1:
         condition: service_healthy
       discovery-service:
         condition: service_healthy
     networks:
       - kahoots-network
 
-  # No container_name: 3 replicas share game-db, where sessions, actions and socket tickets live,
+  # No container_name: 3 replicas share the game-db cluster, where sessions, actions and socket tickets live,
   # so any replica can serve any request. Each registers its own address with Service Discovery.
   game-service:
     image: andrei045/game-service:4.0.0
@@ -339,7 +408,7 @@ services:
     deploy:
       replicas: 3
     environment:
-      ConnectionStrings__Postgres: "Host=game-db;Port=5432;Database=game_db;Username=postgres;Password=postgres"
+      ConnectionStrings__Postgres: "Host=game-db-1,game-db-2,game-db-3;Port=5432;Database=game_db;Username=postgres;Password=postgres;Target Session Attributes=primary"
       ASPNETCORE_ENVIRONMENT: Development
       Services__World: http://gateway-service:8000
       Services__Zombie: http://gateway-service:8000
@@ -356,7 +425,7 @@ services:
       Jwt__Audience: kahoots-with-the-undead
       # The URL clients get from POST /api/sessions/{id}/websocket; the socket port is the
       # only one published, REST stays behind the Gateway. Each replica takes one host port of
-      # 3003-3005; tickets are shared in game-db, so the replica on 3003 accepts any of them.
+      # 3003-3005; tickets are shared in the game-db cluster, so the replica on 3003 accepts any of them.
       WebSocket__PublicBaseUrl: ws://localhost:3003
       Discovery__Url: http://discovery-service:8500
       REDIS_NODES: redis://:${REDIS_PASSWORD}@redis-cache-1:6379,redis://:${REDIS_PASSWORD}@redis-cache-2:6379,redis://:${REDIS_PASSWORD}@redis-cache-3:6379
@@ -368,7 +437,7 @@ services:
     expose:
       - "8080"
     depends_on:
-      game-db:
+      game-db-1:
         condition: service_healthy
       discovery-service:
         condition: service_healthy
@@ -626,9 +695,17 @@ volumes:
     driver: local
   crafting_postgres_data:
     driver: local
-  player_postgres_data:
+  player_db_1_data:
     driver: local
-  game_postgres_data:
+  player_db_2_data:
+    driver: local
+  player_db_3_data:
+    driver: local
+  game_db_1_data:
+    driver: local
+  game_db_2_data:
+    driver: local
+  game_db_3_data:
     driver: local
   exam_postgres_data:
     driver: local
