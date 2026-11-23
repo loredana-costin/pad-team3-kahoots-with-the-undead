@@ -127,6 +127,31 @@ Response — 200 OK, the transaction committed (`state` is `committing` while a 
 
 The transaction, in the shape above, with its current `state` (`preparing`, `committing`, `aborting`, `committed`, `aborted`). 404 Not Found — `tx_not_found`, also for another player's transaction.
 
+### Clearing a room (Game Service and Player Service)
+
+*From the 5.0.0 images of Game Service and Player Service.*
+
+Completing a `clear_room` action changes two databases: the action is completed in Game Service's `game_db`, and the room's loot (`salvage`, one per started minute) is added to the player's inventory in Player Service's `player_db`. Here **Game Service is the coordinator**, and it is also the first participant:
+
+```
+player ── POST /api/actions/act_1/complete ──▶ Gateway ──▶ Game Service (coordinator, log in game_db)
+  log       room_clear_transactions: Preparing
+  phase 1   lock the action (in_progress → completing, one conditional UPDATE)       votes commit
+            prepare ──▶ Player Service (Broker.Relay)   checks the player, records the grant, votes commit
+  decision  commit: written to the log together with the action's outcome (completed), in one DB transaction
+  phase 2   commit ──▶ Player Service   salvage added to the inventory, acknowledged
+```
+
+- **Prepare.** Game Service locks the action, so a cancel or another completion is refused while it runs. Player Service records the grant and votes `commit`, or `abort` (`player_not_found`). A prepare that isn't answered in 5 s counts as `abort` (`player_unavailable`).
+- **Decide.** `commit` only if both voted `commit`. The decision is written to the log (`room_clear_transactions`, Committing / Aborting) in the same database transaction as the action's outcome: completed, or back to in progress.
+- **Commit or abort.** The decision is sent to Player Service. Until it acknowledges, the log stays Committing / Aborting and a recovery task on every replica (every 10 s) resends it. Every Player Service step is idempotent on the `txId`.
+- **Failures.**
+  - A transaction left `Preparing` for 30 s (the replica died before deciding) is aborted by the recovery: no decision was written, so nothing can have committed.
+  - Tested by stopping Player Service: the prepare failed, the transaction aborted (`player_unavailable`) and the abort waited as `aborting`; 36 s after Player Service was back, the recovery delivered it (`aborted`, acknowledged).
+- Player Service reserves nothing for a prepared grant (adding an item can't conflict with anything), so a transaction waiting for its decision never blocks another one.
+
+The participant endpoints (`/api/players/{id}/tx/{txId}/...`) are not reachable through the Gateway. The outcome is read with `GET /api/actions/{actionId}/transaction` (see [Game Service](#2-game-service)).
+
 ---
 ## Sagas
 
@@ -156,6 +181,19 @@ player ── GET /api/sagas/{sagaId} ──▶ Gateway ──▶ broker     { "
 - **Durability.** Every transition is saved before the broker acts on it. After a restart, the broker resumes every unfinished saga from its last recorded step; this was tested by killing the broker in the middle of a step.
 - **Idempotency.** The step id (`{sagaId}:{step}`) is the idempotency key of every step and compensation, so sending one again applies it once.
 - **Compensations are always safe.** A compensation undoes only what its own step did, and succeeds even when there is nothing to undo. It also cancels its step, so a step that was lost and arrives after its compensation is refused (`409 spend_cancelled` / `step_cancelled`) instead of applying something nobody undoes.
+
+### Clearing a room as a saga
+
+*From the 5.0.0 images of the Message Broker, Game Service and Player Service.*
+
+With Game Service's `Coordination__Mode=saga`, [clearing a room](#clearing-a-room-game-service-and-player-service) runs as the broker's `clear-room` saga instead of the Two-Phase Commit. Game Service starts it (`POST /sagas` on the broker, with its service token) and answers `202` with the saga.
+
+| Saga | Step 1 (action ↔ compensation) | Step 2 (action ↔ compensation) |
+|---|---|---|
+| `clear-room` | Game Service: `POST /api/actions/{id}/saga/complete` ↔ `reopen` | Player Service: `POST /api/players/{id}/inventory/saga/grant` ↔ `revoke` |
+
+- When the grant is refused (`404 player_not_found`), the broker reopens the action: the saga ends `compensated`, the action is in progress again and the inventory is unchanged.
+- When the grant can't be reached, it may have been applied, so the broker revokes it too (the revoke carries the item, so it is recorded even if the grant never arrived) and then reopens the action.
 
 ### Two-Phase Commit or saga?
 
@@ -354,6 +392,41 @@ Response
 { "status": "added", "inventorySnapshot": { "barricade_kit": 1 } }
 ```
 
+**`POST /api/players/{player_id}/tx/{txId}/prepare`**, **`/commit`**, **`/abort`** *(Consumed by Game Service, through the Message Broker; not available through the Gateway)*
+
+Player Service's side of the room-clearing [Two-Phase Commit](#clearing-a-room-game-service-and-player-service). Prepare checks the player exists, records the grant and votes; the item reaches the inventory only on commit. Every step is idempotent on the `txId`.
+
+Prepare payload
+```json
+{ "itemId": "salvage", "quantity": 2 }
+```
+
+Prepare response (200 OK) — `vote` is `commit`, or `abort` with a `reason` (`player_not_found`)
+```json
+{ "txId": "tx_6562c7fceda246809cb7bfd674f92efe", "vote": "commit", "reason": null }
+```
+
+Commit / abort response (200 OK, no body needed)
+```json
+{ "txId": "tx_6562c7fceda246809cb7bfd674f92efe", "state": "committed" }
+```
+
+404 `tx_not_found` — a commit for a transaction never prepared here. 409 `tx_already_aborted` / `tx_already_committed` — a decision contradicting the one already applied.
+
+**`POST /api/players/{player_id}/inventory/saga/grant`**, **`/revoke`** *(Consumed by Message Broker; not available through the Gateway)*
+
+The step and the compensation of the [`clear-room` saga](#clearing-a-room-as-a-saga). `stepId` is the idempotency key. A grant applies at once; a revoke takes back what its own grant gave (what the player still holds of it) and always succeeds. A revoke that arrives before its grant is recorded, and the late grant is then refused with 409 `step_cancelled`.
+
+Payload (the same for both)
+```json
+{ "stepId": "saga_3c55b3bb8dfe41658a4941fe762f3c0c:grant", "itemId": "salvage", "quantity": 2 }
+```
+
+Response (200 OK) — `state` is `committed`, `revoked` or `cancelled`
+```json
+{ "stepId": "saga_3c55b3bb8dfe41658a4941fe762f3c0c:grant", "state": "committed" }
+```
+
 **`POST /api/players/{player_id}/achievements`** *(Internal handler, triggered by the `AchievementUnlocked` event)*
 
 Grants an achievement directly (also usable by development team for testing).
@@ -447,6 +520,8 @@ The central real-time gameplay service. Manages sessions, the day/night cycle, t
 - `POST /api/gather` *(Resource Service)* — apply a completed gathering action.
 - `POST /api/base/{playerId}/barricade`, `POST /api/base/{playerId}/facilities` *(Base Service)* — trigger base actions.
 - `PATCH /api/players/{playerId}/progression` *(Player Service)* — award XP after a cycle.
+- `POST /api/players/{playerId}/tx/{txId}/prepare | commit | abort` *(Player Service)* — the room-clearing Two-Phase Commit.
+- `POST /sagas` *(Message Broker, HTTP `:8600`, set with `Broker__HttpUrl`)* — starts the `clear-room` saga when `Coordination__Mode=saga`.
 
 Game Service calls them through the Message Broker over gRPC (`Broker.Relay` on `message-broker:8601`, set with `Broker__Url`): each call carries the service name, method, path, query, headers and body, and the instance's status, headers and body come back in the answer, so the HTTP clients above the gRPC layer are unchanged. The call is signed with a service token in the metadata (`kind: service`; the broker forwards its subject as `X-Service-Name: game-service`) and the broker picks the instance (load-aware balancing, circuit breakers, rerouting). Each called service, Service Discovery included, has a circuit breaker shared by all its endpoints: 3 failures (`5xx`, timeout, unreachable; a `4xx` is not a failure) within Task Timeout × 3.5 (28 s) trip it, the trip is logged, and calls to that service fail at once (`502`) until a trial call after the window succeeds. Every request and every call to another service is logged as one JSON line with its status and duration, and every line of a request carries its `X-Request-ID` as `CorrelationId`.
 
@@ -473,6 +548,56 @@ Payload
 Response
 ```json
 { "actionId": "act_991", "idempotencyKey": "gather_p44_node7_20260908T1200", "status": "in_progress" }
+```
+
+**`POST /api/actions/{action_id}/complete`** *(Consumed by Gateway)*
+
+Completes an action and applies its effect: a gather credits Resource Service, a barricade or upgrade goes to Base Service. **Clearing a room** (`clear_room`) grants loot (`salvage`, one per started minute) in Player Service, and must change both databases or neither:
+
+- With `Coordination__Mode=2pc` (the default), Game Service coordinates a [Two-Phase Commit](#clearing-a-room-game-service-and-player-service) and answers once it is decided.
+
+  Response (200 OK) — `state` is `committing` while Player Service has yet to acknowledge; the outcome is already final
+  ```json
+  {
+    "actionId": "act_1cb4b66d", "playerId": "p_5db3a368", "actionType": "clear_room", "status": "completed", "percent": 100,
+    "result": {
+      "kind": "loot",
+      "loot": {
+        "itemId": "salvage", "quantity": 2,
+        "transaction": {
+          "txId": "tx_6562c7fceda246809cb7bfd674f92efe", "actionId": "act_1cb4b66d", "playerId": "p_5db3a368",
+          "itemId": "salvage", "quantity": 2, "state": "committed", "decision": "commit", "reason": null,
+          "participants": { "game-service": { "vote": "commit", "ack": "committed" }, "player-service": { "vote": "commit", "ack": "committed" } },
+          "createdAt": "2026-11-23T06:54:46.359Z", "updatedAt": "2026-11-23T06:54:46.983Z"
+        }
+      },
+      "saga": null
+    }
+  }
+  ```
+  409 Conflict — the transaction aborted; the action is back `in_progress` and nothing was granted. `cause` is Player Service's reason (`player_not_found`), `player_unavailable`, or `action_not_in_progress` (another completion got there first).
+  ```json
+  { "status": "rejected", "reason": "transaction_aborted", "txId": "tx_3cc84fe022b14431ab31661e2a6a718c", "cause": "player_not_found" }
+  ```
+- With `Coordination__Mode=saga`, the Message Broker runs the [`clear-room` saga](#clearing-a-room-as-a-saga). The answer is **202 Accepted** at once, with `Location: /api/sagas/{sagaId}`, which the Gateway's `GET /api/sagas/{sagaId}` follows.
+  ```json
+  { "actionId": "act_8ac0e1ca", "status": "in_progress", "result": { "kind": "saga", "loot": null,
+    "saga": { "sagaId": "saga_3c55b3bb8dfe41658a4941fe762f3c0c", "saga": "clear-room", "state": "running", "statusUrl": "/api/sagas/saga_3c55b3bb8dfe41658a4941fe762f3c0c" } } }
+  ```
+
+409 `action_not_in_progress` — already completed, cancelled, or being completed.
+
+**`GET /api/actions/{action_id}/transaction`** *(Consumed by Gateway)*
+
+The last Two-Phase Commit of a `clear_room` action, in the `transaction` shape above, with its current `state` (`preparing`, `committing`, `aborting`, `committed`, `aborted`). 404 `tx_not_found` when the action has none.
+
+**`POST /api/actions/{action_id}/saga/complete`**, **`/reopen`** *(Consumed by Message Broker; not available through the Gateway)*
+
+The step and the compensation of the `clear-room` saga on Game Service. `complete` moves the action from `in_progress` to `completed` (409 `action_not_in_progress` otherwise); `reopen` puts it back in progress. Both are idempotent on `stepId`, and a `complete` that arrives after its `reopen` is refused with 409 `step_cancelled`.
+
+Payload
+```json
+{ "stepId": "saga_3c55b3bb8dfe41658a4941fe762f3c0c:complete" }
 ```
 
 **WebSocket Connection**
@@ -2485,9 +2610,9 @@ The compose includes three standalone Redis cache nodes (`redis-cache-1`, `redis
      ```
   The same override works for `zombie-service`, `resource-service` and `gateway-service`: add them to `docker-compose.override.yml` and to both `docker compose up -d` commands. With `CACHE_DEBUG_HEADERS=true`, `X-Cache-Node` then shows the keys that moved to `redis-cache-4`.
 
-#### What Zombie Service, Resource Service and the Gateway cache
+#### What Zombie, Resource, Player and Game Service and the Gateway cache
 
-From the 5.0.0 images, these three services cache the answers below. They follow the team rules above: every key starts with the service's name, nothing is ever flushed, and a Redis node that fails or is slow (`CACHE_COMMAND_TIMEOUT_MS`, 200 ms) is a miss, logged once and skipped for 10 s, while the answer comes from the database.
+From the 5.0.0 images, these services cache the answers below. They follow the team rules above: every key starts with the service's name, nothing is ever flushed, and a Redis node that fails or is slow (`CACHE_COMMAND_TIMEOUT_MS`, 200 ms) is a miss, logged once and skipped for 10 s, while the answer comes from the database.
 
 | Service | Cached | Lives | Invalidated by |
 |---|---|---|---|
@@ -2496,8 +2621,12 @@ From the 5.0.0 images, these three services cache the answers below. They follow
 | | `GET /api/inventory/{playerId}` | 300 s | any committed change to that player's balance: gather, spend, refund (saga compensations too), a Two-Phase Commit's commit, `POST` / `PUT` / `DELETE /api/inventory/{playerId}` |
 | | `GET /api/nodes/{nodeId}` | 300 s | a gather from that node |
 | **Gateway** (authentication data) | the claims of every token it verified | until the token expires, at most 300 s | the token's expiry |
+| **Player Service** | `GET /api/players/{id}`, `GET /api/players/{id}/inventory` | 300 s | any committed write to that player: progression, XP from Exam events, an item delivered, a trade (both players), a room-clearing grant or its revoke |
+| | login lookups (authentication data): id, username and password hash by username, keyed by `SHA-256(username)` | 300 s | never needed: they don't change. An unknown username is not cached, so a new account can log in at once |
+| **Game Service** | `GET /api/sessions/{id}` | 300 s | joining, leaving, starting a session, a new cycle |
+| | World Service's rooms per zone and spawn points per room (each a broker round trip) | 300 s | rooms: a `ZoneUnlocked` event; spawn points: the TTL only (seed data) |
 
-- **Invalidation by version, never by deleting.** Each namespace (`zombie-types`, `resource-types`, `inventory:{playerId}`, `node:{nodeId}`) has a version key without a TTL, `<service>:<namespace>:version`, and its entries are keyed `<service>:<namespace>:v<version>:<key>`.
+- **Invalidation by version, never by deleting.** Each namespace (`zombie-types`, `resource-types`, `inventory:{playerId}`, `node:{nodeId}`, `player:{playerId}`, `session:{sessionId}`, `world-rooms`) has a version key without a TTL, `<service>:<namespace>:version`, and its entries are keyed `<service>:<namespace>:v<version>:<key>`.
   - A change increments the version once its database transaction has committed, so every entry of that namespace is read from the database again. The old entries are never read again and expire on their TTL.
   - A GET reads the version *before* the database. A GET that read a balance just before a spend therefore stores it under the version the spend already left behind, so a stale answer is never served. This was tested with 2 Resource Service instances, 40 spends and 80 reads sent at once: every cached balance then matched PostgreSQL.
   - `volatile-lru` (above) never evicts a version key, as it has no TTL.
@@ -2508,7 +2637,7 @@ From the 5.0.0 images, these three services cache the answers below. They follow
 - **Seeing it.**
   - With `CACHE_DEBUG_HEADERS=true`, the cached GETs answer `X-Cache: HIT | MISS | BYPASS` and `X-Cache-Node: <host:port>`, and the Gateway adds `X-Auth-Cache: HIT | MISS | BYPASS` to every authenticated answer. Both pass through the Gateway.
   - The Gateway's `GET /status` reports `cache`: each node's state, and the counts of hits, misses, bypasses, stored tokens and node errors.
-  - Zombie and Resource Service export `kahoots_cache_requests_total`.
+  - Zombie, Resource, Player and Game Service export `kahoots_cache_requests_total`.
   - The Postman folders **Cache (Redis, sharded with consistent hashing)** of the Zombie and Resource collections check MISS → HIT, the node, and the invalidation (see `postman/README.md`).
 
 #### Consistent hashing (research)
@@ -2533,10 +2662,10 @@ The three Redis nodes are standalone. Nothing in Redis decides which node holds 
 - A departing node's arcs are scattered, so its keys spread over all the remaining nodes.
 
 **Our implementation.**
-- Zombie and Resource Service use `src/cache/hashRing.ts`, and the Gateway uses `app/services/hashRing.py`.
+- Zombie and Resource Service use `src/cache/hashRing.ts`, the Gateway uses `app/services/hashRing.py`, and Player and Game Service `Infrastructure/Caching/HashRing.cs`.
 - A position is the first 4 bytes of the MD5 of the string, read big-endian. The points are sorted once, and a lookup is a binary search: O(log(N·V)).
 - A node is named by its `host:port`, never by its password or its place in `REDIS_NODES`. The order of the list therefore doesn't matter.
-- The Python ring places keys exactly like the TypeScript ring, and a Gateway test checks this.
+- The Python and C# rings place keys exactly like the TypeScript ring; a Gateway test and a Player and Game Service test (`HashRingTests`) check the same placements.
 - The tests measure the behaviour on 20,000 to 30,000 keys:
 
 | | 3 → 4 nodes, keys moved | Where they go | Share per node (3 nodes) |

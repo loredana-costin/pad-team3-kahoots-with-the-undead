@@ -122,6 +122,29 @@ inventory it creates. Each folder:
 The cache headers are only sent with `CACHE_DEBUG_HEADERS=true` in `.env`. Without them, the cache checks show as
 skipped and only the answers are checked.
 
+The Player and Game collections cover lab 5 for Player and Game Service, and need their **5.0.0** images or later.
+The Player collection:
+
+- sends its service-only requests (progression, items, achievements, and the ones below) through the message broker's
+  relay (`{{brokerUrl}}/relay/player-service/...`) with a service token, since the Gateway refuses those routes;
+- logs in and reads the profile twice, expecting `X-Cache: HIT` the second time (with `CACHE_DEBUG_HEADERS=true`);
+- runs the room-clearing Two-Phase Commit's participant steps: prepare (votes `commit`), commit, commit again
+  (idempotent), the inventory read after it (the cache was invalidated), an abort after the commit (`409`), and a
+  prepare for an unknown player (votes `abort`);
+- runs the `clear-room` saga's grant, grant again, revoke, and a revoke that arrives before its grant, after which
+  the late grant is refused (`409 step_cancelled`);
+- checks that the Gateway refuses the participant routes (`404 route_not_found`).
+
+The Game collection's last requests clear rooms in a fresh session, with the player of the collection's token and
+`p_ghost`, whom Player Service doesn't know:
+
+- a Two-Phase Commit that commits (the loot in the response, the transaction log, and the player's inventory), and
+  one that aborts (`409 transaction_aborted`, `player_not_found`, the action still in progress);
+- the `clear-room` saga started on the broker directly with Game Service's service token, which is what Game Service
+  does itself with `GAME_COORDINATION_MODE=saga`: one completes, followed through the Gateway's `GET /api/sagas/{id}`,
+  and the one for `p_ghost` is compensated (the action reopened);
+- that the Gateway refuses the saga step routes.
+
 Requests are numbered and share state through collection variables, so run the whole
 collection rather than firing requests individually - later requests depend on ids captured
 by earlier ones.

@@ -141,6 +141,46 @@
       "key": "messageId",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "tokenPlayerId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "clearSessionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "clearActionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "ghostActionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "sagaActionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "sagaId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "ghostSagaActionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "ghostSagaId",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
@@ -167,6 +207,7 @@
               "    const body = pm.response.json();",
               "    pm.expect(body).to.have.property(\"jwt\");",
               "    pm.collectionVariables.set(\"jwt\", body.jwt);",
+              "    pm.collectionVariables.set(\"tokenPlayerId\", body.player_id);",
               "});"
             ]
           }
@@ -3407,6 +3448,714 @@
             "{{brokeActionId}}",
             "complete"
           ]
+        }
+      }
+    },
+    {
+      "name": "80. Create A Lobby To Clear A Room (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));",
+              "pm.collectionVariables.set(\"clearSessionId\", pm.response.json().session_id);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Room Clearing\",\n  \"zoneId\": \"mathematicsWing\",\n  \"maxPlayers\": 4\n}"
+        }
+      }
+    },
+    {
+      "name": "81. Join The Token Player (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{clearSessionId}}/players",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{clearSessionId}}",
+            "players"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"{{tokenPlayerId}}\"\n}"
+        }
+      }
+    },
+    {
+      "name": "82. Join A Player Unknown To Player Service (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{clearSessionId}}/players",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{clearSessionId}}",
+            "players"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"p_ghost\"\n}"
+        }
+      }
+    },
+    {
+      "name": "83. Start The Room Clearing Session (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{clearSessionId}}/start",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{clearSessionId}}",
+            "start"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{}"
+        }
+      }
+    },
+    {
+      "name": "84. Start Clearing A Room (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));",
+              "pm.collectionVariables.set(\"clearActionId\", pm.response.json().actionId);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{clearSessionId}}/actions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{clearSessionId}}",
+            "actions"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"{{tokenPlayerId}}\",\n  \"actionType\": \"clear_room\",\n  \"targetNodeId\": \"mathematicsExamHall\",\n  \"durationSeconds\": 90\n}"
+        }
+      }
+    },
+    {
+      "name": "85. Complete It: Two-Phase Commit Grants The Loot (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Both participants voted commit and the loot was granted\", () => {",
+              "    const loot = pm.response.json().result.loot;",
+              "    pm.expect(pm.response.json().status).to.eql(\"completed\");",
+              "    pm.expect(loot.itemId).to.eql(\"salvage\");",
+              "    pm.expect(loot.quantity).to.eql(2);",
+              "    pm.expect(loot.transaction.decision).to.eql(\"commit\");",
+              "    pm.expect(loot.transaction.participants[\"player-service\"].vote).to.eql(\"commit\");",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/actions/{{clearActionId}}/complete",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "actions",
+            "{{clearActionId}}",
+            "complete"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{}"
+        }
+      }
+    },
+    {
+      "name": "86. The Transaction Log Shows It Committed (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"committed, acknowledged by Player Service\", () => {",
+              "    const tx = pm.response.json();",
+              "    pm.expect(tx.state).to.eql(\"committed\");",
+              "    pm.expect(tx.participants[\"player-service\"].ack).to.eql(\"committed\");",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/actions/{{clearActionId}}/transaction",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "actions",
+            "{{clearActionId}}",
+            "transaction"
+          ]
+        }
+      }
+    },
+    {
+      "name": "87. The Salvage Is In The Player's Inventory (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"2 salvage\", () => pm.expect(pm.response.json().items.find(i => i.itemId === \"salvage\").quantity).to.eql(2));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{gatewayUrl}}/api/players/{{tokenPlayerId}}/inventory",
+          "host": [
+            "{{gatewayUrl}}"
+          ],
+          "path": [
+            "api",
+            "players",
+            "{{tokenPlayerId}}",
+            "inventory"
+          ]
+        }
+      }
+    },
+    {
+      "name": "88. Start Clearing A Room For The Unknown Player (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));",
+              "pm.collectionVariables.set(\"ghostActionId\", pm.response.json().actionId);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{clearSessionId}}/actions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{clearSessionId}}",
+            "actions"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"p_ghost\",\n  \"actionType\": \"clear_room\",\n  \"targetNodeId\": \"mathematicsExamHall\",\n  \"durationSeconds\": 60\n}"
+        }
+      }
+    },
+    {
+      "name": "89. Complete It: Player Service Votes Abort (409)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 409\", () => pm.response.to.have.status(409));",
+              "pm.test(\"transaction_aborted because of player_not_found\", () => {",
+              "    const b = pm.response.json();",
+              "    pm.expect(b.reason).to.eql(\"transaction_aborted\");",
+              "    pm.expect(b.cause).to.eql(\"player_not_found\");",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/actions/{{ghostActionId}}/complete",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "actions",
+            "{{ghostActionId}}",
+            "complete"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{}"
+        }
+      }
+    },
+    {
+      "name": "90. The Aborted Action Is Still In Progress (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"in_progress, nothing changed\", () => pm.expect(pm.response.json().status).to.eql(\"in_progress\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/actions/{{ghostActionId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "actions",
+            "{{ghostActionId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "91. Start Another Room Clearing For The Saga (200)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// The player has one action at a time; the first one is completed already."
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));",
+              "pm.collectionVariables.set(\"sagaActionId\", pm.response.json().actionId);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/sessions/{{clearSessionId}}/actions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "sessions",
+            "{{clearSessionId}}",
+            "actions"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerId\": \"{{tokenPlayerId}}\",\n  \"actionType\": \"clear_room\",\n  \"targetNodeId\": \"physicsLaboratory\",\n  \"durationSeconds\": 60\n}"
+        }
+      }
+    },
+    {
+      "name": "92. Start The clear-room Saga On The Broker (202)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// What Game Service does itself with Coordination__Mode=saga (its complete then answers 202).",
+              "// Service token for the message broker: HS256, issuer player-service, audience kahoots-with-the-undead, kind service.",
+              "const b64url = (w) => CryptoJS.enc.Base64.stringify(w).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+              "const encode = (o) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(o)));",
+              "const now = Math.floor(Date.now() / 1000);",
+              "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+              "const payload = encode({ sub: 'game-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+              "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret'))));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 202\", () => pm.response.to.have.status(202));",
+              "pm.collectionVariables.set(\"sagaId\", pm.response.json().sagaId);",
+              "pm.test(\"Running\", () => pm.expect(pm.response.json().saga).to.eql(\"clear-room\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{brokerUrl}}/sagas",
+          "host": [
+            "{{brokerUrl}}"
+          ],
+          "path": [
+            "sagas"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"saga\": \"clear-room\",\n  \"input\": {\n    \"playerId\": \"{{tokenPlayerId}}\",\n    \"actionId\": \"{{sagaActionId}}\",\n    \"itemId\": \"salvage\",\n    \"quantity\": 1\n  }\n}"
+        },
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{serviceJwt}}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "93. The Saga Completed Both Steps (200)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// The broker runs the saga in the background: ask again until it has finished (up to ~5 s).",
+              "const get = (tries) => pm.sendRequest({ url: pm.collectionVariables.get('gatewayUrl') + '/api/sagas/' + pm.collectionVariables.get('sagaId'), method: 'GET', header: { Authorization: 'Bearer ' + pm.collectionVariables.get('jwt') } },",
+              "    (err, res) => { if (!err && ['running', 'compensating'].includes(res.json().state) && tries > 0) setTimeout(() => get(tries - 1), 500); });",
+              "get(10);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"completed: action completed, loot granted\", () => {",
+              "    const s = pm.response.json();",
+              "    pm.expect(s.state).to.eql(\"completed\");",
+              "    pm.expect(s.steps.map(x => x.state)).to.eql([\"succeeded\", \"succeeded\"]);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{gatewayUrl}}/api/sagas/{{sagaId}}",
+          "host": [
+            "{{gatewayUrl}}"
+          ],
+          "path": [
+            "api",
+            "sagas",
+            "{{sagaId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "94. The Unknown Player's Saga Is Compensated (202)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 202\", () => pm.response.to.have.status(202));",
+              "pm.collectionVariables.set(\"ghostSagaId\", pm.response.json().sagaId);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{brokerUrl}}/sagas",
+          "host": [
+            "{{brokerUrl}}"
+          ],
+          "path": [
+            "sagas"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"saga\": \"clear-room\",\n  \"input\": {\n    \"playerId\": \"p_ghost\",\n    \"actionId\": \"{{ghostActionId}}\",\n    \"itemId\": \"salvage\",\n    \"quantity\": 1\n  }\n}"
+        },
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{serviceJwt}}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "95. The Action Was Reopened By The Compensation (200)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "setTimeout(() => {}, 1500); // let the broker run the grant (404) and the reopen"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"in_progress again\", () => pm.expect(pm.response.json().status).to.eql(\"in_progress\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/actions/{{ghostActionId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "actions",
+            "{{ghostActionId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "96. The Gateway Refuses The Saga Step Routes (404)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 404\", () => pm.response.to.have.status(404));",
+              "pm.test(\"route_not_found\", () => pm.expect(pm.response.json().error).to.eql(\"route_not_found\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/actions/{{clearActionId}}/saga/complete",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "actions",
+            "{{clearActionId}}",
+            "saga",
+            "complete"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"stepId\": \"x\"\n}"
         }
       }
     }
