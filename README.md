@@ -660,7 +660,7 @@ Owns the definitions of all courses, questions, and the logic to grade them.
 
 ### **DockerHub Image**
 - **Repository:** [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service)
-- **Image Tag:** `mariaelenabotnari/exam-service:5.1.0` (also tagged `mariaelenabotnari/exam-service:latest`)
+- **Image Tag:** `mariaelenabotnari/exam-service:5.0.0` (also tagged `mariaelenabotnari/exam-service:latest`)
 - **Default Port:** `Internal only (3000), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
@@ -859,7 +859,7 @@ Owns the persistent physical state of the university.
 
 ### **DockerHub Image**
 - **Repository:** [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service)
-- **Image Tag:** `mariaelenabotnari/world-service:5.1.0` (also tagged `mariaelenabotnari/world-service:latest`)
+- **Image Tag:** `mariaelenabotnari/world-service:5.0.0` (also tagged `mariaelenabotnari/world-service:latest`)
 - **Default Port:** `Internal only (3001), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
@@ -2544,8 +2544,8 @@ The microservices are containerized and published on DockerHub:
 | Service | DockerHub Repository | Image Tag | Default Port | Description |
 |---|---|---|---|---|
 | **Gateway Service** | [`mariaelenabotnari/gateway-service`](https://hub.docker.com/r/mariaelenabotnari/gateway-service) | `mariaelenabotnari/gateway-service:4.0.0` | `8000` | System entry point, async request routing layer |
-| **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:5.1.0` | `Internal (3000)` | Academic progression, exams, and achievements |
-| **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:5.1.0` | `Internal (3001)` | Physical campus layout, rooms, zones, and spawn points |
+| **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:5.0.0` | `Internal (3000)` | Academic progression, exams, and achievements |
+| **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:5.0.0` | `Internal (3001)` | Physical campus layout, rooms, zones, and spawn points |
 | **Service Discovery** | [`mariaelenabotnari/service-discovery`](https://hub.docker.com/r/mariaelenabotnari/service-discovery) | `mariaelenabotnari/service-discovery:4.0.0` | `Internal (8500)` | Service registry: instances register, deregister and are looked up by name |
 | **Message Broker** | [`mariaelenabotnari/message-broker`](https://hub.docker.com/r/mariaelenabotnari/message-broker) | `mariaelenabotnari/message-broker:4.0.0` | `8600` (HTTP), `Internal (8601)` (gRPC) | Service queues for the Gateway, gRPC relay between services, durable topic queues, load balancing and circuit breakers |
 | **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:5.0.0` | `Internal (8080)` | Player identity, progression, inventory, and trades |
