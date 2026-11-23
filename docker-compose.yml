@@ -85,6 +85,7 @@ x-sync-replication: &sync-replication
 
 services:
   # --- PostgreSQL Databases ---
+  # Exam Service and World Service databases: 1 Primary + 2 Hot-Standby Streaming Replicas each, with automatic failover.
   exam-db:
     image: postgres:16-alpine
     container_name: exam-db
@@ -93,10 +94,94 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: exam_db
+    command:
+      - sh
+      - -c
+      - |
+        docker-entrypoint.sh postgres -c wal_level=replica -c hot_standby=on -c max_wal_senders=10 -c max_replication_slots=10 -c hot_standby_feedback=on -c wal_keep_size=64MB &
+        PG_PID=$$!
+        until pg_isready -U postgres -d exam_db; do sleep 1; done
+        if ! grep -q "host replication all" /var/lib/postgresql/data/pg_hba.conf; then
+          echo "host replication all 0.0.0.0/0 trust" >> /var/lib/postgresql/data/pg_hba.conf
+          psql -U postgres -d exam_db -c "SELECT pg_reload_conf();"
+        fi
+        wait $$PG_PID
     ports:
       - "5433:5432"
     volumes:
       - exam_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d exam_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      kahoots-network:
+        aliases:
+          - exam-db-primary
+
+  exam-db-replica-1:
+    image: postgres:16-alpine
+    container_name: exam-db-replica-1
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: exam_db
+    command:
+      - sh
+      - -c
+      - |
+        export PGPASSWORD=postgres
+        if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then
+          until pg_isready -h exam-db -p 5432 -U postgres; do sleep 1; done
+          rm -rf /var/lib/postgresql/data/*
+          until pg_basebackup -h exam-db -p 5432 -U postgres -D /var/lib/postgresql/data -Fp -Xs -P -R; do
+            sleep 1
+          done
+          chmod 0700 /var/lib/postgresql/data
+        fi
+        exec docker-entrypoint.sh postgres -c wal_level=replica -c hot_standby=on -c max_wal_senders=10 -c max_replication_slots=10 -c hot_standby_feedback=on -c wal_keep_size=64MB
+    volumes:
+      - exam_postgres_replica_1_data:/var/lib/postgresql/data
+    depends_on:
+      exam-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d exam_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kahoots-network
+
+  exam-db-replica-2:
+    image: postgres:16-alpine
+    container_name: exam-db-replica-2
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: exam_db
+    command:
+      - sh
+      - -c
+      - |
+        export PGPASSWORD=postgres
+        if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then
+          until pg_isready -h exam-db -p 5432 -U postgres; do sleep 1; done
+          rm -rf /var/lib/postgresql/data/*
+          until pg_basebackup -h exam-db -p 5432 -U postgres -D /var/lib/postgresql/data -Fp -Xs -P -R; do
+            sleep 1
+          done
+          chmod 0700 /var/lib/postgresql/data
+        fi
+        exec docker-entrypoint.sh postgres -c wal_level=replica -c hot_standby=on -c max_wal_senders=10 -c max_replication_slots=10 -c hot_standby_feedback=on -c wal_keep_size=64MB
+    volumes:
+      - exam_postgres_replica_2_data:/var/lib/postgresql/data
+    depends_on:
+      exam-db:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d exam_db"]
       interval: 5s
@@ -113,10 +198,94 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: world_db
+    command:
+      - sh
+      - -c
+      - |
+        docker-entrypoint.sh postgres -c wal_level=replica -c hot_standby=on -c max_wal_senders=10 -c max_replication_slots=10 -c hot_standby_feedback=on -c wal_keep_size=64MB &
+        PG_PID=$$!
+        until pg_isready -U postgres -d world_db; do sleep 1; done
+        if ! grep -q "host replication all" /var/lib/postgresql/data/pg_hba.conf; then
+          echo "host replication all 0.0.0.0/0 trust" >> /var/lib/postgresql/data/pg_hba.conf
+          psql -U postgres -d world_db -c "SELECT pg_reload_conf();"
+        fi
+        wait $$PG_PID
     ports:
       - "5434:5432"
     volumes:
       - world_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d world_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      kahoots-network:
+        aliases:
+          - world-db-primary
+
+  world-db-replica-1:
+    image: postgres:16-alpine
+    container_name: world-db-replica-1
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: world_db
+    command:
+      - sh
+      - -c
+      - |
+        export PGPASSWORD=postgres
+        if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then
+          until pg_isready -h world-db -p 5432 -U postgres; do sleep 1; done
+          rm -rf /var/lib/postgresql/data/*
+          until pg_basebackup -h world-db -p 5432 -U postgres -D /var/lib/postgresql/data -Fp -Xs -P -R; do
+            sleep 1
+          done
+          chmod 0700 /var/lib/postgresql/data
+        fi
+        exec docker-entrypoint.sh postgres -c wal_level=replica -c hot_standby=on -c max_wal_senders=10 -c max_replication_slots=10 -c hot_standby_feedback=on -c wal_keep_size=64MB
+    volumes:
+      - world_postgres_replica_1_data:/var/lib/postgresql/data
+    depends_on:
+      world-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d world_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kahoots-network
+
+  world-db-replica-2:
+    image: postgres:16-alpine
+    container_name: world-db-replica-2
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: world_db
+    command:
+      - sh
+      - -c
+      - |
+        export PGPASSWORD=postgres
+        if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then
+          until pg_isready -h world-db -p 5432 -U postgres; do sleep 1; done
+          rm -rf /var/lib/postgresql/data/*
+          until pg_basebackup -h world-db -p 5432 -U postgres -D /var/lib/postgresql/data -Fp -Xs -P -R; do
+            sleep 1
+          done
+          chmod 0700 /var/lib/postgresql/data
+        fi
+        exec docker-entrypoint.sh postgres -c wal_level=replica -c hot_standby=on -c max_wal_senders=10 -c max_replication_slots=10 -c hot_standby_feedback=on -c wal_keep_size=64MB
+    volumes:
+      - world_postgres_replica_2_data:/var/lib/postgresql/data
+    depends_on:
+      world-db:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d world_db"]
       interval: 5s
@@ -503,7 +672,7 @@ services:
   # serve any request. Each registers its own address with Service Discovery; the Gateway reads it
   # to spread requests over them, and each replica looks up World Service there for its ExamPassed events.
   exam-service:
-    image: mariaelenabotnari/exam-service:4.0.0
+    image: mariaelenabotnari/exam-service:5.0.0
     restart: always
     deploy:
       replicas: 3
@@ -516,6 +685,7 @@ services:
       DB_PASSWORD: postgres
       DB_NAME: exam_db
       DATABASE_URL: "postgresql://postgres:postgres@exam-db:5432/exam_db?schema=public"
+      DATABASE_REPLICA_URLS: "postgresql://postgres:postgres@exam-db-replica-1:5432/exam_db?schema=public,postgresql://postgres:postgres@exam-db-replica-2:5432/exam_db?schema=public"
       DISCOVERY_URL: http://discovery-service:8500
       BROKER_URL: http://message-broker:8600
       BROKER_GRPC_URL: message-broker:8601
@@ -537,7 +707,7 @@ services:
   # No container_name: 3 replicas share world-db, where zones and rooms live, so any replica can serve
   # any request. Each registers its own address with Service Discovery, which the Gateway and Exam Service read.
   world-service:
-    image: mariaelenabotnari/world-service:4.0.0
+    image: mariaelenabotnari/world-service:5.0.0
     restart: always
     deploy:
       replicas: 3
@@ -550,6 +720,7 @@ services:
       DB_PASSWORD: postgres
       DB_NAME: world_db
       DATABASE_URL: "postgresql://postgres:postgres@world-db:5432/world_db?schema=public"
+      DATABASE_REPLICA_URLS: "postgresql://postgres:postgres@world-db-replica-1:5432/world_db?schema=public,postgresql://postgres:postgres@world-db-replica-2:5432/world_db?schema=public"
       DISCOVERY_URL: http://discovery-service:8500
       BROKER_URL: http://message-broker:8600
       JWT_SECRET: team-compose-development-secret-at-least-32-chars
@@ -914,7 +1085,15 @@ volumes:
     driver: local
   exam_postgres_data:
     driver: local
+  exam_postgres_replica_1_data:
+    driver: local
+  exam_postgres_replica_2_data:
+    driver: local
   world_postgres_data:
+    driver: local
+  world_postgres_replica_1_data:
+    driver: local
+  world_postgres_replica_2_data:
     driver: local
   resource_db_1_data:
     driver: local

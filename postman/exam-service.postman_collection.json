@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d",
     "name": "Exam Service",
-    "description": "Postman Collection for testing Exam Service (v5.1.0) through the Gateway: exam CRUD, queries and validation rules, attempts (start, submit, abandon, retry eligibility), player endpoints (exams, courses, progress, achievements), and Saga Participant endpoints (/exams/sagas/*).",
+    "description": "Postman Collection for testing Exam Service (v5.0.0) through the Gateway: exam CRUD, queries and validation rules, attempts (start, submit, abandon, retry eligibility), player endpoints (exams, courses, progress, achievements), and Saga Participant endpoints (/exams/sagas/*).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -1613,7 +1613,7 @@
       ]
     },
     {
-      "name": "Saga Participant (v5.1.0)",
+      "name": "Saga Participant (v5.0.0)",
       "description": "Tests Exam Service Saga participant endpoints (/exams/sagas/*) orchestrated by Message Broker: access rules, reserve-achievement, release-achievement (including tombstones and late reserve rejection), confirm-achievement, and GET /exams/sagas/:sagaId.",
       "item": [
         {
@@ -1701,7 +1701,7 @@
                 "health"
               ]
             },
-            "description": "Direct internal health check verifying the v5.1.0 sagas block alongside cache and databaseReplication.",
+            "description": "Direct internal health check verifying the v5.0.0 sagas block alongside cache and databaseReplication.",
             "auth": {
               "type": "noauth"
             }
