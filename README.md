@@ -2695,7 +2695,8 @@ We chose the ring because this is a cache:
 
 Player Service and Game Service each run on a PostgreSQL cluster of three nodes, a primary and 2 standbys, managed by **repmgr** (`bitnamilegacy/postgresql-repmgr:17.6.0`): `player-db-1..3` (`player_db`) and `game-db-1..3` (`game_db`). Each node has its own volume.
 
-- **Replication.** The primary streams its WAL to both standbys (asynchronous streaming replication). The standbys are read-only copies, a few milliseconds behind.
+- **Replication.** The primary streams its WAL to both standbys (synchronous streaming replication, `synchronous_standby_names = 'ANY 1 (*)'`). A commit returns only once at least one standby has it, so a failover never loses a confirmed write. The cost: with both standbys down, writes wait until one comes back.
+- **Setting it.** `player-db-sync-replication` and `game-db-sync-replication` run once the cluster is healthy, set it with `ALTER SYSTEM` on all three nodes and exit; the services start after them. The image's env vars would set it only on the first primary, and a config file makes the first primary hang at startup waiting for standbys that are not there yet. `ALTER SYSTEM` writes it into each node's data directory, so a promoted standby already has it (checked: after a failover the new primary lists both standbys as `quorum`).
 - **Automatic failover.** `repmgrd` runs on every node. When the primary stops answering, the standbys vote, the most up-to-date one is promoted, and the other standby follows it. The old primary rejoins as a standby when it comes back.
 - **The services.** The connection string lists all three nodes with `Target Session Attributes=primary`. Npgsql tries them in order and uses the one that is currently the primary, so a failover needs no restart and no configuration change.
 - **Measured** (stopping `player-db-2` while it was the primary, with writes every 2 s):
