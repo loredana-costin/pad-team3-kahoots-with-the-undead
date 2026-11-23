@@ -468,6 +468,10 @@ services:
       # Calls to the other services go to the message broker over gRPC (Broker.Relay); the Services__* URLs
       # above are the fallback of an image without broker support.
       Broker__Url: http://message-broker:8601
+      # The broker's HTTP API, where Game Service starts the clear-room saga.
+      Broker__HttpUrl: http://message-broker:8600
+      # How a cleared room completes: 2pc (a Two-Phase Commit Game Service coordinates) or saga (the broker's clear-room saga).
+      Coordination__Mode: ${GAME_COORDINATION_MODE:-2pc}
       # Signs Game Service's own calls through the broker; same secret as Player Service, the Gateway and the broker.
       Jwt__Secret: "team-compose-development-secret-at-least-32-chars"
       Jwt__Issuer: player-service
