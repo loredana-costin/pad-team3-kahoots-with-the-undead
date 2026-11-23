@@ -2562,6 +2562,28 @@ We chose the ring because this is a cache:
 - The versioned keys never need a multi-key transaction.
 - Redis Cluster's slot migration, replicas and failover are aimed at Redis as a primary store, and would add operational weight the team compose doesn't need.
 
+### Database replication and failover (Player Service, Game Service)
+
+Player Service and Game Service each run on a PostgreSQL cluster of three nodes, a primary and 2 standbys, managed by **repmgr** (`bitnamilegacy/postgresql-repmgr:17.6.0`): `player-db-1..3` (`player_db`) and `game-db-1..3` (`game_db`). Each node has its own volume.
+
+- **Replication.** The primary streams its WAL to both standbys (asynchronous streaming replication). The standbys are read-only copies, a few milliseconds behind.
+- **Automatic failover.** `repmgrd` runs on every node. When the primary stops answering, the standbys vote, the most up-to-date one is promoted, and the other standby follows it. The old primary rejoins as a standby when it comes back.
+- **The services.** The connection string lists all three nodes with `Target Session Attributes=primary`. Npgsql tries them in order and uses the one that is currently the primary, so a failover needs no restart and no configuration change.
+- **Measured** (stopping `player-db-2` while it was the primary, with writes every 2 s):
+  - The writes failed for about 30 s while repmgr confirmed the primary was gone; `player-db-1` was then promoted and the next write succeeded.
+  - Redis stopped at the same time only turned the cached reads into `BYPASS`; they still answered 200.
+- **Host ports.** Only node 1 of each cluster is published (`5435` player, `5436` game). Once a failover has happened, node 1 may be a standby.
+
+See which node is the primary, and fail one over:
+```bash
+for n in 1 2 3; do docker compose exec -T player-db-$n sh -c 'PGPASSWORD=$POSTGRESQL_PASSWORD psql -U postgres -d player_db -Atc "select inet_server_addr(), pg_is_in_recovery()"'; done
+docker compose stop player-db-1          # the primary at first start
+# ~30 s later one standby answers pg_is_in_recovery() = f; then bring the old primary back as a standby:
+docker compose start player-db-1
+```
+
+The clusters start on new volumes (`player_db_{1,2,3}_data`, `game_db_{1,2,3}_data`). Data in the old `player_postgres_data` / `game_postgres_data` volumes is not carried over.
+
 ---
 
 ### System Requirements & Prerequisites
@@ -2576,8 +2598,8 @@ To run these services locally via Docker Compose, ensure the host machine meets 
    - `3003` — Game Service WebSocket (negotiate through the Gateway first; REST is not served here)
    - `5433` — Exam PostgreSQL Database (`exam-db`)
    - `5434` — World PostgreSQL Database (`world-db`)
-   - `5435` — Player PostgreSQL Database (`player-db`)
-   - `5436` — Game PostgreSQL Database (`game-db`)
+   - `5435` — Player PostgreSQL Database (`player-db-1`, node 1 of the cluster)
+   - `5436` — Game PostgreSQL Database (`game-db-1`, node 1 of the cluster)
    - `5437` — Resource PostgreSQL Database (`resource-db`)
    - `27017` — Zombie MongoDB Database (`zombie-db`)
    - `5003` — Base Service HTTP API
@@ -2627,7 +2649,7 @@ From the repository root, start the stack in detached mode (Player, Game, Base, 
 ```bash
 docker compose up -d
 ```
-Docker Compose will automatically pull the images from DockerHub, initialize the database containers (`exam-db` on 5433, `world-db` on 5434, `player-db` on 5435, `game-db` on 5436, `resource-db` on 5437, `zombie-db` on 27017, `base-db` on 5438, `crafting-db` on 5439), perform healthchecks, and launch `gateway-service`, `exam-service`, `world-service`, `player-service`, `game-service`, `zombie-service`, `resource-service`, `base-service` and `crafting-service`.
+Docker Compose will automatically pull the images from DockerHub, initialize the database containers (`exam-db` on 5433, `world-db` on 5434, `player-db-1..3` (5435 for node 1), `game-db-1..3` (5436 for node 1), `resource-db` on 5437, `zombie-db` on 27017, `base-db` on 5438, `crafting-db` on 5439), perform healthchecks, and launch `gateway-service`, `exam-service`, `world-service`, `player-service`, `game-service`, `zombie-service`, `resource-service`, `base-service` and `crafting-service`.
 
 Each replica of these six services registers itself with Discovery Service on startup and deregisters on shutdown; the Gateway looks them up there and sends requests to them in turn. To see the registered instances, or to scale a service while the stack runs:
 ```bash
