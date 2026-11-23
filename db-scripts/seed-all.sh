@@ -49,7 +49,8 @@ expect_ok() {
 }
 
 psql_in() {
-    docker compose exec -T "$1" sh -c 'psql -v ON_ERROR_STOP=1 -q -At -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+    # The repmgr nodes (player-db-*, game-db-*) name their variables POSTGRESQL_*; the other databases POSTGRES_*.
+    docker compose exec -T "$1" sh -c 'PGPASSWORD="${POSTGRESQL_PASSWORD:-}" psql -v ON_ERROR_STOP=1 -q -At -U "${POSTGRES_USER:-$POSTGRESQL_USERNAME}" -d "${POSTGRES_DB:-$POSTGRESQL_DATABASE}"'
 }
 
 echo -n "Waiting for the Gateway at $GATEWAY_URL "
@@ -277,7 +278,7 @@ echo "  recipes, known players and unlocks ensured; craft $CRAFT_ID"
 
 # ---------------------------------------------------------------- Game Service
 echo; echo "== Game Service"
-session_named() { psql_in game-db <<< "SELECT id FROM game_sessions WHERE name = '$1' ORDER BY created_on_utc LIMIT 1"; }
+session_named() { psql_in game-db-1 <<< "SELECT id FROM game_sessions WHERE name = '$1' ORDER BY created_on_utc LIMIT 1"; }
 
 # ensure_session NAME start|lobby USER... -> prints the session id, creating the session when it is missing.
 ensure_session() {
@@ -303,7 +304,7 @@ ensure_session() {
 
 LOBBY_ID=$(ensure_session "Seed Lobby" lobby survivor trader)
 SESSION_ID=$(ensure_session "Seed Running Session" start veteran survivor)
-ACTION_ID=$(psql_in game-db <<< "SELECT id FROM player_actions WHERE session_id = '$SESSION_ID' ORDER BY created_on_utc LIMIT 1")
+ACTION_ID=$(psql_in game-db-1 <<< "SELECT id FROM player_actions WHERE session_id = '$SESSION_ID' ORDER BY created_on_utc LIMIT 1")
 # Spawning again in the same cycle returns the same wave, so this is safe to repeat.
 response=$(api POST "/api/sessions/$SESSION_ID/zombies/spawn" '{"typeWeights":{"professor":1}}' "${JWT[veteran]}")
 expect_ok "the seed zombie wave" "$response"
