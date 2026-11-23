@@ -43,6 +43,28 @@ x-game-db-env: &game-db-env
   REPMGR_PARTNER_NODES: game-db-1,game-db-2,game-db-3
   REPMGR_PORT_NUMBER: 5432
 
+x-resource-db-env: &resource-db-env
+  POSTGRESQL_USERNAME: ${RESOURCE_DB_USER:-postgres}
+  POSTGRESQL_PASSWORD: ${RESOURCE_DB_PASSWORD:-postgres}
+  POSTGRESQL_POSTGRES_PASSWORD: ${RESOURCE_DB_PASSWORD:-postgres}
+  POSTGRESQL_DATABASE: resource_db
+  REPMGR_PASSWORD: repmgr
+  REPMGR_PRIMARY_HOST: resource-db-1
+  REPMGR_PARTNER_NODES: resource-db-1,resource-db-2,resource-db-3
+  REPMGR_PORT_NUMBER: 5432
+
+x-zombie-db-node: &zombie-db-node
+  image: mongo:8
+  restart: always
+  command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+  healthcheck:
+    test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+    interval: 5s
+    timeout: 5s
+    retries: 20
+  networks:
+    - kahoots-network
+
 # Runs once the cluster is up and makes the replication synchronous on every node: a commit returns only after
 # at least one standby has it. The image's env vars set this only on the first primary, and in a config file the
 # first primary hangs at startup waiting for standbys that aren't there yet. ALTER SYSTEM writes it into each
@@ -211,40 +233,115 @@ services:
       game-db-3:
         condition: service_healthy
 
-  resource-db:
-    image: postgres:17-alpine
-    container_name: resource-db
-    restart: always
+  # --- Resource Service database: one primary and 2 standbys, with automatic failover (like player-db, game-db) ---
+  # Prisma connects to one host, so Resource Service asks every node in DATABASE_HOSTS which is the primary
+  # (pg_is_in_recovery() = false) and follows it after a promotion. Synchronous replication: see resource-db-sync-replication.
+  resource-db-1:
+    <<: *repmgr-node
+    container_name: resource-db-1
     environment:
-      POSTGRES_USER: ${RESOURCE_DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${RESOURCE_DB_PASSWORD:-postgres}
-      POSTGRES_DB: resource_db
+      <<: *resource-db-env
+      REPMGR_NODE_NAME: resource-db-1
+      REPMGR_NODE_NETWORK_NAME: resource-db-1
     ports:
       - "5437:5432"
     volumes:
-      - resource_postgres_data:/var/lib/postgresql/data
+      - resource_db_1_data:/bitnami/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d resource_db"]
+      test: ["CMD-SHELL", "PGPASSWORD=$${POSTGRESQL_PASSWORD} pg_isready -h 127.0.0.1 -U $${POSTGRESQL_USERNAME} -d resource_db"]
       interval: 5s
       timeout: 5s
-      retries: 5
-    networks:
-      - kahoots-network
+      retries: 20
 
-  # --- MongoDB Database ---
-  zombie-db:
-    image: mongo:8
-    container_name: zombie-db
-    restart: always
+  resource-db-2:
+    <<: *repmgr-node
+    container_name: resource-db-2
+    environment:
+      <<: *resource-db-env
+      REPMGR_NODE_NAME: resource-db-2
+      REPMGR_NODE_NETWORK_NAME: resource-db-2
+    volumes:
+      - resource_db_2_data:/bitnami/postgresql
+
+  resource-db-3:
+    <<: *repmgr-node
+    container_name: resource-db-3
+    environment:
+      <<: *resource-db-env
+      REPMGR_NODE_NAME: resource-db-3
+      REPMGR_NODE_NETWORK_NAME: resource-db-3
+    volumes:
+      - resource_db_3_data:/bitnami/postgresql
+
+  resource-db-sync-replication:
+    <<: *sync-replication
+    container_name: resource-db-sync-replication
+    environment:
+      PGUSER: postgres
+      PGPASSWORD: ${RESOURCE_DB_PASSWORD:-postgres}
+      NODES: resource-db-1 resource-db-2 resource-db-3
+    depends_on:
+      resource-db-1:
+        condition: service_healthy
+      resource-db-2:
+        condition: service_healthy
+      resource-db-3:
+        condition: service_healthy
+
+  # --- Zombie Service database: a MongoDB replica set (rs0) of 3 members, with automatic failover ---
+  # The members elect a primary among themselves and elect a new one when it stops (electionTimeoutMillis 5 s).
+  # Writes are acknowledged by a majority (w: majority), so an acknowledged write survives a failover.
+  zombie-db-1:
+    <<: *zombie-db-node
+    container_name: zombie-db-1
     ports:
       - "27017:27017"
     volumes:
-      - zombie_mongo_data:/data/db
-    healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+      - zombie_db_1_data:/data/db
+
+  zombie-db-2:
+    <<: *zombie-db-node
+    container_name: zombie-db-2
+    volumes:
+      - zombie_db_2_data:/data/db
+
+  zombie-db-3:
+    <<: *zombie-db-node
+    container_name: zombie-db-3
+    volumes:
+      - zombie_db_3_data:/data/db
+
+  # Runs once: initiates the replica set on first start (a no-op afterwards), then waits until it has a primary.
+  zombie-db-init:
+    image: mongo:8
+    container_name: zombie-db-init
+    restart: "no"
+    entrypoint: ["mongosh", "--quiet", "--host", "zombie-db-1", "--eval"]
+    command:
+      - |
+        try {
+          rs.status();
+          print("rs0 already initiated");
+        } catch (e) {
+          if (e.codeName !== "NotYetInitialized") throw e;
+          rs.initiate({ _id: "rs0", settings: { electionTimeoutMillis: 5000 }, members: [
+            { _id: 0, host: "zombie-db-1:27017" },
+            { _id: 1, host: "zombie-db-2:27017" },
+            { _id: 2, host: "zombie-db-3:27017" },
+          ] });
+          print("rs0 initiated");
+        }
+        for (let i = 0; i < 60 && !rs.status().members.some((m) => m.stateStr === "PRIMARY"); i++) sleep(1000);
+        const primary = rs.status().members.find((m) => m.stateStr === "PRIMARY");
+        if (!primary) throw new Error("rs0 has no primary after 60 s");
+        print("rs0 primary: " + primary.name);
+    depends_on:
+      zombie-db-1:
+        condition: service_healthy
+      zombie-db-2:
+        condition: service_healthy
+      zombie-db-3:
+        condition: service_healthy
     networks:
       - kahoots-network
 
@@ -327,10 +424,11 @@ services:
       GAME_DB_DSN: "host=game-db-1,game-db-2,game-db-3 port=5432 dbname=game_db user=postgres password=postgres target_session_attrs=standby"
       EXAM_DB_DSN: "host=exam-db port=5432 dbname=exam_db user=postgres password=postgres"
       WORLD_DB_DSN: "host=world-db port=5432 dbname=world_db user=postgres password=postgres"
-      RESOURCE_DB_DSN: "host=resource-db port=5432 dbname=resource_db user=${RESOURCE_DB_USER:-postgres} password=${RESOURCE_DB_PASSWORD:-postgres}"
+      RESOURCE_DB_DSN: "host=resource-db-1,resource-db-2,resource-db-3 port=5432 dbname=resource_db user=${RESOURCE_DB_USER:-postgres} password=${RESOURCE_DB_PASSWORD:-postgres} target_session_attrs=standby"
       BASE_DB_DSN: "host=base-db port=5432 dbname=base_db user=${BASE_DB_USER:-postgres} password=${BASE_DB_PASSWORD:-postgres}"
       CRAFTING_DB_DSN: "host=crafting-db port=5432 dbname=crafting_db user=${CRAFTING_DB_USER:-postgres} password=${CRAFTING_DB_PASSWORD:-postgres}"
-      ZOMBIE_DB_URI: "mongodb://zombie-db:27017/zombie_db"
+      # Zombie Service's replica set is read from a secondary when one is up.
+      ZOMBIE_DB_URI: "mongodb://zombie-db-1:27017,zombie-db-2:27017,zombie-db-3:27017/zombie_db?replicaSet=rs0&readPreference=secondaryPreferred"
     depends_on:
       warehouse-db:
         condition: service_healthy
@@ -551,7 +649,7 @@ services:
     networks:
       - kahoots-network
 
-  # No container_name: 3 replicas share resource-db, and each registers its own address with
+  # No container_name: 3 replicas share the resource-db cluster, and each registers its own address with
   # Service Discovery, which the Gateway reads to spread requests over them (round robin).
   # Idempotency keys and the table bootstrap are safe across replicas (resource-service #248, #249).
   resource-service:
@@ -561,11 +659,10 @@ services:
     restart: always
     environment:
       PORT: 4002
-      POSTGRES_HOST: resource-db
-      POSTGRES_PORT: 5432
-      POSTGRES_USER: ${RESOURCE_DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${RESOURCE_DB_PASSWORD:-postgres}
-      POSTGRES_DB: resource_db
+      # The user, password and database; with DATABASE_HOSTS the service connects to whichever node is the primary
+      # and follows it across failovers (from the 5.0.0 image; the 4.0.0 image uses resource-db-1 only).
+      DATABASE_URL: postgresql://${RESOURCE_DB_USER:-postgres}:${RESOURCE_DB_PASSWORD:-postgres}@resource-db-1:5432/resource_db
+      DATABASE_HOSTS: resource-db-1:5432,resource-db-2:5432,resource-db-3:5432
       DISCOVERY_URL: http://discovery-service:8500
       REDIS_NODES: redis://:${REDIS_PASSWORD}@redis-cache-1:6379,redis://:${REDIS_PASSWORD}@redis-cache-2:6379,redis://:${REDIS_PASSWORD}@redis-cache-3:6379
       REDIS_VNODES: ${REDIS_VNODES:-160}
@@ -575,14 +672,16 @@ services:
     expose:
       - "4002"
     depends_on:
-      resource-db:
+      resource-db-1:
         condition: service_healthy
+      resource-db-sync-replication:
+        condition: service_completed_successfully
       discovery-service:
         condition: service_healthy
     networks:
       - kahoots-network
 
-  # No container_name: 3 replicas share zombie-db, and each registers its own address with
+  # No container_name: 3 replicas share the zombie-db replica set, and each registers its own address with
   # Service Discovery, which the Gateway reads to spread requests over them (round robin).
   zombie-service:
     image: costinloredana/zombie-service:4.0.0
@@ -591,7 +690,8 @@ services:
     restart: always
     environment:
       PORT: 4001
-      MONGO_URI: "mongodb://zombie-db:27017/zombie_db"
+      # Every member and the set's name: the driver finds the primary and follows it across failovers.
+      MONGO_URI: "mongodb://zombie-db-1:27017,zombie-db-2:27017,zombie-db-3:27017/zombie_db?replicaSet=rs0"
       DISCOVERY_URL: http://discovery-service:8500
       REDIS_NODES: redis://:${REDIS_PASSWORD}@redis-cache-1:6379,redis://:${REDIS_PASSWORD}@redis-cache-2:6379,redis://:${REDIS_PASSWORD}@redis-cache-3:6379
       REDIS_VNODES: ${REDIS_VNODES:-160}
@@ -601,8 +701,8 @@ services:
     expose:
       - "4001"
     depends_on:
-      zombie-db:
-        condition: service_healthy
+      zombie-db-init:
+        condition: service_completed_successfully
       discovery-service:
         condition: service_healthy
     networks:
@@ -816,9 +916,17 @@ volumes:
     driver: local
   world_postgres_data:
     driver: local
-  resource_postgres_data:
+  resource_db_1_data:
     driver: local
-  zombie_mongo_data:
+  resource_db_2_data:
+    driver: local
+  resource_db_3_data:
+    driver: local
+  zombie_db_1_data:
+    driver: local
+  zombie_db_2_data:
+    driver: local
+  zombie_db_3_data:
     driver: local
   warehouse_postgres_data:
     driver: local
