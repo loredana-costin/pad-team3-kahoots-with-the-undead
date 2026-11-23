@@ -76,6 +76,14 @@
     {
       "key": "cacheNode",
       "value": ""
+    },
+    {
+      "key": "pRun",
+      "value": ""
+    },
+    {
+      "key": "pPlayer",
+      "value": ""
     }
   ],
   "auth": {
@@ -1478,6 +1486,1612 @@
               }
             }
           ]
+        }
+      ]
+    },
+    {
+      "name": "Participant endpoints (2PC and saga refunds, through the Message Broker)",
+      "description": "Needs the 5.0.0 image. Calls the endpoints only the coordinators use, directly, through the broker's queue with a game-service token: the Two-Phase Commit participant (holds, votes, repeats, conflicts, GET /api/tx/{txId}) and the refund as a saga compensation (compensates: credited once, a spend cancelled before it arrives, refund_mismatch). Then GET /status. Runs on its own: it creates a fresh player every run and deletes it at the end.",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Mint a service token for game-service, which the message broker requires (it calls this route in the system).",
+              "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+              "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+              "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+              "const now = Math.floor(Date.now() / 1000);",
+              "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+              "const payload = encode({ sub: 'game-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+              "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+              "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+            ]
+          }
+        }
+      ],
+      "item": [
+        {
+          "name": "Create an inventory for the participant checks",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// A fresh player and run id, so the folder can run again.",
+                  "const run = String(Date.now());",
+                  "pm.collectionVariables.set('pRun', run);",
+                  "pm.collectionVariables.set('pPlayer', 'p_participant_' + run);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', function () { pm.response.to.have.status(201); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/inventory/{{pPlayer}}",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "inventory",
+                "{{pPlayer}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Give the player 5 chemicals and 10 food",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Balances set', function () { pm.expect(pm.response.json().resources).to.eql({\"chemicals\": 5, \"food\": 10}); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/inventory/{{pPlayer}}",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "inventory",
+                "{{pPlayer}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resources\": {\n    \"chemicals\": 5,\n    \"food\": 10\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC prepare 2 chemicals - votes commit (held)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('vote is commit', function () { pm.expect(pm.response.json().vote).to.eql(\"commit\"); });",
+                  "pm.test('state is prepared', function () { pm.expect(pm.response.json().state).to.eql(\"prepared\"); });",
+                  "pm.test('status is prepared', function () { pm.expect(pm.response.json().status).to.eql(\"prepared\"); });",
+                  "pm.test('The hold expires later', function () { pm.expect(Date.parse(pm.response.json().expiresAt)).to.be.above(Date.now()); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/tx/tx_pr_{{pRun}}_1/prepare",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "tx",
+                "tx_pr_{{pRun}}_1",
+                "prepare"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"playerId\": \"{{pPlayer}}\",\n  \"reason\": \"cure_infected_zombie\",\n  \"costs\": [\n    {\n      \"resourceType\": \"chemicals\",\n      \"amount\": 2\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC prepare the same transaction again - the same vote",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('vote is commit', function () { pm.expect(pm.response.json().vote).to.eql(\"commit\"); });",
+                  "pm.test('status is already_prepared', function () { pm.expect(pm.response.json().status).to.eql(\"already_prepared\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/tx/tx_pr_{{pRun}}_1/prepare",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "tx",
+                "tx_pr_{{pRun}}_1",
+                "prepare"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"playerId\": \"{{pPlayer}}\",\n  \"reason\": \"cure_infected_zombie\",\n  \"costs\": [\n    {\n      \"resourceType\": \"chemicals\",\n      \"amount\": 2\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC prepare the same txId with other costs (409 tx_mismatch)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 409', function () { pm.response.to.have.status(409); });",
+                  "pm.test('error is tx_mismatch', function () { pm.expect(pm.response.json().error).to.eql('tx_mismatch'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/tx/tx_pr_{{pRun}}_1/prepare",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "tx",
+                "tx_pr_{{pRun}}_1",
+                "prepare"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"playerId\": \"{{pPlayer}}\",\n  \"reason\": \"cure_infected_zombie\",\n  \"costs\": [\n    {\n      \"resourceType\": \"chemicals\",\n      \"amount\": 3\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Spend 4 chemicals while 2 are held (402, only 3 free)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 402', function () { pm.response.to.have.status(402); });",
+                  "pm.test('status is rejected_insufficient', function () { pm.expect(pm.response.json().status).to.eql(\"rejected_insufficient\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/spend",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "spend"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idempotencyKey\": \"spend_pr_{{pRun}}_held\",\n  \"playerId\": \"{{pPlayer}}\",\n  \"reason\": \"barricade\",\n  \"costs\": [\n    {\n      \"resourceType\": \"chemicals\",\n      \"amount\": 4\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC prepare 4 more chemicals - votes abort (insufficient)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('vote is abort', function () { pm.expect(pm.response.json().vote).to.eql(\"abort\"); });",
+                  "pm.test('status is rejected_insufficient', function () { pm.expect(pm.response.json().status).to.eql(\"rejected_insufficient\"); });",
+                  "pm.test('abortReason is insufficient_resources', function () { pm.expect(pm.response.json().abortReason).to.eql(\"insufficient_resources\"); });",
+                  "pm.test('1 chemical missing', function () { pm.expect(pm.response.json().missing).to.eql({\"chemicals\": 1}); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/tx/tx_pr_{{pRun}}_2/prepare",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "tx",
+                "tx_pr_{{pRun}}_2",
+                "prepare"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"playerId\": \"{{pPlayer}}\",\n  \"reason\": \"cure_infected_zombie\",\n  \"costs\": [\n    {\n      \"resourceType\": \"chemicals\",\n      \"amount\": 4\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC read the held transaction (GET /api/tx/{txId})",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Prepared, for that player and those costs', function () {",
+                  "  const tx = pm.response.json();",
+                  "  pm.expect(tx.state).to.eql('prepared');",
+                  "  pm.expect(tx.playerId).to.eql(pm.collectionVariables.get('pPlayer'));",
+                  "  pm.expect(tx.costs).to.eql([{ resourceType: 'chemicals', amount: 2 }]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/tx/tx_pr_{{pRun}}_1",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "tx",
+                "tx_pr_{{pRun}}_1"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC commit - deducts the held chemicals",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('state is committed', function () { pm.expect(pm.response.json().state).to.eql(\"committed\"); });",
+                  "pm.test('status is committed', function () { pm.expect(pm.response.json().status).to.eql(\"committed\"); });",
+                  "pm.test('3 chemicals left', function () { pm.expect(pm.response.json().newBalance.chemicals).to.eql(3); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/tx/tx_pr_{{pRun}}_1/commit",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "tx",
+                "tx_pr_{{pRun}}_1",
+                "commit"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC commit again - already_committed",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('status is already_committed', function () { pm.expect(pm.response.json().status).to.eql(\"already_committed\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/tx/tx_pr_{{pRun}}_1/commit",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "tx",
+                "tx_pr_{{pRun}}_1",
+                "commit"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC abort a committed transaction (409 tx_committed)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 409', function () { pm.response.to.have.status(409); });",
+                  "pm.test('error is tx_committed', function () { pm.expect(pm.response.json().error).to.eql('tx_committed'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/tx/tx_pr_{{pRun}}_1/abort",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "tx",
+                "tx_pr_{{pRun}}_1",
+                "abort"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC prepare 3 food - votes commit",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('vote is commit', function () { pm.expect(pm.response.json().vote).to.eql(\"commit\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/tx/tx_pr_{{pRun}}_3/prepare",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "tx",
+                "tx_pr_{{pRun}}_3",
+                "prepare"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"playerId\": \"{{pPlayer}}\",\n  \"reason\": \"tourist_steal\",\n  \"costs\": [\n    {\n      \"resourceType\": \"food\",\n      \"amount\": 3\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC abort - releases the hold",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('status is aborted', function () { pm.expect(pm.response.json().status).to.eql(\"aborted\"); });",
+                  "pm.test('abortReason is coordinator', function () { pm.expect(pm.response.json().abortReason).to.eql(\"coordinator\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/tx/tx_pr_{{pRun}}_3/abort",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "tx",
+                "tx_pr_{{pRun}}_3",
+                "abort"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC abort again - already_aborted",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('status is already_aborted', function () { pm.expect(pm.response.json().status).to.eql(\"already_aborted\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/tx/tx_pr_{{pRun}}_3/abort",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "tx",
+                "tx_pr_{{pRun}}_3",
+                "abort"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC commit an aborted transaction (409 tx_aborted)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 409', function () { pm.response.to.have.status(409); });",
+                  "pm.test('error is tx_aborted', function () { pm.expect(pm.response.json().error).to.eql('tx_aborted'); });",
+                  "pm.test('abortReason is coordinator', function () { pm.expect(pm.response.json().abortReason).to.eql(\"coordinator\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/tx/tx_pr_{{pRun}}_3/commit",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "tx",
+                "tx_pr_{{pRun}}_3",
+                "commit"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "The aborted hold left the balance untouched",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('3 chemicals, 10 food', function () { pm.expect(pm.response.json().resources).to.eql({\"chemicals\": 3, \"food\": 10}); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/inventory/{{pPlayer}}",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "inventory",
+                "{{pPlayer}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC abort a transaction never prepared here - remembered",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('state is aborted', function () { pm.expect(pm.response.json().state).to.eql(\"aborted\"); });",
+                  "pm.test('abortReason is aborted_before_prepare', function () { pm.expect(pm.response.json().abortReason).to.eql(\"aborted_before_prepare\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/tx/tx_pr_{{pRun}}_4/abort",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "tx",
+                "tx_pr_{{pRun}}_4",
+                "abort"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC late prepare after that abort - votes abort",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('vote is abort', function () { pm.expect(pm.response.json().vote).to.eql(\"abort\"); });",
+                  "pm.test('abortReason is aborted_before_prepare', function () { pm.expect(pm.response.json().abortReason).to.eql(\"aborted_before_prepare\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/tx/tx_pr_{{pRun}}_4/prepare",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "tx",
+                "tx_pr_{{pRun}}_4",
+                "prepare"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"playerId\": \"{{pPlayer}}\",\n  \"reason\": \"tourist_steal\",\n  \"costs\": [\n    {\n      \"resourceType\": \"food\",\n      \"amount\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC commit an unknown transaction (404 tx_not_found)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404', function () { pm.response.to.have.status(404); });",
+                  "pm.test('error is tx_not_found', function () { pm.expect(pm.response.json().error).to.eql('tx_not_found'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/tx/tx_does_not_exist_{{pRun}}/commit",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "tx",
+                "tx_does_not_exist_{{pRun}}",
+                "commit"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC prepare without costs (400 invalid_body)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', function () { pm.response.to.have.status(400); });",
+                  "pm.test('error is invalid_body', function () { pm.expect(pm.response.json().error).to.eql('invalid_body'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/tx/tx_pr_{{pRun}}_5/prepare",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "tx",
+                "tx_pr_{{pRun}}_5",
+                "prepare"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"playerId\": \"{{pPlayer}}\",\n  \"reason\": \"tourist_steal\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Spend 3 food (the saga step to compensate)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('status is applied', function () { pm.expect(pm.response.json().status).to.eql(\"applied\"); });",
+                  "pm.test('7 food left', function () { pm.expect(pm.response.json().newBalance.food).to.eql(7); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/spend",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "spend"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idempotencyKey\": \"saga_pr_{{pRun}}:take\",\n  \"playerId\": \"{{pPlayer}}\",\n  \"reason\": \"tourist_steal\",\n  \"costs\": [\n    {\n      \"resourceType\": \"food\",\n      \"amount\": 3\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Refund compensating that spend - credited back once",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('status is refunded', function () { pm.expect(pm.response.json().status).to.eql(\"refunded\"); });",
+                  "pm.test('compensates names the spend', function () { pm.expect(pm.response.json().compensates).to.eql('saga_pr_' + pm.collectionVariables.get('pRun') + ':take'); });",
+                  "pm.test('10 food again', function () { pm.expect(pm.response.json().newBalance.food).to.eql(10); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/refund",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "refund"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idempotencyKey\": \"saga_pr_{{pRun}}:take:refund\",\n  \"playerId\": \"{{pPlayer}}\",\n  \"reason\": \"saga_compensation\",\n  \"costs\": [\n    {\n      \"resourceType\": \"food\",\n      \"amount\": 3\n    }\n  ],\n  \"compensates\": \"saga_pr_{{pRun}}:take\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Refund again - already_refunded",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('status is already_refunded', function () { pm.expect(pm.response.json().status).to.eql(\"already_refunded\"); });",
+                  "pm.test('Still 10 food', function () { pm.expect(pm.response.json().newBalance.food).to.eql(10); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/refund",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "refund"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idempotencyKey\": \"saga_pr_{{pRun}}:take:refund\",\n  \"playerId\": \"{{pPlayer}}\",\n  \"reason\": \"saga_compensation\",\n  \"costs\": [\n    {\n      \"resourceType\": \"food\",\n      \"amount\": 3\n    }\n  ],\n  \"compensates\": \"saga_pr_{{pRun}}:take\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Refund compensating a spend that never happened - nothing_to_refund",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('status is nothing_to_refund', function () { pm.expect(pm.response.json().status).to.eql(\"nothing_to_refund\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/refund",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "refund"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idempotencyKey\": \"saga_pr_{{pRun}}_2:take:refund\",\n  \"playerId\": \"{{pPlayer}}\",\n  \"reason\": \"saga_compensation\",\n  \"costs\": [\n    {\n      \"resourceType\": \"food\",\n      \"amount\": 3\n    }\n  ],\n  \"compensates\": \"saga_pr_{{pRun}}_2:take\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "That spend arriving late (409 spend_cancelled)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 409', function () { pm.response.to.have.status(409); });",
+                  "pm.test('error is spend_cancelled', function () { pm.expect(pm.response.json().error).to.eql('spend_cancelled'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/spend",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "spend"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idempotencyKey\": \"saga_pr_{{pRun}}_2:take\",\n  \"playerId\": \"{{pPlayer}}\",\n  \"reason\": \"tourist_steal\",\n  \"costs\": [\n    {\n      \"resourceType\": \"food\",\n      \"amount\": 3\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Spend 1 food (to compensate with other costs)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('status is applied', function () { pm.expect(pm.response.json().status).to.eql(\"applied\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/spend",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "spend"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idempotencyKey\": \"saga_pr_{{pRun}}_3:take\",\n  \"playerId\": \"{{pPlayer}}\",\n  \"reason\": \"tourist_steal\",\n  \"costs\": [\n    {\n      \"resourceType\": \"food\",\n      \"amount\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Refund with other costs than the spend (409 refund_mismatch)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 409', function () { pm.response.to.have.status(409); });",
+                  "pm.test('error is refund_mismatch', function () { pm.expect(pm.response.json().error).to.eql('refund_mismatch'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/refund",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "refund"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idempotencyKey\": \"saga_pr_{{pRun}}_3:take:refund\",\n  \"playerId\": \"{{pPlayer}}\",\n  \"reason\": \"saga_compensation\",\n  \"costs\": [\n    {\n      \"resourceType\": \"food\",\n      \"amount\": 2\n    }\n  ],\n  \"compensates\": \"saga_pr_{{pRun}}_3:take\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Refund compensating itself (400 invalid_body)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', function () { pm.response.to.have.status(400); });",
+                  "pm.test('error is invalid_body', function () { pm.expect(pm.response.json().error).to.eql('invalid_body'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/refund",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "refund"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idempotencyKey\": \"saga_pr_{{pRun}}_4:refund\",\n  \"playerId\": \"{{pPlayer}}\",\n  \"reason\": \"saga_compensation\",\n  \"costs\": [\n    {\n      \"resourceType\": \"food\",\n      \"amount\": 1\n    }\n  ],\n  \"compensates\": \"saga_pr_{{pRun}}_4:refund\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete the participant checks' inventory",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 204', function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/inventory/{{pPlayer}}",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "inventory",
+                "{{pPlayer}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Status (GET /status through the Message Broker)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test('The instance is ok and names its service and version', function () {",
+                  "  pm.expect(body.status).to.eql('ok');",
+                  "  pm.expect(body.service).to.eql('resource-service');",
+                  "  pm.expect(body.version).to.match(/^\\d+\\.\\d+\\.\\d+$/);",
+                  "  pm.expect(body.uptimeSeconds).to.be.a('number');",
+                  "});",
+                  "pm.test('PostgreSQL answers', function () { pm.expect(body.dependencies.database).to.eql('ok'); });",
+                  "// cache and replication come with the 5.0.0 image.",
+                  "(body.cache ? pm.test : pm.test.skip)('The cache state (enabled, and its nodes when enabled)', function () {",
+                  "  pm.expect(body.cache.enabled).to.be.a('boolean');",
+                  "  if (body.cache.enabled) pm.expect(body.cache.nodes).to.be.an('array').that.is.not.empty;",
+                  "});",
+                  "(body.replication ? pm.test : pm.test.skip)('The replication state (the primary and each node)', function () {",
+                  "  pm.expect(body.replication.primary).to.be.a('string');",
+                  "  pm.expect(body.replication.primaryChanges).to.be.a('number');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/status",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "status"
+              ]
+            },
+            "description": "What a replica reports about itself: version, uptime, whether its database answers, and (from 5.0.0) the cache and the replication state. Not exposed by the Gateway, so the collection reads one replica through the broker's queue."
+          },
+          "response": []
         }
       ]
     },
