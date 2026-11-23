@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "b2c3d4e5-f6a7-4b5c-9d0e-1f2a3b4c5d6e",
     "name": "World Service",
-    "description": "Postman Collection for testing World Service (v5.0.0) rooms, zones and spawn points through the Gateway, the zone unlock endpoint, the health check (with sagaParticipant, cache, and databaseReplication), the ExamPassed event, and Saga Participant endpoints (/world/sagas/*).",
+    "description": "Postman Collection for testing World Service (v5.0.0) rooms, zones and spawn points through the Gateway and Message Broker, Sharded Redis Cache (MISS -> HIT & invalidation), PostgreSQL Streaming Replication & Failover (1 primary + 2 standbys), and Saga Participant endpoints (/world/sagas/*).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -48,6 +48,21 @@
     },
     {
       "key": "worldSagaId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "brokerUrl",
+      "value": "http://localhost:8600",
+      "type": "string"
+    },
+    {
+      "key": "cacheZoneName",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "cacheZoneNode",
       "value": "",
       "type": "string"
     }
@@ -1251,6 +1266,343 @@
       ]
     },
     {
+      "name": "Cache (Redis, sharded with consistent hashing)",
+      "description": "Verifies World Service client-side consistent hashing Redis cache (MISS -> HIT on the same shard node, namespace token invalidation on PUT update, and cleanup).",
+      "item": [
+        {
+          "name": "1. Create zone for cache test (201)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 201', () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "pm.collectionVariables.set('cacheZoneName', json.zoneName);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/zones",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "zones"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Cache Test Wing {{runId}}\",\n  \"unlocked\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2. First GET zone - X-Cache: MISS (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('X-Cache is MISS (or BYPASS if cache disabled)', () => {",
+                  "    const xCache = pm.response.headers.get('X-Cache');",
+                  "    if (xCache) pm.expect(xCache).to.be.oneOf(['MISS', 'BYPASS']);",
+                  "    const node = pm.response.headers.get('X-Cache-Node');",
+                  "    if (node) pm.collectionVariables.set('cacheZoneNode', node);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/zones/{{cacheZoneName}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "zones",
+                "{{cacheZoneName}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3. Second GET zone - X-Cache: HIT from same shard node (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('X-Cache is HIT on the same Redis shard node', () => {",
+                  "    const xCache = pm.response.headers.get('X-Cache');",
+                  "    if (xCache) pm.expect(xCache).to.be.oneOf(['HIT', 'BYPASS']);",
+                  "    const node = pm.response.headers.get('X-Cache-Node');",
+                  "    const prev = pm.collectionVariables.get('cacheZoneNode');",
+                  "    if (node && prev) pm.expect(node).to.eql(prev);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/zones/{{cacheZoneName}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "zones",
+                "{{cacheZoneName}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4. Update zone - rotates world namespace token across all shards (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Zone unlocked updated to true', () => pm.expect(pm.response.json().unlocked).to.be.true);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/zones/{{cacheZoneName}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "zones",
+                "{{cacheZoneName}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"unlocked\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "5. GET zone after update - X-Cache: MISS with fresh value (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Returns fresh unlocked=true and X-Cache: MISS', () => {",
+                  "    pm.expect(pm.response.json().unlocked).to.be.true;",
+                  "    const xCache = pm.response.headers.get('X-Cache');",
+                  "    if (xCache) pm.expect(xCache).to.be.oneOf(['MISS', 'BYPASS']);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/zones/{{cacheZoneName}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "zones",
+                "{{cacheZoneName}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "6. Cleanup cache test zone (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/zones/{{cacheZoneName}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "zones",
+                "{{cacheZoneName}}"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Replication and failover",
+      "description": "Inspects World Service PostgreSQL streaming replication topology (1 Primary + 2 Hot-Standby Replicas) and 3-node Redis consistent hashing ring via the Message Broker queue.",
+      "item": [
+        {
+          "name": "Mint Message Broker service token for health check",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'message-broker', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('brokerServiceJwt', header + '.' + payload + '.' + signature);",
+                  "pm.collectionVariables.set('worldSagaId', 'pm-world-saga-' + Date.now().toString(36));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Service token minted', () => pm.expect(pm.collectionVariables.get('brokerServiceJwt').split('.')).to.have.length(3));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8000/health",
+              "host": [
+                "http://localhost:8000"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "World Service health via Broker queue - 1 Primary + 2 Standby Replicas & 3 Redis shards (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Database replication has 3 nodes (1 primary + 2 standby replicas) and 3 Redis shards', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.service).to.eql('world-service');",
+                  "    pm.expect(json.database).to.eql('up');",
+                  "    pm.expect(json).to.have.property('databaseReplication');",
+                  "    pm.expect(json.databaseReplication.status).to.eql('up');",
+                  "    pm.expect(json.databaseReplication.mode).to.eql('replicated');",
+                  "    pm.expect(json.databaseReplication.nodes).to.have.length(3);",
+                  "    const primaries = json.databaseReplication.nodes.filter(n => n.role === 'primary');",
+                  "    const replicas = json.databaseReplication.nodes.filter(n => n.role === 'replica');",
+                  "    pm.expect(primaries).to.have.length(1);",
+                  "    pm.expect(replicas).to.have.length(2);",
+                  "    pm.expect(json.cache.ring.nodes).to.eql(3);",
+                  "    pm.expect(json.cache.ring.vnodes).to.eql(160);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/world-service/health",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "world-service",
+                "health"
+              ]
+            },
+            "description": "Reads GET /health of a World Service replica through the Message Broker queue, verifying 1 primary + 2 replicas and the 3-node Redis ring.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{brokerServiceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Saga Participant (v5.0.0)",
       "description": "Tests World Service Saga participant endpoints (/world/sagas/*) orchestrated by Message Broker: access rules, unlock-zone (pivot), idempotent repeat, relock-zone compensation, tombstones, late execute rejection, and GET /world/sagas/:sagaId.",
       "item": [
@@ -1306,7 +1658,7 @@
           "response": []
         },
         {
-          "name": "World Service health (direct, internal) - sagaParticipant, cache & replication (200)",
+          "name": "World Service health via Broker queue - sagaParticipant block (200)",
           "event": [
             {
               "listen": "test",
@@ -1314,14 +1666,11 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
-                  "pm.test('Reports sagaParticipant, cache, and databaseReplication blocks', () => {",
+                  "pm.test('Reports sagaParticipant block', () => {",
                   "    const json = pm.response.json();",
                   "    pm.expect(json.service).to.eql('world-service');",
-                  "    pm.expect(json.database).to.eql('up');",
                   "    pm.expect(json).to.have.property('sagaParticipant');",
                   "    pm.expect(json.sagaParticipant).to.have.keys(['enabled', 'applied', 'compensated', 'rejected']);",
-                  "    pm.expect(json).to.have.property('cache');",
-                  "    pm.expect(json).to.have.property('databaseReplication');",
                   "});"
                 ]
               }
@@ -1331,17 +1680,26 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{worldDirectUrl}}/health",
+              "raw": "{{brokerUrl}}/queues/world-service/health",
               "host": [
-                "{{worldDirectUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "world-service",
                 "health"
               ]
             },
-            "description": "Direct internal health check verifying the v5.0.0 sagaParticipant block alongside cache and databaseReplication.",
+            "description": "Verifies the v5.0.0 sagaParticipant health block via the Message Broker queue.",
             "auth": {
-              "type": "noauth"
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{brokerServiceJwt}}",
+                  "type": "string"
+                }
+              ]
             }
           },
           "response": []
@@ -1388,7 +1746,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"zoneId\": \"zoneZero\",\n  \"achievementId\": \"ach-0\",\n  \"playerId\": \"{{playerId}}\"\n}",
+              "raw": "{\n  \"zoneId\": \"mainCorridorZone\",\n  \"achievementId\": \"ach-0\",\n  \"playerId\": \"{{playerId}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1433,7 +1791,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"zoneId\": \"zoneZero\",\n  \"achievementId\": \"ach-0\",\n  \"playerId\": \"{{playerId}}\"\n}",
+              "raw": "{\n  \"zoneId\": \"mainCorridorZone\",\n  \"achievementId\": \"ach-0\",\n  \"playerId\": \"{{playerId}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1523,7 +1881,7 @@
           "response": []
         },
         {
-          "name": "Unlock Zone (Saga) - already unlocked zoneZero (200)",
+          "name": "Unlock Zone (Saga) - already unlocked mainCorridorZone (200)",
           "event": [
             {
               "listen": "test",
@@ -1534,7 +1892,7 @@
                   "pm.test('alreadyUnlocked=true and changed=false', () => {",
                   "    const json = pm.response.json();",
                   "    pm.expect(json.ok).to.be.true;",
-                  "    pm.expect(json.zoneId).to.eql('zoneZero');",
+                  "    pm.expect(json.zoneId).to.eql('mainCorridorZone');",
                   "    pm.expect(json.changed).to.be.false;",
                   "    pm.expect(json.alreadyUnlocked).to.be.true;",
                   "});"
@@ -1570,14 +1928,14 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"zoneId\": \"zoneZero\",\n  \"achievementId\": \"ach-0\",\n  \"playerId\": \"{{playerId}}\"\n}",
+              "raw": "{\n  \"zoneId\": \"mainCorridorZone\",\n  \"achievementId\": \"ach-0\",\n  \"playerId\": \"{{playerId}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "Executes unlock-zone on pre-unlocked zoneZero; records APPLIED with changed=false.",
+            "description": "Executes unlock-zone on pre-unlocked mainCorridorZone; records APPLIED with changed=false.",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -1603,7 +1961,7 @@
                   "pm.test('Returns stored result', () => {",
                   "    const json = pm.response.json();",
                   "    pm.expect(json.ok).to.be.true;",
-                  "    pm.expect(json.zoneId).to.eql('zoneZero');",
+                  "    pm.expect(json.zoneId).to.eql('mainCorridorZone');",
                   "});"
                 ]
               }
@@ -1637,7 +1995,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"zoneId\": \"zoneZero\",\n  \"achievementId\": \"ach-0\",\n  \"playerId\": \"{{playerId}}\"\n}",
+              "raw": "{\n  \"zoneId\": \"mainCorridorZone\",\n  \"achievementId\": \"ach-0\",\n  \"playerId\": \"{{playerId}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1705,14 +2063,14 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"zoneId\": \"zoneZero\"\n}",
+              "raw": "{\n  \"zoneId\": \"mainCorridorZone\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "Compensating a step where changed=false leaves zoneZero unlocked.",
+            "description": "Compensating a step where changed=false leaves mainCorridorZone unlocked.",
             "auth": {
               "type": "bearer",
               "bearer": [
