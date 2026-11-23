@@ -43,6 +43,24 @@ x-game-db-env: &game-db-env
   REPMGR_PARTNER_NODES: game-db-1,game-db-2,game-db-3
   REPMGR_PORT_NUMBER: 5432
 
+# Runs once the cluster is up and makes the replication synchronous on every node: a commit returns only after
+# at least one standby has it. The image's env vars set this only on the first primary, and in a config file the
+# first primary hangs at startup waiting for standbys that aren't there yet. ALTER SYSTEM writes it into each
+# node's data directory, so it survives restarts and a promoted standby already has it.
+x-sync-replication: &sync-replication
+  image: postgres:17-alpine
+  restart: "no"
+  entrypoint: ["sh", "-c"]
+  command:
+    - |
+      set -e
+      for node in $$NODES; do
+        psql -h $$node -d postgres -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET synchronous_standby_names = 'ANY 1 (*)'" -c "SELECT pg_reload_conf()" > /dev/null
+        echo "$$node: synchronous_standby_names = $$(psql -h $$node -d postgres -Atc 'SHOW synchronous_standby_names')"
+      done
+  networks:
+    - kahoots-network
+
 services:
   # --- PostgreSQL Databases ---
   exam-db:
@@ -162,6 +180,36 @@ services:
       REPMGR_NODE_NETWORK_NAME: game-db-3
     volumes:
       - game_db_3_data:/bitnami/postgresql
+
+  player-db-sync-replication:
+    <<: *sync-replication
+    container_name: player-db-sync-replication
+    environment:
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      NODES: player-db-1 player-db-2 player-db-3
+    depends_on:
+      player-db-1:
+        condition: service_healthy
+      player-db-2:
+        condition: service_healthy
+      player-db-3:
+        condition: service_healthy
+
+  game-db-sync-replication:
+    <<: *sync-replication
+    container_name: game-db-sync-replication
+    environment:
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      NODES: game-db-1 game-db-2 game-db-3
+    depends_on:
+      game-db-1:
+        condition: service_healthy
+      game-db-2:
+        condition: service_healthy
+      game-db-3:
+        condition: service_healthy
 
   resource-db:
     image: postgres:17-alpine
@@ -444,6 +492,8 @@ services:
     depends_on:
       player-db-1:
         condition: service_healthy
+      player-db-sync-replication:
+        condition: service_completed_successfully
       discovery-service:
         condition: service_healthy
     networks:
@@ -492,6 +542,8 @@ services:
     depends_on:
       game-db-1:
         condition: service_healthy
+      game-db-sync-replication:
+        condition: service_completed_successfully
       discovery-service:
         condition: service_healthy
       message-broker:
