@@ -53,6 +53,26 @@ x-resource-db-env: &resource-db-env
   REPMGR_PARTNER_NODES: resource-db-1,resource-db-2,resource-db-3
   REPMGR_PORT_NUMBER: 5432
 
+x-gateway-db-env: &gateway-db-env
+  POSTGRESQL_USERNAME: ${GATEWAY_DB_USER:-postgres}
+  POSTGRESQL_PASSWORD: ${GATEWAY_DB_PASSWORD:-postgres}
+  POSTGRESQL_POSTGRES_PASSWORD: ${GATEWAY_DB_PASSWORD:-postgres}
+  POSTGRESQL_DATABASE: gateway_db
+  REPMGR_PASSWORD: repmgr
+  REPMGR_PRIMARY_HOST: gateway-db-1
+  REPMGR_PARTNER_NODES: gateway-db-1,gateway-db-2,gateway-db-3
+  REPMGR_PORT_NUMBER: 5432
+
+x-broker-db-env: &broker-db-env
+  POSTGRESQL_USERNAME: ${BROKER_DB_USER:-postgres}
+  POSTGRESQL_PASSWORD: ${BROKER_DB_PASSWORD:-postgres}
+  POSTGRESQL_POSTGRES_PASSWORD: ${BROKER_DB_PASSWORD:-postgres}
+  POSTGRESQL_DATABASE: broker_db
+  REPMGR_PASSWORD: repmgr
+  REPMGR_PRIMARY_HOST: broker-db-1
+  REPMGR_PARTNER_NODES: broker-db-1,broker-db-2,broker-db-3
+  REPMGR_PORT_NUMBER: 5432
+
 x-zombie-db-node: &zombie-db-node
   image: mongo:8
   restart: always
@@ -457,6 +477,112 @@ services:
       resource-db-3:
         condition: service_healthy
 
+  # --- Gateway database: one primary and 2 standbys, with automatic failover (like resource-db) ---
+  # The Two-Phase Commit coordinator's transaction log (TX_LOG_DSN), synchronously replicated: a logged decision survives the primary.
+  # The DSN lists the 3 nodes and asks for the one that accepts writes, so it follows the primary after a promotion.
+  gateway-db-1:
+    <<: *repmgr-node
+    container_name: gateway-db-1
+    environment:
+      <<: *gateway-db-env
+      REPMGR_NODE_NAME: gateway-db-1
+      REPMGR_NODE_NETWORK_NAME: gateway-db-1
+    volumes:
+      - gateway_db_1_data:/bitnami/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=$${POSTGRESQL_PASSWORD} pg_isready -h 127.0.0.1 -U $${POSTGRESQL_USERNAME} -d gateway_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  gateway-db-2:
+    <<: *repmgr-node
+    container_name: gateway-db-2
+    environment:
+      <<: *gateway-db-env
+      REPMGR_NODE_NAME: gateway-db-2
+      REPMGR_NODE_NETWORK_NAME: gateway-db-2
+    volumes:
+      - gateway_db_2_data:/bitnami/postgresql
+
+  gateway-db-3:
+    <<: *repmgr-node
+    container_name: gateway-db-3
+    environment:
+      <<: *gateway-db-env
+      REPMGR_NODE_NAME: gateway-db-3
+      REPMGR_NODE_NETWORK_NAME: gateway-db-3
+    volumes:
+      - gateway_db_3_data:/bitnami/postgresql
+
+  gateway-db-sync-replication:
+    <<: *sync-replication
+    container_name: gateway-db-sync-replication
+    environment:
+      PGUSER: postgres
+      PGPASSWORD: ${GATEWAY_DB_PASSWORD:-postgres}
+      NODES: gateway-db-1 gateway-db-2 gateway-db-3
+    depends_on:
+      gateway-db-1:
+        condition: service_healthy
+      gateway-db-2:
+        condition: service_healthy
+      gateway-db-3:
+        condition: service_healthy
+
+  # --- Message Broker database: one primary and 2 standbys, with automatic failover (like resource-db) ---
+  # The durable topic queues, the dead letter channel and the saga store (QUEUE_STORE_DSN), synchronously replicated.
+  # The DSN lists the 3 nodes and asks for the one that accepts writes, so it follows the primary after a promotion.
+  broker-db-1:
+    <<: *repmgr-node
+    container_name: broker-db-1
+    environment:
+      <<: *broker-db-env
+      REPMGR_NODE_NAME: broker-db-1
+      REPMGR_NODE_NETWORK_NAME: broker-db-1
+    volumes:
+      - broker_db_1_data:/bitnami/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=$${POSTGRESQL_PASSWORD} pg_isready -h 127.0.0.1 -U $${POSTGRESQL_USERNAME} -d broker_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  broker-db-2:
+    <<: *repmgr-node
+    container_name: broker-db-2
+    environment:
+      <<: *broker-db-env
+      REPMGR_NODE_NAME: broker-db-2
+      REPMGR_NODE_NETWORK_NAME: broker-db-2
+    volumes:
+      - broker_db_2_data:/bitnami/postgresql
+
+  broker-db-3:
+    <<: *repmgr-node
+    container_name: broker-db-3
+    environment:
+      <<: *broker-db-env
+      REPMGR_NODE_NAME: broker-db-3
+      REPMGR_NODE_NETWORK_NAME: broker-db-3
+    volumes:
+      - broker_db_3_data:/bitnami/postgresql
+
+  broker-db-sync-replication:
+    <<: *sync-replication
+    container_name: broker-db-sync-replication
+    environment:
+      PGUSER: postgres
+      PGPASSWORD: ${BROKER_DB_PASSWORD:-postgres}
+      NODES: broker-db-1 broker-db-2 broker-db-3
+    depends_on:
+      broker-db-1:
+        condition: service_healthy
+      broker-db-2:
+        condition: service_healthy
+      broker-db-3:
+        condition: service_healthy
+
   # --- Zombie Service database: a MongoDB replica set (rs0) of 3 members, with automatic failover ---
   # The members elect a primary among themselves and elect a new one when it stops (electionTimeoutMillis 5 s).
   # Writes are acknowledged by a majority (w: majority), so an acknowledged write survives a failover.
@@ -654,7 +780,10 @@ services:
       JWT_SECRET: team-compose-development-secret-at-least-32-chars
       # Key for GET /logs/download; the download is off while it is empty (set it in .env, never commit it).
       LOGS_ADMIN_KEY: ${LOGS_ADMIN_KEY:-}
-      # Durable queues: undelivered events and dead letters survive restarts in this volume.
+      # Durable queues: undelivered events, dead letters and sagas are kept in the broker-db cluster and follow
+      # its primary across failovers (from the 5.0.0 image; the 4.0.0 image ignores it and uses QUEUE_STORE_PATH).
+      QUEUE_STORE_DSN: "host=broker-db-1,broker-db-2,broker-db-3 port=5432 dbname=broker_db user=${BROKER_DB_USER:-postgres} password=${BROKER_DB_PASSWORD:-postgres}"
+      DB_FAILOVER_WAIT_SECONDS: 45
       QUEUE_STORE_PATH: /app/data/messages.db
     volumes:
       - broker_data:/app/data
@@ -665,6 +794,10 @@ services:
     depends_on:
       discovery-service:
         condition: service_healthy
+      broker-db-1:
+        condition: service_healthy
+      broker-db-sync-replication:
+        condition: service_completed_successfully
     networks:
       - kahoots-network
 
@@ -991,11 +1124,18 @@ services:
       REDIS_VNODES: ${REDIS_VNODES:-160}
       CACHE_ENABLED: "true"
       CACHE_DEBUG_HEADERS: ${CACHE_DEBUG_HEADERS:-false}
+      # The Two-Phase Commit transaction log, in the gateway-db cluster; it follows the primary across failovers
+      # and answers 503 database_unavailable meanwhile (from the 5.0.0 image; the 4.0.0 image keeps it in SQLite).
+      TX_LOG_DSN: "host=gateway-db-1,gateway-db-2,gateway-db-3 port=5432 dbname=gateway_db user=${GATEWAY_DB_USER:-postgres} password=${GATEWAY_DB_PASSWORD:-postgres}"
     ports:
       - "8000:8000"
     depends_on:
       message-broker:
         condition: service_healthy
+      gateway-db-1:
+        condition: service_healthy
+      gateway-db-sync-replication:
+        condition: service_completed_successfully
     networks:
       - kahoots-network
 
@@ -1100,6 +1240,18 @@ volumes:
   resource_db_2_data:
     driver: local
   resource_db_3_data:
+    driver: local
+  gateway_db_1_data:
+    driver: local
+  gateway_db_2_data:
+    driver: local
+  gateway_db_3_data:
+    driver: local
+  broker_db_1_data:
+    driver: local
+  broker_db_2_data:
+    driver: local
+  broker_db_3_data:
     driver: local
   zombie_db_1_data:
     driver: local
