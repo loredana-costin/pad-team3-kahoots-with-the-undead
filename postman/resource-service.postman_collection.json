@@ -1878,6 +1878,148 @@
       ]
     },
     {
+      "name": "Replication and failover",
+      "description": "Needs the 5.0.0 images (with 4.0.0 the checks are skipped). Reads one replica's GET /status and GET /metrics through the broker's queue: the database nodes, which one is the primary, and the failovers seen. To see a failover, stop the primary (README, 'Database replication and failover') and run the folder again: another node is the primary and primaryChanges went up (on the replicas that noticed it).",
+      "item": [
+        {
+          "name": "Replication state (GET /status through the Message Broker)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for game-service, which the message broker requires (it calls this route in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'game-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "const replication = pm.response.json().replication;",
+                  "// The 4.0.0 image has no replication field; the checks need the 5.0.0 image.",
+                  "const check = replication ? pm.test : pm.test.skip;",
+                  "check('The database is replicated (replicated)', function () { pm.expect(replication.mode).to.eql('replicated'); });",
+                  "check('3 nodes, exactly one of them the primary', function () {",
+                  "  pm.expect(replication.members.map(m => m.host).sort()).to.eql([\"resource-db-1:5432\", \"resource-db-2:5432\", \"resource-db-3:5432\"]);",
+                  "  const primaries = replication.members.filter(m => m.role === 'primary');",
+                  "  pm.expect(primaries).to.have.lengthOf(1);",
+                  "  pm.expect(replication.primary).to.eql(primaries[0].host);",
+                  "});",
+                  "check('The other nodes are standbys, or unreachable while stopped (at least one standby)', function () {",
+                  "  const others = replication.members.filter(m => m.host !== replication.primary);",
+                  "  others.forEach(m => pm.expect(m.role).to.be.oneOf(['standby', 'unreachable']));",
+                  "  pm.expect(others.filter(m => m.role === 'standby')).to.not.be.empty;",
+                  "});",
+                  "check('primaryChanges counts the failovers', function () { pm.expect(replication.primaryChanges).to.be.a('number').and.at.least(0); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/status",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "status"
+              ]
+            },
+            "description": "The replication field of GET /status: the primary, each node's role, and the failovers this replica has seen."
+          },
+          "response": []
+        },
+        {
+          "name": "Replication metrics (GET /metrics through the Message Broker)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for game-service, which the message broker requires (it calls this route in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'game-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "const text = pm.response.text();",
+                  "const check = text.includes('kahoots_database_has_primary') ? pm.test : pm.test.skip;",
+                  "check('There is a primary to write to', function () { pm.expect(text).to.include('kahoots_database_has_primary 1'); });",
+                  "check('The failovers are counted', function () { pm.expect(text).to.match(/kahoots_database_failovers_total \\d+/); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/metrics",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "metrics"
+              ]
+            },
+            "description": "kahoots_database_has_primary (0 during a failover) and kahoots_database_failovers_total."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Monitoring",
       "description": "GET /metrics of resource-service (Prometheus text format), the endpoint Prometheus scrapes for the Grafana dashboard.",
       "item": [

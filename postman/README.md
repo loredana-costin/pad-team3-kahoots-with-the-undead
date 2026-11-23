@@ -119,6 +119,12 @@ inventory it creates. Each folder:
   after it a `HIT`;
 - deletes it and checks the `404`.
 
+The Zombie and Resource collections' **Replication and failover** folders read one replica's `GET /status` and
+`GET /metrics` through the broker's queue. They check that the database has 3 nodes, exactly one of them the primary,
+the others `secondary` (MongoDB) or `standby` (PostgreSQL), and that `kahoots_database_has_primary` is 1. They need the
+**5.0.0** images; with 4.0.0 the checks are skipped. To see a failover, stop the primary (see the main README,
+"Database replication and failover") and run the folder again: another node is the primary.
+
 The cache headers are only sent with `CACHE_DEBUG_HEADERS=true` in `.env`. Without them, the cache checks show as
 skipped and only the answers are checked.
 

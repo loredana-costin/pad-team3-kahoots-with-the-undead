@@ -2714,13 +2714,59 @@ docker compose start player-db-1
 
 The clusters start on new volumes (`player_db_{1,2,3}_data`, `game_db_{1,2,3}_data`). Data in the old `player_postgres_data` / `game_postgres_data` volumes is not carried over.
 
+### Database replication and failover (Zombie Service, Resource Service)
+
+Zombie Service and Resource Service also run on three database nodes each, with automatic failover (from the **5.0.0** images; the 4.0.0 images connect to node 1 only).
+
+| | Zombie Service | Resource Service |
+|---|---|---|
+| **Nodes** | `zombie-db-1..3`: a MongoDB replica set `rs0` (`mongo:8`), one primary and 2 secondaries | `resource-db-1..3`: repmgr (`bitnamilegacy/postgresql-repmgr:17.6.0`), one primary and 2 standbys, like `player-db` and `game-db` |
+| **Set up by** | `zombie-db-init`, once: `rs.initiate(...)` on first start (a no-op afterwards), then it waits for a primary | `resource-db-sync-replication`, once: synchronous replication on every node (the team's `x-sync-replication`) |
+| **Replication** | each secondary copies the primary's oplog | each standby streams the primary's WAL |
+| **No confirmed write lost** | writes are acknowledged by a majority of members (`w: "majority"`) | synchronous: a commit returns once a standby has it (`ANY 1 (*)`), and repmgr promotes the most advanced standby |
+| **Who elects the new primary** | the members themselves (Raft-like election, `electionTimeoutMillis` 5 s) | `repmgrd` on the standbys |
+| **How the service finds it** | `MONGO_URI` lists every member with `replicaSet=rs0`. The driver tracks the members and sends every operation to the primary, waiting for the election and retrying once | Prisma takes one host, so the service asks every node in `DATABASE_HOSTS` `pg_is_in_recovery()` every 2 s, and at once on a connection error, then switches to the promoted node |
+| **During the failover** | about 5 s; a request waits for the new primary, or gets `503 database_unavailable` with `Retry-After` after 6 s | about 10 to 13 s; a request gets `503 database_unavailable` with `Retry-After: 2` |
+| **ETL** | reads a secondary (`readPreference=secondaryPreferred`) | reads a standby (`target_session_attrs=standby`) |
+
+- **Retrying is safe.** Spends, gathers and refunds carry an `idempotencyKey`, the Two-Phase Commit calls a `txId` and the saga steps a `stepId`, so a request retried after the `503` is applied exactly once.
+- **Observing it.**
+  - Both services' `GET /status` report `replication`: the primary, each node's role and `primaryChanges`.
+  - Both export `kahoots_database_has_primary` and `kahoots_database_failovers_total`, and log the failover at `WARNING`.
+  - The Postman folders **Replication and failover** of the Zombie and Resource collections check them through the broker.
+- **Measured** with each service's own failover test (see their READMEs):
+  - **Zombie:** the primary was killed while a write was sent every 200 ms. The writes in flight waited about 5 s and then succeeded: 148 of 148 answered `201`.
+  - **Resource:** the primary was killed twice in a row, while a spend was sent every 200 ms. All 442 spends ended `200`, the requests refused with `503` during each promotion having been retried. The database had exactly 442 spend records: nothing lost, nothing applied twice.
+- **Host ports.** Only node 1 is published (`5437` Resource, `27017` Zombie), and it may be a standby or a secondary after a failover. From the host, connect to MongoDB with `mongodb://localhost:27017/zombie_db?directConnection=true`: the replica set's member names only resolve inside the Docker network.
+- **Data.** The new nodes start on new volumes (`resource_db_*_data`, `zombie_db_*_data`). Run `db-scripts/seed-all.sh` again after the first start. It finds Resource Service's primary by itself.
+
+See which node is the primary, and fail one over:
+```bash
+docker compose exec -T zombie-db-1 mongosh --quiet --eval 'rs.status().members.map((m) => m.name + " " + m.stateStr)'
+docker compose stop zombie-db-1        # with zombie-db-1 the primary: a secondary is elected within ~5 s
+docker compose start zombie-db-1       # it rejoins as a secondary
+
+for n in 1 2 3; do docker compose exec -T resource-db-$n sh -c 'PGPASSWORD=$POSTGRESQL_PASSWORD psql -U $POSTGRESQL_USERNAME -d resource_db -Atc "select pg_is_in_recovery()"'; done
+docker compose stop resource-db-1      # the primary at first start: a standby is promoted within ~15 s
+docker compose start resource-db-1     # it rejoins as a standby
+```
+
+#### MongoDB's election compared with repmgr
+
+| | MongoDB replica set | PostgreSQL + repmgr |
+|---|---|---|
+| Failover built into the database | yes: the members hold the election themselves, and a primary that loses the majority steps down | no: PostgreSQL only replicates, and `repmgrd` (an extra daemon) decides and runs `pg_promote()` |
+| Split brain | prevented by the majority: a minority can't elect a primary or acknowledge `w: majority` writes | relies on repmgr's voting among the standbys. The old primary must rejoin as a standby, which the image does on restart |
+| What the client does | the driver discovers the topology and follows the primary itself | the client must find the primary: Npgsql's `Target Session Attributes=primary` (Player and Game), or Resource Service's own check |
+| Time to fail over here | about 5 s | about 10 to 15 s (repmgr retries the old primary before promoting) |
+
 ### Data Warehouse and ETL
 
 `warehouse-db` (`postgres:17-alpine`, database `kahoots_dw`, host port `5440`) is a data warehouse: one place to ask questions that span the services, which the services themselves can't answer because each one only sees its own database. Nothing in the running system reads from it.
 
 `etl-service` (`etl/`, a small Python 3.13 job, image `andrei045/kahoots-etl:1.0.0`) fills it once at startup and then every `ETL_INTERVAL_SECONDS` (default `300`):
 
-- **Extract:** reads every service database, the eight PostgreSQL ones in read-only sessions (`default_transaction_read_only`) and `zombie-db` (MongoDB). Each source is a libpq connection string in the compose (`PLAYER_DB_DSN`, `GAME_DB_DSN`, ...), so a replicated database is listed by all its nodes: Player and Game Service's clusters are read from a standby (`target_session_attrs=standby`, or any node while no standby is up), so the load never touches the primary. A database that is down, or a table that is missing, is logged and skipped; the run goes on and is marked `partial`.
+- **Extract:** reads every service database, the eight PostgreSQL ones in read-only sessions (`default_transaction_read_only`) and Zombie Service's MongoDB replica set. Each source is a libpq connection string in the compose (`PLAYER_DB_DSN`, `GAME_DB_DSN`, ...), so a replicated database is listed by all its nodes: Player, Game and Resource Service's clusters are read from a standby (`target_session_attrs=standby`, or any node while no standby is up), and Zombie Service's replica set from a secondary (`readPreference=secondaryPreferred`), so the load never touches the primary. A database that is down, or a table that is missing, is logged and skipped; the run goes on and is marked `partial`.
 - **Transform:** renames the columns, turns the enum codes into names (`status 2` → `finished`, `action_type 1` → `scavenge`), derives date keys, durations, the player level and the exam `passed` flag, and splits each resource inventory into one row per resource. Emails and password hashes are never read: players are kept as id, username and nickname only.
 - **Load:** upserts (`INSERT ... ON CONFLICT DO UPDATE`) into the star schema below, so a rerun updates rows and never duplicates them. Zombie instances expire in MongoDB after 4 hours; the warehouse keeps them.
 
@@ -2786,8 +2832,8 @@ To run these services locally via Docker Compose, ensure the host machine meets 
    - `5434` — World PostgreSQL Database (`world-db`)
    - `5435` — Player PostgreSQL Database (`player-db-1`, node 1 of the cluster)
    - `5436` — Game PostgreSQL Database (`game-db-1`, node 1 of the cluster)
-   - `5437` — Resource PostgreSQL Database (`resource-db`)
-   - `27017` — Zombie MongoDB Database (`zombie-db`)
+   - `5437` — Resource PostgreSQL Database (`resource-db-1`, node 1 of the repmgr cluster; it may be a standby after a failover)
+   - `27017` — Zombie MongoDB Database (`zombie-db-1`, member 1 of the replica set; connect with `?directConnection=true` from the host)
    - `5003` — Base Service HTTP API
    - `5004` — Crafting Service HTTP API
    - `5438` — Base PostgreSQL Database (`base-db`)
@@ -2836,7 +2882,7 @@ From the repository root, start the stack in detached mode (Player, Game, Base, 
 ```bash
 docker compose up -d
 ```
-Docker Compose will automatically pull the images from DockerHub, initialize the database containers (`exam-db` on 5433, `world-db` on 5434, `player-db-1..3` (5435 for node 1), `game-db-1..3` (5436 for node 1), `resource-db` on 5437, `zombie-db` on 27017, `base-db` on 5438, `crafting-db` on 5439, `warehouse-db` on 5440), perform healthchecks, and launch `gateway-service`, `exam-service`, `world-service`, `player-service`, `game-service`, `zombie-service`, `resource-service`, `base-service` and `crafting-service`.
+Docker Compose will automatically pull the images from DockerHub, initialize the database containers (`exam-db` on 5433, `world-db` on 5434, `player-db-1..3` (5435 for node 1), `game-db-1..3` (5436 for node 1), `resource-db-1..3` (5437 for node 1), `zombie-db-1..3` (27017 for member 1), `base-db` on 5438, `crafting-db` on 5439, `warehouse-db` on 5440), perform healthchecks, and launch `gateway-service`, `exam-service`, `world-service`, `player-service`, `game-service`, `zombie-service`, `resource-service`, `base-service` and `crafting-service`.
 
 Each replica of these six services registers itself with Discovery Service on startup and deregisters on shutdown; the Gateway looks them up there and sends requests to them in turn. To see the registered instances, or to scale a service while the stack runs:
 ```bash

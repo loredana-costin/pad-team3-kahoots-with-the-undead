@@ -49,8 +49,18 @@ expect_ok() {
 }
 
 psql_in() {
-    # The repmgr nodes (player-db-*, game-db-*) name their variables POSTGRESQL_*; the other databases POSTGRES_*.
+    # The repmgr nodes (player-db-*, game-db-*, resource-db-*) name their variables POSTGRESQL_*; the other databases POSTGRES_*.
     docker compose exec -T "$1" sh -c 'PGPASSWORD="${POSTGRESQL_PASSWORD:-}" psql -v ON_ERROR_STOP=1 -q -At -U "${POSTGRES_USER:-$POSTGRESQL_USERNAME}" -d "${POSTGRES_DB:-$POSTGRESQL_DATABASE}"'
+}
+
+# The node of a repmgr cluster that is the primary right now (after a failover it may not be node 1).
+primary_of() {
+    local node
+    for node in "$@"; do
+        if [[ "$(psql_in "$node" <<< 'SELECT pg_is_in_recovery()' 2>/dev/null)" == "f" ]]; then echo "$node"; return; fi
+    done
+    echo "error: no primary among $*" >&2
+    return 1
 }
 
 echo -n "Waiting for the Gateway at $GATEWAY_URL "
@@ -139,7 +149,8 @@ done
 # ---------------------------------------------------------------- Resource Service
 echo; echo "== Resource Service"
 docker compose exec -T resource-service node dist/scripts/seed.js
-psql_in resource-db <<SQL
+RESOURCE_PRIMARY=$(primary_of resource-db-1 resource-db-2 resource-db-3)
+psql_in "$RESOURCE_PRIMARY" <<SQL
 INSERT INTO inventories (player_id, resources)
 SELECT id, CASE role
     WHEN 'player'  THEN '{"wood":10,"metal":5,"food":8,"paper":4}'
