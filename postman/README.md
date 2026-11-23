@@ -109,6 +109,30 @@ long-running sagas, and also needs the **5.0.0** images or later. It starts them
 
 Each request that reads a saga's outcome waits 1.5 s first, as the saga runs in the broker after it was started.
 
+The Zombie and Resource collections' **Participant endpoints** folders call, directly, the endpoints that only the
+coordinators use: the Gateway (Two-Phase Commit) and the Message Broker (sagas). The Gateway refuses these endpoints,
+so the folders call them through the broker's queue (`{{brokerUrl}}/queues/{service}/...`) with a game-service token
+minted from `jwtSecret` (a folder-level pre-request script). They need the **5.0.0** images. Each folder runs on its
+own and can be run again: it spawns its zombies or creates its player, and uses ids made from a fresh `pRun`.
+
+- **Zombie Service** (38 requests):
+  - Two-Phase Commit `prepare` / `commit` / `abort` / `GET /api/tx/{txId}`: votes commit and abort (`zombie_busy`, `already_cured`, `not_a_tourist`), repeats (`already_prepared`, `already_committed`, `already_aborted`), `tx_mismatch`, `tx_committed`, `tx_aborted`, an abort remembered before its prepare (`aborted_before_prepare`), `tx_not_found` and `invalid_body`;
+  - the saga steps `cure` / `record-loot` and their compensations `uncure` / `return-loot`: repeats (`already_cured_by_step`, `already_recorded`, `nothing_to_undo`), a step refused after its compensation and a compensation that arrives before its step (`step_cancelled`), `already_cured`, `not_a_tourist`, `zombie_not_found` and `invalid_body`;
+  - `GET /status`.
+- **Resource Service** (30 requests):
+  - Two-Phase Commit holds: a held amount can't be spent (`402`), a prepare beyond the free balance votes abort with `missing`, commit deducts (`newBalance`), abort releases the hold and leaves the balance untouched, plus the same repeats and conflicts as Zombie;
+  - the refund as a saga compensation (`compensates`): credited back once (`refunded`, then `already_refunded`), `nothing_to_refund` for a spend that never happened, which then cancels it (`409 spend_cancelled`), `refund_mismatch`, and `invalid_body`;
+  - `GET /status`; the folder deletes its player at the end.
+
+| Variable | Set by | Used for |
+|---|---|---|
+| `brokerUrl` | the collection (`http://localhost:8600`) | the broker's queues, for the routes the Gateway refuses |
+| `jwtSecret` | the collection (the compose's `JWT_SECRET`) | minting the game-service token |
+| `serviceJwt` | each folder's pre-request script | the bearer token of the broker calls |
+| `pRun` | the first request of each Participant folder | unique transaction, step and idempotency ids for each run |
+| `pInfectedA`, `pInfectedB`, `pTourist` | the Zombie folder's spawn requests | the zombies the checks act on |
+| `pPlayer` | the Resource folder's first request | the player whose balance the checks hold, spend and refund |
+
 The Zombie and Resource collections' **Cache (Redis, sharded with consistent hashing)** folders check the Redis cache,
 and need the **5.0.0** images or later. The Zombie folder uses a zombie type it creates, and the Resource folder an
 inventory it creates. Each folder:
