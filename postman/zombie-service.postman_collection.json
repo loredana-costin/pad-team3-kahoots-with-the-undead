@@ -158,6 +158,22 @@
     {
       "key": "cacheNode",
       "value": ""
+    },
+    {
+      "key": "pRun",
+      "value": ""
+    },
+    {
+      "key": "pInfectedA",
+      "value": ""
+    },
+    {
+      "key": "pInfectedB",
+      "value": ""
+    },
+    {
+      "key": "pTourist",
+      "value": ""
     }
   ],
   "auth": {
@@ -3152,6 +3168,2147 @@
               }
             },
             "description": "Only the broker's saga coordinator calls the saga steps; a player can't cure a zombie without paying."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Participant endpoints (2PC and saga steps, through the Message Broker)",
+      "description": "Needs the 5.0.0 image. Calls the endpoints only the coordinators use, directly, through the broker's queue with a game-service token (the Gateway refuses them): the Two-Phase Commit participant (/api/tx/{txId}/prepare, /commit, /abort, GET /api/tx/{txId}) with its votes, repeats and conflicts, and the saga steps and compensations (/api/zombies/{id}/saga/cure, /uncure, /record-loot, /return-loot), including a compensation that arrives before its step. Then GET /status. Runs on its own: it spawns its zombies and uses fresh ids every run.",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Mint a service token for game-service, which the message broker requires (it calls this route in the system).",
+              "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+              "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+              "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+              "const now = Math.floor(Date.now() / 1000);",
+              "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+              "const payload = encode({ sub: 'game-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+              "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+              "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+            ]
+          }
+        }
+      ],
+      "item": [
+        {
+          "name": "Spawn 2 Infected Zombies for the participant checks",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// One run id for the transaction and step ids of this folder, so the folder can run again.",
+                  "pm.collectionVariables.set('pRun', String(Date.now()));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', function () { pm.response.to.have.status(201); });",
+                  "const zombies = pm.response.json().zombies;",
+                  "pm.test('Two infected zombies', function () { pm.expect(zombies).to.have.lengthOf(2); zombies.forEach(z => pm.expect(z.category).to.eql('infected')); });",
+                  "pm.collectionVariables.set('pInfectedA', zombies[0].instanceId);",
+                  "pm.collectionVariables.set('pInfectedB', zombies[1].instanceId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/zombies/spawn",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "zombies",
+                "spawn"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cycleId\": \"cyc_participant\",\n  \"worldZoneId\": \"zone_participant\",\n  \"spawnCount\": 2,\n  \"typeWeights\": {\n    \"infected\": 1\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Spawn a Tourist Zombie for the participant checks",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', function () { pm.response.to.have.status(201); });",
+                  "const z = pm.response.json().zombies[0];",
+                  "pm.test('A tourist zombie', function () { pm.expect(z.category).to.eql('tourist'); });",
+                  "pm.collectionVariables.set('pTourist', z.instanceId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/zombies/spawn",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "zombies",
+                "spawn"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cycleId\": \"cyc_participant\",\n  \"worldZoneId\": \"zone_participant\",\n  \"spawnCount\": 1,\n  \"typeWeights\": {\n    \"tourist\": 1\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC prepare a cure - votes commit",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('vote is commit', function () { pm.expect(pm.response.json().vote).to.eql(\"commit\"); });",
+                  "pm.test('state is prepared', function () { pm.expect(pm.response.json().state).to.eql(\"prepared\"); });",
+                  "pm.test('status is prepared', function () { pm.expect(pm.response.json().status).to.eql(\"prepared\"); });",
+                  "pm.test('The cure requirement and when the hold expires', function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.cureRequirement.resourceType).to.be.a('string');",
+                  "  pm.expect(body.cureRequirement.amount).to.be.above(0);",
+                  "  pm.expect(Date.parse(body.expiresAt)).to.be.above(Date.now());",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/tx/tx_pz_{{pRun}}_1/prepare",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "tx",
+                "tx_pz_{{pRun}}_1",
+                "prepare"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"cure\",\n  \"instanceId\": \"{{pInfectedA}}\",\n  \"playerId\": \"p_participant\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC prepare the same transaction again - the same vote",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('vote is commit', function () { pm.expect(pm.response.json().vote).to.eql(\"commit\"); });",
+                  "pm.test('status is already_prepared', function () { pm.expect(pm.response.json().status).to.eql(\"already_prepared\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/tx/tx_pz_{{pRun}}_1/prepare",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "tx",
+                "tx_pz_{{pRun}}_1",
+                "prepare"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"cure\",\n  \"instanceId\": \"{{pInfectedA}}\",\n  \"playerId\": \"p_participant\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC prepare the same txId for another zombie (409 tx_mismatch)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 409', function () { pm.response.to.have.status(409); });",
+                  "pm.test('error is tx_mismatch', function () { pm.expect(pm.response.json().error).to.eql('tx_mismatch'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/tx/tx_pz_{{pRun}}_1/prepare",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "tx",
+                "tx_pz_{{pRun}}_1",
+                "prepare"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"cure\",\n  \"instanceId\": \"{{pInfectedB}}\",\n  \"playerId\": \"p_participant\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC prepare another cure of the held zombie - votes abort (zombie_busy)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('vote is abort', function () { pm.expect(pm.response.json().vote).to.eql(\"abort\"); });",
+                  "pm.test('abortReason is zombie_busy', function () { pm.expect(pm.response.json().abortReason).to.eql(\"zombie_busy\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/tx/tx_pz_{{pRun}}_2/prepare",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "tx",
+                "tx_pz_{{pRun}}_2",
+                "prepare"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"cure\",\n  \"instanceId\": \"{{pInfectedA}}\",\n  \"playerId\": \"p_participant\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC commit the cure",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('state is committed', function () { pm.expect(pm.response.json().state).to.eql(\"committed\"); });",
+                  "pm.test('status is committed', function () { pm.expect(pm.response.json().status).to.eql(\"committed\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/tx/tx_pz_{{pRun}}_1/commit",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "tx",
+                "tx_pz_{{pRun}}_1",
+                "commit"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC commit again - already_committed",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('status is already_committed', function () { pm.expect(pm.response.json().status).to.eql(\"already_committed\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/tx/tx_pz_{{pRun}}_1/commit",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "tx",
+                "tx_pz_{{pRun}}_1",
+                "commit"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC abort a committed transaction (409 tx_committed)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 409', function () { pm.response.to.have.status(409); });",
+                  "pm.test('error is tx_committed', function () { pm.expect(pm.response.json().error).to.eql('tx_committed'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/tx/tx_pz_{{pRun}}_1/abort",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "tx",
+                "tx_pz_{{pRun}}_1",
+                "abort"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC read the transaction (GET /api/tx/{txId})",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Committed cure of that zombie, for that player', function () {",
+                  "  const tx = pm.response.json();",
+                  "  pm.expect(tx).to.include({ state: 'committed', action: 'cure', instanceId: pm.collectionVariables.get('pInfectedA'), playerId: 'p_participant' });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/tx/tx_pz_{{pRun}}_1",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "tx",
+                "tx_pz_{{pRun}}_1"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC prepare a cure of the cured zombie - votes abort (already_cured)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('vote is abort', function () { pm.expect(pm.response.json().vote).to.eql(\"abort\"); });",
+                  "pm.test('state is aborted', function () { pm.expect(pm.response.json().state).to.eql(\"aborted\"); });",
+                  "pm.test('abortReason is already_cured', function () { pm.expect(pm.response.json().abortReason).to.eql(\"already_cured\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/tx/tx_pz_{{pRun}}_3/prepare",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "tx",
+                "tx_pz_{{pRun}}_3",
+                "prepare"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"cure\",\n  \"instanceId\": \"{{pInfectedA}}\",\n  \"playerId\": \"p_participant\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC commit a transaction that voted abort (409 tx_aborted)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 409', function () { pm.response.to.have.status(409); });",
+                  "pm.test('error is tx_aborted', function () { pm.expect(pm.response.json().error).to.eql('tx_aborted'); });",
+                  "pm.test('abortReason is already_cured', function () { pm.expect(pm.response.json().abortReason).to.eql(\"already_cured\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/tx/tx_pz_{{pRun}}_3/commit",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "tx",
+                "tx_pz_{{pRun}}_3",
+                "commit"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC prepare a steal by an Infected Zombie - votes abort (not_a_tourist)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('vote is abort', function () { pm.expect(pm.response.json().vote).to.eql(\"abort\"); });",
+                  "pm.test('abortReason is not_a_tourist', function () { pm.expect(pm.response.json().abortReason).to.eql(\"not_a_tourist\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/tx/tx_pz_{{pRun}}_4/prepare",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "tx",
+                "tx_pz_{{pRun}}_4",
+                "prepare"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"steal\",\n  \"instanceId\": \"{{pInfectedB}}\",\n  \"playerId\": \"p_participant\",\n  \"loot\": [\n    {\n      \"resourceType\": \"food\",\n      \"amount\": 3\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC prepare a Tourist Zombie's steal - votes commit",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('vote is commit', function () { pm.expect(pm.response.json().vote).to.eql(\"commit\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/tx/tx_pz_{{pRun}}_5/prepare",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "tx",
+                "tx_pz_{{pRun}}_5",
+                "prepare"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"steal\",\n  \"instanceId\": \"{{pTourist}}\",\n  \"playerId\": \"p_participant\",\n  \"loot\": [\n    {\n      \"resourceType\": \"food\",\n      \"amount\": 3\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC abort the steal (the coordinator gives up)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('state is aborted', function () { pm.expect(pm.response.json().state).to.eql(\"aborted\"); });",
+                  "pm.test('status is aborted', function () { pm.expect(pm.response.json().status).to.eql(\"aborted\"); });",
+                  "pm.test('abortReason is coordinator', function () { pm.expect(pm.response.json().abortReason).to.eql(\"coordinator\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/tx/tx_pz_{{pRun}}_5/abort",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "tx",
+                "tx_pz_{{pRun}}_5",
+                "abort"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC abort again - already_aborted",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('status is already_aborted', function () { pm.expect(pm.response.json().status).to.eql(\"already_aborted\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/tx/tx_pz_{{pRun}}_5/abort",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "tx",
+                "tx_pz_{{pRun}}_5",
+                "abort"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC commit an aborted transaction (409 tx_aborted)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 409', function () { pm.response.to.have.status(409); });",
+                  "pm.test('error is tx_aborted', function () { pm.expect(pm.response.json().error).to.eql('tx_aborted'); });",
+                  "pm.test('abortReason is coordinator', function () { pm.expect(pm.response.json().abortReason).to.eql(\"coordinator\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/tx/tx_pz_{{pRun}}_5/commit",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "tx",
+                "tx_pz_{{pRun}}_5",
+                "commit"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC abort a transaction never prepared here - remembered",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('state is aborted', function () { pm.expect(pm.response.json().state).to.eql(\"aborted\"); });",
+                  "pm.test('abortReason is aborted_before_prepare', function () { pm.expect(pm.response.json().abortReason).to.eql(\"aborted_before_prepare\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/tx/tx_pz_{{pRun}}_6/abort",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "tx",
+                "tx_pz_{{pRun}}_6",
+                "abort"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC late prepare after that abort - votes abort",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('vote is abort', function () { pm.expect(pm.response.json().vote).to.eql(\"abort\"); });",
+                  "pm.test('abortReason is aborted_before_prepare', function () { pm.expect(pm.response.json().abortReason).to.eql(\"aborted_before_prepare\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/tx/tx_pz_{{pRun}}_6/prepare",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "tx",
+                "tx_pz_{{pRun}}_6",
+                "prepare"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"steal\",\n  \"instanceId\": \"{{pTourist}}\",\n  \"playerId\": \"p_participant\",\n  \"loot\": [\n    {\n      \"resourceType\": \"food\",\n      \"amount\": 3\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC commit an unknown transaction (404 tx_not_found)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404', function () { pm.response.to.have.status(404); });",
+                  "pm.test('error is tx_not_found', function () { pm.expect(pm.response.json().error).to.eql('tx_not_found'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/tx/tx_does_not_exist_{{pRun}}/commit",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "tx",
+                "tx_does_not_exist_{{pRun}}",
+                "commit"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2PC prepare a cure with loot (400 invalid_body)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', function () { pm.response.to.have.status(400); });",
+                  "pm.test('error is invalid_body', function () { pm.expect(pm.response.json().error).to.eql('invalid_body'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/tx/tx_pz_{{pRun}}_7/prepare",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "tx",
+                "tx_pz_{{pRun}}_7",
+                "prepare"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"cure\",\n  \"instanceId\": \"{{pInfectedB}}\",\n  \"playerId\": \"p_participant\",\n  \"loot\": [\n    {\n      \"resourceType\": \"food\",\n      \"amount\": 3\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saga step cure",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('status is cured', function () { pm.expect(pm.response.json().status).to.eql(\"cured\"); });",
+                  "pm.test('The cure requirement, for the broker\\'s next step', function () { pm.expect(pm.response.json().cureRequirement.amount).to.be.above(0); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/zombies/{{pInfectedB}}/saga/cure",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "zombies",
+                "{{pInfectedB}}",
+                "saga",
+                "cure"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stepId\": \"saga_pz_{{pRun}}_1:cure\",\n  \"playerId\": \"p_participant\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saga step cure again - already_cured_by_step",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('status is already_cured_by_step', function () { pm.expect(pm.response.json().status).to.eql(\"already_cured_by_step\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/zombies/{{pInfectedB}}/saga/cure",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "zombies",
+                "{{pInfectedB}}",
+                "saga",
+                "cure"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stepId\": \"saga_pz_{{pRun}}_1:cure\",\n  \"playerId\": \"p_participant\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saga compensation uncure",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('status is uncured', function () { pm.expect(pm.response.json().status).to.eql(\"uncured\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/zombies/{{pInfectedB}}/saga/uncure",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "zombies",
+                "{{pInfectedB}}",
+                "saga",
+                "uncure"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stepId\": \"saga_pz_{{pRun}}_1:cure\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saga compensation uncure again - nothing_to_undo",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('status is nothing_to_undo', function () { pm.expect(pm.response.json().status).to.eql(\"nothing_to_undo\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/zombies/{{pInfectedB}}/saga/uncure",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "zombies",
+                "{{pInfectedB}}",
+                "saga",
+                "uncure"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stepId\": \"saga_pz_{{pRun}}_1:cure\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saga step cure after its compensation (409 step_cancelled)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 409', function () { pm.response.to.have.status(409); });",
+                  "pm.test('error is step_cancelled', function () { pm.expect(pm.response.json().error).to.eql('step_cancelled'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/zombies/{{pInfectedB}}/saga/cure",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "zombies",
+                "{{pInfectedB}}",
+                "saga",
+                "cure"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stepId\": \"saga_pz_{{pRun}}_1:cure\",\n  \"playerId\": \"p_participant\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saga compensation that arrives before its step - nothing_to_undo",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('status is nothing_to_undo', function () { pm.expect(pm.response.json().status).to.eql(\"nothing_to_undo\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/zombies/{{pInfectedB}}/saga/uncure",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "zombies",
+                "{{pInfectedB}}",
+                "saga",
+                "uncure"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stepId\": \"saga_pz_{{pRun}}_2:cure\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saga step arriving after its compensation (409 step_cancelled)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 409', function () { pm.response.to.have.status(409); });",
+                  "pm.test('error is step_cancelled', function () { pm.expect(pm.response.json().error).to.eql('step_cancelled'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/zombies/{{pInfectedB}}/saga/cure",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "zombies",
+                "{{pInfectedB}}",
+                "saga",
+                "cure"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stepId\": \"saga_pz_{{pRun}}_2:cure\",\n  \"playerId\": \"p_participant\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saga step cure of a cured zombie (409 already_cured)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 409', function () { pm.response.to.have.status(409); });",
+                  "pm.test('error is already_cured', function () { pm.expect(pm.response.json().error).to.eql('already_cured'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/zombies/{{pInfectedA}}/saga/cure",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "zombies",
+                "{{pInfectedA}}",
+                "saga",
+                "cure"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stepId\": \"saga_pz_{{pRun}}_3:cure\",\n  \"playerId\": \"p_participant\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saga step record-loot",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('status is recorded', function () { pm.expect(pm.response.json().status).to.eql(\"recorded\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/zombies/{{pTourist}}/saga/record-loot",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "zombies",
+                "{{pTourist}}",
+                "saga",
+                "record-loot"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stepId\": \"saga_pz_{{pRun}}_4:record-loot\",\n  \"playerId\": \"p_participant\",\n  \"loot\": [\n    {\n      \"resourceType\": \"food\",\n      \"amount\": 3\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saga step record-loot again - already_recorded",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('status is already_recorded', function () { pm.expect(pm.response.json().status).to.eql(\"already_recorded\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/zombies/{{pTourist}}/saga/record-loot",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "zombies",
+                "{{pTourist}}",
+                "saga",
+                "record-loot"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stepId\": \"saga_pz_{{pRun}}_4:record-loot\",\n  \"playerId\": \"p_participant\",\n  \"loot\": [\n    {\n      \"resourceType\": \"food\",\n      \"amount\": 3\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saga compensation return-loot",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('status is returned', function () { pm.expect(pm.response.json().status).to.eql(\"returned\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/zombies/{{pTourist}}/saga/return-loot",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "zombies",
+                "{{pTourist}}",
+                "saga",
+                "return-loot"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stepId\": \"saga_pz_{{pRun}}_4:record-loot\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saga compensation return-loot again - nothing_to_undo",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('status is nothing_to_undo', function () { pm.expect(pm.response.json().status).to.eql(\"nothing_to_undo\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/zombies/{{pTourist}}/saga/return-loot",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "zombies",
+                "{{pTourist}}",
+                "saga",
+                "return-loot"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stepId\": \"saga_pz_{{pRun}}_4:record-loot\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saga step record-loot after its compensation (409 step_cancelled)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 409', function () { pm.response.to.have.status(409); });",
+                  "pm.test('error is step_cancelled', function () { pm.expect(pm.response.json().error).to.eql('step_cancelled'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/zombies/{{pTourist}}/saga/record-loot",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "zombies",
+                "{{pTourist}}",
+                "saga",
+                "record-loot"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stepId\": \"saga_pz_{{pRun}}_4:record-loot\",\n  \"playerId\": \"p_participant\",\n  \"loot\": [\n    {\n      \"resourceType\": \"food\",\n      \"amount\": 3\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saga step record-loot by an Infected Zombie (409 not_a_tourist)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 409', function () { pm.response.to.have.status(409); });",
+                  "pm.test('error is not_a_tourist', function () { pm.expect(pm.response.json().error).to.eql('not_a_tourist'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/zombies/{{pInfectedB}}/saga/record-loot",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "zombies",
+                "{{pInfectedB}}",
+                "saga",
+                "record-loot"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stepId\": \"saga_pz_{{pRun}}_5:record-loot\",\n  \"playerId\": \"p_participant\",\n  \"loot\": [\n    {\n      \"resourceType\": \"food\",\n      \"amount\": 3\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saga step for an unknown zombie (404 zombie_not_found)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404', function () { pm.response.to.have.status(404); });",
+                  "pm.test('error is zombie_not_found', function () { pm.expect(pm.response.json().error).to.eql('zombie_not_found'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/zombies/does_not_exist/saga/cure",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "zombies",
+                "does_not_exist",
+                "saga",
+                "cure"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stepId\": \"saga_pz_{{pRun}}_6:cure\",\n  \"playerId\": \"p_participant\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saga step without a stepId (400 invalid_body)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', function () { pm.response.to.have.status(400); });",
+                  "pm.test('error is invalid_body', function () { pm.expect(pm.response.json().error).to.eql('invalid_body'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/zombies/{{pInfectedB}}/saga/cure",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "zombies",
+                "{{pInfectedB}}",
+                "saga",
+                "cure"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"playerId\": \"p_participant\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Status (GET /status through the Message Broker)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test('The instance is ok and names its service and version', function () {",
+                  "  pm.expect(body.status).to.eql('ok');",
+                  "  pm.expect(body.service).to.eql('zombie-service');",
+                  "  pm.expect(body.version).to.match(/^\\d+\\.\\d+\\.\\d+$/);",
+                  "  pm.expect(body.uptimeSeconds).to.be.a('number');",
+                  "});",
+                  "pm.test('MongoDB answers', function () { pm.expect(body.dependencies.database).to.eql('ok'); });",
+                  "// cache and replication come with the 5.0.0 image.",
+                  "(body.cache ? pm.test : pm.test.skip)('The cache state (enabled, and its nodes when enabled)', function () {",
+                  "  pm.expect(body.cache.enabled).to.be.a('boolean');",
+                  "  if (body.cache.enabled) pm.expect(body.cache.nodes).to.be.an('array').that.is.not.empty;",
+                  "});",
+                  "(body.replication ? pm.test : pm.test.skip)('The replication state (the primary and each node)', function () {",
+                  "  pm.expect(body.replication.primary).to.be.a('string');",
+                  "  pm.expect(body.replication.primaryChanges).to.be.a('number');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/status",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "status"
+              ]
+            },
+            "description": "What a replica reports about itself: version, uptime, whether its database answers, and (from 5.0.0) the cache and the replication state. Not exposed by the Gateway, so the collection reads one replica through the broker's queue."
           },
           "response": []
         }
