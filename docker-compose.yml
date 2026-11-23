@@ -240,6 +240,55 @@ services:
     networks:
       - kahoots-network
 
+  # --- Data Warehouse: a star schema loaded by etl-service from every database above ---
+  # Published on 5440 so it can be queried in the demo; nothing in the system reads from it.
+  warehouse-db:
+    image: postgres:17-alpine
+    container_name: warehouse-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: kahoots_dw
+    ports:
+      - "5440:5432"
+    volumes:
+      - warehouse_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d kahoots_dw"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kahoots-network
+
+  # Extracts every service database (read-only sessions), transforms and upserts into warehouse-db, once at
+  # startup and then every ETL_INTERVAL_SECONDS. A source that is down is skipped and the run marked partial.
+  # The *_DSN values are libpq connection strings, so a cluster can be listed as host=a,b,c with target_session_attrs.
+  # One pass by hand: docker compose run --rm etl-service python etl.py --once
+  etl-service:
+    build: ./etl
+    image: andrei045/kahoots-etl:1.0.0
+    container_name: etl-service
+    restart: unless-stopped
+    environment:
+      ETL_INTERVAL_SECONDS: ${ETL_INTERVAL_SECONDS:-300}
+      WAREHOUSE_DSN: "host=warehouse-db port=5432 dbname=kahoots_dw user=postgres password=postgres"
+      # Player and Game are read from a standby of their cluster when one is up, so the load never touches the primary.
+      PLAYER_DB_DSN: "host=player-db-1,player-db-2,player-db-3 port=5432 dbname=player_db user=postgres password=postgres target_session_attrs=standby"
+      GAME_DB_DSN: "host=game-db-1,game-db-2,game-db-3 port=5432 dbname=game_db user=postgres password=postgres target_session_attrs=standby"
+      EXAM_DB_DSN: "host=exam-db port=5432 dbname=exam_db user=postgres password=postgres"
+      WORLD_DB_DSN: "host=world-db port=5432 dbname=world_db user=postgres password=postgres"
+      RESOURCE_DB_DSN: "host=resource-db port=5432 dbname=resource_db user=${RESOURCE_DB_USER:-postgres} password=${RESOURCE_DB_PASSWORD:-postgres}"
+      BASE_DB_DSN: "host=base-db port=5432 dbname=base_db user=${BASE_DB_USER:-postgres} password=${BASE_DB_PASSWORD:-postgres}"
+      CRAFTING_DB_DSN: "host=crafting-db port=5432 dbname=crafting_db user=${CRAFTING_DB_USER:-postgres} password=${CRAFTING_DB_PASSWORD:-postgres}"
+      ZOMBIE_DB_URI: "mongodb://zombie-db:27017/zombie_db"
+    depends_on:
+      warehouse-db:
+        condition: service_healthy
+    networks:
+      - kahoots-network
+
   # --- Shared Cache (3 standalone nodes, internal only, no persistence; sharded by the services) ---
   redis-cache-1:
     <<: *redis-cache-common
@@ -714,6 +763,8 @@ volumes:
   resource_postgres_data:
     driver: local
   zombie_mongo_data:
+    driver: local
+  warehouse_postgres_data:
     driver: local
   prometheus_data:
     driver: local

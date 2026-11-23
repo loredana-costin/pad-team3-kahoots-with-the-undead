@@ -2584,6 +2584,62 @@ docker compose start player-db-1
 
 The clusters start on new volumes (`player_db_{1,2,3}_data`, `game_db_{1,2,3}_data`). Data in the old `player_postgres_data` / `game_postgres_data` volumes is not carried over.
 
+### Data Warehouse and ETL
+
+`warehouse-db` (`postgres:17-alpine`, database `kahoots_dw`, host port `5440`) is a data warehouse: one place to ask questions that span the services, which the services themselves can't answer because each one only sees its own database. Nothing in the running system reads from it.
+
+`etl-service` (`etl/`, a small Python 3.13 job, image `andrei045/kahoots-etl:1.0.0`) fills it once at startup and then every `ETL_INTERVAL_SECONDS` (default `300`):
+
+- **Extract:** reads every service database, the eight PostgreSQL ones in read-only sessions (`default_transaction_read_only`) and `zombie-db` (MongoDB). Each source is a libpq connection string in the compose (`PLAYER_DB_DSN`, `GAME_DB_DSN`, ...), so a replicated database is listed by all its nodes: Player and Game Service's clusters are read from a standby (`target_session_attrs=standby`, or any node while no standby is up), so the load never touches the primary. A database that is down, or a table that is missing, is logged and skipped; the run goes on and is marked `partial`.
+- **Transform:** renames the columns, turns the enum codes into names (`status 2` → `finished`, `action_type 1` → `scavenge`), derives date keys, durations, the player level and the exam `passed` flag, and splits each resource inventory into one row per resource. Emails and password hashes are never read: players are kept as id, username and nickname only.
+- **Load:** upserts (`INSERT ... ON CONFLICT DO UPDATE`) into the star schema below, so a rerun updates rows and never duplicates them. Zombie instances expire in MongoDB after 4 hours; the warehouse keeps them.
+
+Every run is recorded in `etl_runs` (start, end, `ok` / `partial`, rows loaded per table, errors), and logged as one JSON line per event on stdout, so the runs show up in Grafana's Loki logs under `service="etl-service"`.
+
+| Star schema | Tables |
+|---|---|
+| Dimensions | `dim_date` (calendar 2025-2030, `date_key` = `YYYYMMDD`), `dim_player`, `dim_exam`, `dim_room` (with its zone), `dim_resource_type`, `dim_zombie_type`, `dim_recipe` |
+| Facts | `fact_game_session`, `fact_player_action`, `fact_trade`, `fact_exam_attempt`, `fact_resource_transaction`, `fact_resource_balance` (daily snapshot), `fact_craft`, `fact_base_snapshot` (daily snapshot), `fact_zombie_instance` |
+| Bookkeeping | `etl_runs` |
+
+The schema is in `etl/schema.sql` and is applied by the job itself. To run one pass by hand and look at the result:
+
+```bash
+docker compose run --rm etl-service python etl.py --once
+docker compose exec warehouse-db psql -U postgres -d kahoots_dw -c "SELECT run_id, status, rows_loaded FROM etl_runs ORDER BY run_id DESC LIMIT 3"
+```
+
+Example questions (connect with `psql -h localhost -p 5440 -U postgres kahoots_dw`, password `postgres`):
+
+```sql
+-- Resources gathered per player per day
+SELECT d.date, p.username, sum(t.amount_gathered) AS gathered
+FROM fact_resource_transaction t
+JOIN dim_date d ON d.date_key = t.date_key
+JOIN dim_player p ON p.player_id = t.player_id
+WHERE t.operation = 'gather'
+GROUP BY d.date, p.username
+ORDER BY d.date DESC, gathered DESC;
+
+-- Exam pass rate per course category
+SELECT course_category, count(*) AS attempts,
+       round(100.0 * count(*) FILTER (WHERE passed) / count(*), 1) AS pass_rate_pct,
+       round(avg(grade), 1) AS avg_grade
+FROM fact_exam_attempt
+WHERE status <> 'in_progress'
+GROUP BY course_category
+ORDER BY pass_rate_pct DESC;
+
+-- Player actions per type and weekday
+SELECT d.weekday, a.action_type, count(*) AS actions, round(avg(a.duration_seconds)) AS avg_seconds
+FROM fact_player_action a
+JOIN dim_date d ON d.date_key = a.date_key
+GROUP BY d.weekday, a.action_type
+ORDER BY actions DESC;
+```
+
+The transform functions have a self-check that needs no database: `cd etl && pip install -r requirements.txt && python test_transform.py`.
+
 ---
 
 ### System Requirements & Prerequisites
@@ -2606,6 +2662,7 @@ To run these services locally via Docker Compose, ensure the host machine meets 
    - `5004` — Crafting Service HTTP API
    - `5438` — Base PostgreSQL Database (`base-db`)
    - `5439` — Crafting PostgreSQL Database (`crafting-db`)
+   - `5440` — Data Warehouse PostgreSQL Database (`warehouse-db`, `kahoots_dw`)
 3. **Resource Allocations**:
    - At least 3 GB of RAM available for Docker (thirty containers, including one MongoDB instance)
    - 3 GB free disk space for Docker images and the PostgreSQL/MongoDB data volumes
@@ -2649,7 +2706,7 @@ From the repository root, start the stack in detached mode (Player, Game, Base, 
 ```bash
 docker compose up -d
 ```
-Docker Compose will automatically pull the images from DockerHub, initialize the database containers (`exam-db` on 5433, `world-db` on 5434, `player-db-1..3` (5435 for node 1), `game-db-1..3` (5436 for node 1), `resource-db` on 5437, `zombie-db` on 27017, `base-db` on 5438, `crafting-db` on 5439), perform healthchecks, and launch `gateway-service`, `exam-service`, `world-service`, `player-service`, `game-service`, `zombie-service`, `resource-service`, `base-service` and `crafting-service`.
+Docker Compose will automatically pull the images from DockerHub, initialize the database containers (`exam-db` on 5433, `world-db` on 5434, `player-db-1..3` (5435 for node 1), `game-db-1..3` (5436 for node 1), `resource-db` on 5437, `zombie-db` on 27017, `base-db` on 5438, `crafting-db` on 5439, `warehouse-db` on 5440), perform healthchecks, and launch `gateway-service`, `exam-service`, `world-service`, `player-service`, `game-service`, `zombie-service`, `resource-service`, `base-service` and `crafting-service`.
 
 Each replica of these six services registers itself with Discovery Service on startup and deregisters on shutdown; the Gateway looks them up there and sends requests to them in turn. To see the registered instances, or to scale a service while the stack runs:
 ```bash
