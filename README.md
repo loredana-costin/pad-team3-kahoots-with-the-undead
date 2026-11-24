@@ -1153,7 +1153,7 @@ Owns the persistent definitions and short-lived instance state of zombies.
 
 ### **DockerHub Image**
 - **Repository:** [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service)
-- **Image Tag:** `costinloredana/zombie-service:4.0.0`
+- **Image Tag:** `costinloredana/zombie-service:5.0.0`
 - **Default Port:** `Internal only (4001), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
@@ -1162,7 +1162,7 @@ None. Zombie Service never calls other services. Game Service coordinates what f
 
 ### **Exposed API Endpoints**
 
-Every error response has the shape `{ "error": "<code>", "message": "<reason>" }`.
+Every error response has the shape `{ "error": "<code>", "message": "<reason>" }`. From 5.0.0, any endpoint that reaches the database answers `503` with `Retry-After: 2` and `{ "error": "database_unavailable", "message": "The database is failing over to a new primary. Retry in a few seconds." }` while no node is the primary (see [Database replication and failover](#database-replication-and-failover-zombie-service-resource-service)).
 
 **`GET /health`** *(Consumed by Docker healthcheck)*
 
@@ -1170,6 +1170,57 @@ Response
 ```json
 { "status": "ok", "service": "zombie-service" }
 ```
+
+**`GET /status`** *(Consumed by development team)*
+
+Describes the running instance. Unlike `GET /health`, it also checks that MongoDB answers (a `ping` command, up to 2 s), and from 5.0.0 it reports the replicated database and the cache.
+
+Response — 200 OK
+```json
+{
+  "status": "ok",
+  "service": "zombie-service",
+  "version": "5.0.0",
+  "startedAt": "2026-11-23T09:12:03.418Z",
+  "uptimeSeconds": 42.317,
+  "timestamp": "2026-11-23T09:12:45.735Z",
+  "dependencies": { "database": "ok" },
+  "replication": {
+    "mode": "replicaSet",
+    "replicaSet": "rs0",
+    "primary": "zombie-db-1:27017",
+    "members": [
+      { "host": "zombie-db-1:27017", "role": "primary" },
+      { "host": "zombie-db-2:27017", "role": "secondary" },
+      { "host": "zombie-db-3:27017", "role": "secondary" }
+    ],
+    "primaryChanges": 0
+  },
+  "cache": {
+    "enabled": true,
+    "vnodes": 160,
+    "ttlSeconds": 300,
+    "nodes": [
+      { "node": "redis-cache-1:6379", "up": true },
+      { "node": "redis-cache-2:6379", "up": true },
+      { "node": "redis-cache-3:6379", "up": true }
+    ]
+  }
+}
+```
+
+503 Service Unavailable — the same body with `"status": "degraded"` and `"dependencies": { "database": "unreachable" }` when MongoDB does not answer within 2 s.
+
+| Field | Description |
+|---|---|
+| `version` | The `package.json` version, the same one the DockerHub image is tagged with |
+| `dependencies.database` | `ok` or `unreachable` |
+| `replication.mode` | `replicaSet`, or `standalone` for a single `mongod` |
+| `replication.replicaSet` | The replica set's name (`rs0`) |
+| `replication.primary` | The node the service writes to; `null` while a failover is in progress |
+| `replication.members` | Each node's `role`: `primary`, `secondary` or `unreachable` |
+| `replication.primaryChanges` | The failovers this instance has followed since it started |
+| `cache` | `{ "enabled": false }`, or the virtual nodes per Redis node, the TTL and each node's state (`up: false` while it is skipped after a failure). The cache never makes the status `degraded` |
 
 **`GET /metrics`** *(Consumed by Prometheus)*
 
@@ -1425,7 +1476,7 @@ Owns the university's resource economy independently from the physical map.
 
 ### **DockerHub Image**
 - **Repository:** [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service)
-- **Image Tag:** `costinloredana/resource-service:4.0.0`
+- **Image Tag:** `costinloredana/resource-service:5.0.0`
 - **Default Port:** `Internal only (4002), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
@@ -1434,7 +1485,7 @@ None. Resource Service never calls other services. Node state is stored in its o
 
 ### **Exposed API Endpoints**
 
-Errors use the shape `{ "error": "<code>", "message": "<reason>" }` (`invalid_body` / `invalid_resource_type` for 400, `not_found` for 404, `resource_type_exists` / `inventory_exists` for 409). The only exception is the 402 from `/api/spend`, shown below.
+Errors use the shape `{ "error": "<code>", "message": "<reason>" }` (`invalid_body` / `invalid_resource_type` for 400, `not_found` for 404, `resource_type_exists` / `inventory_exists` for 409). The only exception is the 402 from `/api/spend`, shown below. From 5.0.0, any endpoint that reaches the database answers `503` with `Retry-After: 2` and `{ "error": "database_unavailable", "message": "The database is failing over to a new primary. Retry in a few seconds." }` while no node is the primary (see [Database replication and failover](#database-replication-and-failover-zombie-service-resource-service)).
 
 **`GET /health`** *(Consumed by Docker healthcheck)*
 
@@ -1442,6 +1493,57 @@ Response
 ```json
 { "status": "ok", "service": "resource-service" }
 ```
+
+**`GET /status`** *(Consumed by development team)*
+
+Describes the running instance. Unlike `GET /health`, it also checks that PostgreSQL answers (`SELECT 1`, up to 2 s), and from 5.0.0 it reports the replicated database and the cache.
+
+Response — 200 OK
+```json
+{
+  "status": "ok",
+  "service": "resource-service",
+  "version": "5.0.0",
+  "startedAt": "2026-11-23T09:12:03.418Z",
+  "uptimeSeconds": 42.317,
+  "timestamp": "2026-11-23T09:12:45.735Z",
+  "dependencies": { "database": "ok" },
+  "replication": {
+    "mode": "replicated",
+    "primary": "resource-db-1:5432",
+    "members": [
+      { "host": "resource-db-1:5432", "role": "primary" },
+      { "host": "resource-db-2:5432", "role": "standby" },
+      { "host": "resource-db-3:5432", "role": "standby" }
+    ],
+    "primaryChanges": 0,
+    "lastCheckedAt": "2026-11-23T09:12:44.102Z"
+  },
+  "cache": {
+    "enabled": true,
+    "vnodes": 160,
+    "ttlSeconds": 300,
+    "nodes": [
+      { "node": "redis-cache-1:6379", "up": true },
+      { "node": "redis-cache-2:6379", "up": true },
+      { "node": "redis-cache-3:6379", "up": true }
+    ]
+  }
+}
+```
+
+503 Service Unavailable — the same body with `"status": "degraded"` and `"dependencies": { "database": "unreachable" }` when PostgreSQL does not answer within 2 s.
+
+| Field | Description |
+|---|---|
+| `version` | The `package.json` version, the same one the DockerHub image is tagged with |
+| `dependencies.database` | `ok` or `unreachable` |
+| `replication.mode` | `replicated` with `DATABASE_HOSTS`, or `single` for `DATABASE_URL`'s host only |
+| `replication.lastCheckedAt` | When the nodes were last checked (every 2 s, and at once after a connection error) |
+| `replication.primary` | The node the service writes to; `null` while a failover is in progress |
+| `replication.members` | Each node's `role`: `primary`, `standby` or `unreachable` |
+| `replication.primaryChanges` | The failovers this instance has followed since it started |
+| `cache` | `{ "enabled": false }`, or the virtual nodes per Redis node, the TTL and each node's state (`up: false` while it is skipped after a failure). The cache never makes the status `degraded` |
 
 **`GET /metrics`** *(Consumed by Prometheus)*
 
@@ -1669,10 +1771,11 @@ Responsible for the player's survival base, initially represented by the FAF Cab
 - Unlocked storage capacity and homeroom decorations.
 - Kiki's interaction state and reward outcomes.
 - The transaction ledger keyed on the caller's idempotency key.
+- The Two-Phase Commit log of the upgrades it coordinates (from 5.0.0).
 
 ### **DockerHub Image**
 - **Repository:** [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service)
-- **Image Tag:** `cristi150404/base-service:4.0.0`
+- **Image Tag:** `cristi150404/base-service:5.0.0`
 - **Default Port:** `Internal only (5003), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
@@ -1683,8 +1786,16 @@ Responsible for the player's survival base, initially represented by the FAF Cab
 - `POST /api/spend` *(Resource Service)* — deducts resources before applying a barricade, facility upgrade, decoration, or Kiki feeding.
 - `POST /api/refund` *(Resource Service)* — returns the resources if the effect cannot be applied.
 - `POST /api/players/{player_id}/inventory/items` *(Player Service)* — delivers a Kiki reward to the player's inventory.
+- `POST /api/tx/{txId}/prepare`, `/commit`, `/abort` *(Resource Service)* — from 5.0.0, the participant of an upgrade's Two-Phase Commit.
+- `POST /sagas` *(Message Broker, port 8600)* — from 5.0.0, starts the `base-upgrade` saga when `Coordination__Mode` is `saga`.
 
 Base Service calls them through the Message Broker over gRPC (`Broker.Relay` on `message-broker:8601`, set with `Broker__Url`), signed with a service token in the call metadata (`kind: service`; the broker forwards its subject as `X-Service-Name: base-service`), and the broker picks the instance (load balancing, circuit breakers, rerouting). Without `Broker__Url` it calls them through the Gateway as before. Each called service has a circuit breaker shared by all its endpoints: 3 failures (`5xx`, timeout, unreachable; a `4xx` is not a failure) within Task Timeout × 3.5 (28 s) trip it, the trip is logged, and calls to that service fail at once until a trial call after the window succeeds. Every state-changing endpoint spends first, then applies the effect in one database transaction. If that fails, Base Service refunds the resources rather than leaving the player having paid for nothing.
+
+From 5.0.0 (Lab 5):
+- **Replication:** `base-db-1..3` is a repmgr cluster (one primary, 2 standbys, synchronous replication). `POSTGRES_HOST` lists the three nodes and the service connects to whichever one is the primary, so it follows a failover. Until a standby is promoted, requests answer `503 database_unavailable` with `Retry-After: 2`. `GET /status` reports each node's role under `replication`.
+- **Cache:** `GET /api/base/{player_id}` is cached per player and invalidated after any write to that base. World Service's rooms and zones are cached too, and zones are invalidated on `ZoneUnlocked`. Keys start with `base-service:` and are sharded on `redis-cache-1..3` with the team's consistent-hashing ring.
+- **Two-Phase Commit** (`Coordination__Mode=2pc`, the team compose default): a barricade, facility upgrade or decoration is one transaction over base_db and Resource Service. Resource Service votes on the cost, and Base Service votes by applying the effect in the decision's transaction. An abort releases the held resources: `402 rejected_insufficient`, `409 aborted` or `503 resource_service_unavailable`. Kiki keeps the local saga.
+- **Saga** (`Coordination__Mode=saga`): the same actions start the broker's `base-upgrade` saga, `apply` (Base) ↔ `revert`, then `pay` (Resource) ↔ `refund`, and answer `202` with the `sagaId` (progress on `GET /api/sagas/{sagaId}`).
 
 ### **Exposed API Endpoints**
 
@@ -1823,6 +1934,14 @@ Success Response (200 OK)
 { "eventName": "ZoneUnlocked", "status": "applied", "roomsNowClaimable": 1 }
 ```
 
+**`GET /api/base/{player_id}/transactions/{idempotencyKey}/2pc`** *(Consumed by development team — from 5.0.0)*
+
+The Two-Phase Commit behind an action: its state (`preparing`, `committing`, `committed`, `aborting`, `aborted`), the decision and reason, and each participant's vote and acknowledgement. `404 tx_not_found` for an action that did not run as one.
+
+**`POST /api/base/{player_id}/saga/apply`**, **`POST /api/base/{player_id}/saga/revert`** *(Consumed by the Message Broker's saga coordinator — from 5.0.0, not available through the Gateway)*
+
+The `apply` step of the `base-upgrade` saga and its compensation. Body `{ "stepId": "<sagaId>:apply", "idempotencyKey": "b1" }`. `apply`: `200 applied` / `already_applied`, `409 step_cancelled` once reverted, `422` when the effect no longer fits. `revert` always answers `200` (`reverted`, `cancelled`, `already_reverted`, `nothing_to_revert`).
+
 **`GET /metrics`** *(Consumed by Prometheus)*
 
 Request counts and durations per route and status in the Prometheus text format (`http_requests_received_total`, `http_request_duration_seconds`), plus `kahoots_events_published_total` and `kahoots_events_received_total` by topic and outcome, `kahoots_saga_compensations_total` and `kahoots_circuit_breaker_open` per called service. Exempt from the task limits like `GET /health`. Not available through the Gateway.
@@ -1852,10 +1971,11 @@ Allows players to combine resources into useful survival equipment.
 - Recipe definitions and unlock conditions: Wood + Metal → Barricade Kit, Paper + Metal → Improvised Weapon, Food + Chemicals → Energy Booster, Metal + Electronics → Zombie Detector, Paper + Wood → Exam Cheat Sheet.
 - Which recipes each player has unlocked.
 - The craft transaction/saga state for each craft attempt.
+- The Two-Phase Commit log of the crafts it coordinates (from 5.0.0).
 
 ### **DockerHub Image**
 - **Repository:** [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service)
-- **Image Tag:** `cristi150404/crafting-service:4.0.0`
+- **Image Tag:** `cristi150404/crafting-service:5.0.0`
 - **Default Port:** `Internal only (5004), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
@@ -1867,8 +1987,16 @@ Allows players to combine resources into useful survival equipment.
 - `GET /api/players/{player_id}` *(Player Service)* — reads the player's level.
 - `GET /players/{playerId}/progress` *(Exam Service)* — reads passed exams.
 - `GET /world/zones` *(World Service)* — reads unlocked zones.
+- `POST /api/tx/{txId}/prepare`, `/commit`, `/abort` *(Resource Service)* and `POST /api/players/{player_id}/tx/{txId}/prepare`, `/commit`, `/abort` *(Player Service)* — from 5.0.0, the participants of a craft's Two-Phase Commit.
+- `POST /sagas` *(Message Broker, port 8600)* — from 5.0.0, starts the `craft-item` saga when `Coordination__Mode` is `saga`.
 
 Crafting Service calls them through the Message Broker over gRPC (`Broker.Relay` on `message-broker:8601`, set with `Broker__Url`), signed with a service token in the call metadata (`kind: service`; the broker forwards its subject as `X-Service-Name: crafting-service`), and the broker picks the instance (load balancing, circuit breakers, rerouting). Without `Broker__Url` it calls them through the Gateway as before. Each called service has a circuit breaker shared by all its endpoints: 3 failures (`5xx`, timeout, unreachable; a `4xx` is not a failure) within Task Timeout × 3.5 (28 s) trip it, the trip is logged, and calls to that service fail at once until a trial call after the window succeeds. A recipe can be gated on a player level, a passed exam, an unlocked zone, or a discovered resource, which is why this service reads from four others. If delivery fails after the ingredients were consumed, Crafting Service refunds them — this is the saga's rollback path.
+
+From 5.0.0 (Lab 5):
+- **Replication:** `crafting-db-1..3` is a repmgr cluster (one primary, 2 standbys, synchronous replication). `POSTGRES_HOST` lists the three nodes and the service connects to whichever one is the primary, so it follows a failover. Until a standby is promoted, requests answer `503 database_unavailable` with `Retry-After: 2`. `GET /status` reports each node's role under `replication`.
+- **Cache:** recipe definitions (invalidated when a recipe changes), the player lookups behind the unlock conditions (30 s) and World Service's zones (invalidated on `ZoneUnlocked`) are cached. Keys start with `crafting-service:` and are sharded on `redis-cache-1..3` with the team's consistent-hashing ring.
+- **Two-Phase Commit** (`Coordination__Mode=2pc`, the team compose default): a craft is one transaction over crafting_db, Resource Service (the ingredients) and Player Service (the item). Both participants vote. The item and the spend land together, or the held ingredients are released and nothing is delivered: `402 rejected_insufficient_materials`, `409 aborted`, or `503 resource_service_unavailable` / `player_service_unavailable`.
+- **Saga** (`Coordination__Mode=saga`): a craft starts the broker's `craft-item` saga, `complete` (Crafting) ↔ `cancel`, `pay` (Resource) ↔ `refund`, then `deliver` (Player) ↔ `revoke`, and answers `202` with the `sagaId` (progress on `GET /api/sagas/{sagaId}`).
 
 ### **Exposed API Endpoints**
 
@@ -1976,6 +2104,14 @@ Success Response (200 OK)
 ```json
 { "eventName": "AchievementUnlocked", "status": "applied", "recipesUnlocked": ["recipe_paper_metal"] }
 ```
+
+**`GET /api/crafts/{craftId}/transaction`** *(Consumed by development team — from 5.0.0)*
+
+The Two-Phase Commit behind a craft: its state, the decision and reason, and each participant's vote and acknowledgement. `404 tx_not_found` for a craft that did not run as one.
+
+**`POST /api/crafts/{craftId}/saga/complete`**, **`POST /api/crafts/{craftId}/saga/cancel`** *(Consumed by the Message Broker's saga coordinator — from 5.0.0, not available through the Gateway)*
+
+The `complete` step of the `craft-item` saga and its compensation. Body `{ "stepId": "<sagaId>:complete" }`. `complete`: `200 completed` / `already_completed`, `404 craft_not_found`, `409 step_cancelled` once cancelled. `cancel` always answers `200` (`cancelled`, `already_cancelled`, `nothing_to_cancel`).
 
 **`GET /metrics`** *(Consumed by Prometheus)*
 
@@ -2550,8 +2686,8 @@ The microservices are containerized and published on DockerHub:
 | **Message Broker** | [`mariaelenabotnari/message-broker`](https://hub.docker.com/r/mariaelenabotnari/message-broker) | `mariaelenabotnari/message-broker:4.0.0` | `8600` (HTTP), `Internal (8601)` (gRPC) | Service queues for the Gateway, gRPC relay between services, durable topic queues, load balancing and circuit breakers |
 | **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:5.0.0` | `Internal (8080)` | Player identity, progression, inventory, and trades |
 | **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:5.0.0` | `Internal (8080), WebSocket 3003-3005` | Game sessions, day/night cycle, and timed player actions |
-| **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:4.0.0` | `Internal (4001)` | Zombie type definitions, spawned instances, and special actions |
-| **Resource Service** | [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service) | `costinloredana/resource-service:4.0.0` | `Internal (4002)` | Resource types, player balances, nodes, and idempotent transactions |
+| **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:5.0.0` | `Internal (4001)` | Zombie type definitions, spawned instances, and special actions |
+| **Resource Service** | [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service) | `costinloredana/resource-service:5.0.0` | `Internal (4002)` | Resource types, player balances, nodes, and idempotent transactions |
 | **Base Service** | [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service) | `cristi150404/base-service:4.0.0` | `Internal (5003)` | Player bases, barricades, facilities, and decorations |
 | **Crafting Service** | [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service) | `cristi150404/crafting-service:4.0.0` | `Internal (5004)` | Recipes, unlock conditions, and crafting sagas |
 
@@ -2716,7 +2852,7 @@ The clusters start on new volumes (`player_db_{1,2,3}_data`, `game_db_{1,2,3}_da
 
 ### Database replication and failover (Zombie Service, Resource Service)
 
-Zombie Service and Resource Service also run on three database nodes each, with automatic failover (from the **5.0.0** images; the 4.0.0 images connect to node 1 only).
+Zombie Service and Resource Service also run on three database nodes each, with automatic failover (from the **5.0.0** images, which the team compose runs).
 
 | | Zombie Service | Resource Service |
 |---|---|---|
@@ -2851,7 +2987,7 @@ Both images are multi-stage Node.js 20 builds that run as the non-root `node` us
 
 | | Zombie Service | Resource Service |
 |---|---|---|
-| **Image** | `costinloredana/zombie-service:4.0.0` (`node:20-alpine`) | `costinloredana/resource-service:4.0.0` (`node:20-slim` + OpenSSL for Prisma) |
+| **Image** | `costinloredana/zombie-service:5.0.0` (`node:20-alpine`) | `costinloredana/resource-service:5.0.0` (`node:20-slim` + OpenSSL for Prisma) |
 | **Database** | MongoDB 8 (`mongo:8`) | PostgreSQL 17 (`postgres:17-alpine`) |
 | **Required env** | `MONGO_URI`, e.g. `mongodb://zombie-db:27017/zombie_db` | `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, or a single `DATABASE_URL` that takes precedence over them |
 | **Optional env** | `PORT` (default `4001`) | `PORT` (default `4002`) |
@@ -2864,11 +3000,11 @@ The service exits on startup if its database is unreachable, so start it only af
 
 # Zombie Service
 docker run -d --name zombie-db --network kahoots-net mongo:8
-docker run -d --name zombie-service --network kahoots-net -p 4001:4001   -e MONGO_URI=mongodb://zombie-db:27017/zombie_db   costinloredana/zombie-service:4.0.0
+docker run -d --name zombie-service --network kahoots-net -p 4001:4001   -e MONGO_URI=mongodb://zombie-db:27017/zombie_db   costinloredana/zombie-service:5.0.0
 
 # Resource Service
 docker run -d --name resource-db --network kahoots-net   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=resource_db postgres:17-alpine
-docker run -d --name resource-service --network kahoots-net -p 4002:4002   -e POSTGRES_HOST=resource-db -e POSTGRES_PORT=5432 -e POSTGRES_USER=postgres   -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=resource_db   costinloredana/resource-service:4.0.0
+docker run -d --name resource-service --network kahoots-net -p 4002:4002   -e POSTGRES_HOST=resource-db -e POSTGRES_PORT=5432 -e POSTGRES_USER=postgres   -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=resource_db   costinloredana/resource-service:5.0.0
 ```
 
 If a container exits right away, the database probably wasn't ready yet. Wait a few seconds and run `docker start zombie-service` or `docker start resource-service`.
