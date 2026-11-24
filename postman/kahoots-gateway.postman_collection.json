@@ -231,14 +231,15 @@
           "response": []
         },
         {
-          "name": "Add inventory item",
+          "name": "Add inventory item is internal (404)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                  "pm.test('Status is 404 (the Gateway keeps this route for the services)', () => pm.expect(pm.response.code).to.eql(404));",
+                  "pm.test('Refused with route_not_found', () => pm.expect(pm.response.json().error).to.eql('route_not_found'));"
                 ]
               }
             }
@@ -277,14 +278,15 @@
           "response": []
         },
         {
-          "name": "Update progression (XP)",
+          "name": "Update progression (XP) is internal (404)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                  "pm.test('Status is 404 (the Gateway keeps this route for the services)', () => pm.expect(pm.response.code).to.eql(404));",
+                  "pm.test('Refused with route_not_found', () => pm.expect(pm.response.json().error).to.eql('route_not_found'));"
                 ]
               }
             }
@@ -322,14 +324,15 @@
           "response": []
         },
         {
-          "name": "Grant achievement",
+          "name": "Grant achievement is internal (404)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                  "pm.test('Status is 404 (the Gateway keeps this route for the services)', () => pm.expect(pm.response.code).to.eql(404));",
+                  "pm.test('Refused with route_not_found', () => pm.expect(pm.response.json().error).to.eql('route_not_found'));"
                 ]
               }
             }
@@ -357,6 +360,102 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"achievementId\": \"achievementSurvivedMathematics\",\n  \"grantedBy\": \"exam:mathematics_complete\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Room-clearing Two-Phase Commit prepare is internal (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404 (the Gateway keeps this route for the services)', () => pm.expect(pm.response.code).to.eql(404));",
+                  "pm.test('Refused with route_not_found', () => pm.expect(pm.response.json().error).to.eql('route_not_found'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayUrl}}/api/players/{{playerId}}/tx/tx_postman/prepare",
+              "host": [
+                "{{gatewayUrl}}"
+              ],
+              "path": [
+                "api",
+                "players",
+                "{{playerId}}",
+                "tx",
+                "tx_postman",
+                "prepare"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"itemId\": \"salvage\",\n  \"quantity\": 1,\n  \"actionId\": \"act_postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "clear-room saga grant is internal (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404 (the Gateway keeps this route for the services)', () => pm.expect(pm.response.code).to.eql(404));",
+                  "pm.test('Refused with route_not_found', () => pm.expect(pm.response.json().error).to.eql('route_not_found'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayUrl}}/api/players/{{playerId}}/inventory/saga/grant",
+              "host": [
+                "{{gatewayUrl}}"
+              ],
+              "path": [
+                "api",
+                "players",
+                "{{playerId}}",
+                "inventory",
+                "saga",
+                "grant"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stepId\": \"saga_postman:grant\",\n  \"itemId\": \"salvage\",\n  \"quantity\": 1\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -460,14 +559,15 @@
           "response": []
         },
         {
-          "name": "Deliver ExamPassedEvent",
+          "name": "Deliver ExamPassedEvent is internal (404)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                  "pm.test('Status is 404 (the Gateway keeps this route for the services)', () => pm.expect(pm.response.code).to.eql(404));",
+                  "pm.test('Refused with route_not_found', () => pm.expect(pm.response.json().error).to.eql('route_not_found'));"
                 ]
               }
             }
@@ -930,14 +1030,15 @@
               "response": []
             },
             {
-              "name": "Deliver ZoneUnlockedEvent",
+              "name": "Deliver ZoneUnlockedEvent is internal (404)",
               "event": [
                 {
                   "listen": "test",
                   "script": {
                     "type": "text/javascript",
                     "exec": [
-                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                      "pm.test('Status is 404 (the Gateway keeps this route for the services)', () => pm.expect(pm.response.code).to.eql(404));",
+                      "pm.test('Refused with route_not_found', () => pm.expect(pm.response.json().error).to.eql('route_not_found'));"
                     ]
                   }
                 }
@@ -1068,6 +1169,90 @@
                   ]
                 },
                 "description": "409 once the action has already been completed."
+              },
+              "response": []
+            },
+            {
+              "name": "Room-clearing transaction of the seeded action",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 200 once the action was completed by a room-clearing Two-Phase Commit, 404 for any other action.",
+                      "pm.test('Status is one of [200, 404]', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
+                      "if (pm.response.code === 200) {",
+                      "    const tx = pm.response.json();",
+                      "    pm.test('The transaction is the action\\'s', () => pm.expect(tx.actionId).to.eql(pm.environment.get('actionId')));",
+                      "    pm.test('It has a state', () => pm.expect(['preparing', 'committing', 'aborting', 'committed', 'aborted']).to.include(String(tx.state).toLowerCase()));",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/actions/{{actionId}}/transaction",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "actions",
+                    "{{actionId}}",
+                    "transaction"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "clear-room saga step is internal (404)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is 404 (the Gateway keeps this route for the services)', () => pm.expect(pm.response.code).to.eql(404));",
+                      "pm.test('Refused with route_not_found', () => pm.expect(pm.response.json().error).to.eql('route_not_found'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/actions/{{actionId}}/saga/complete",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "actions",
+                    "{{actionId}}",
+                    "saga",
+                    "complete"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"stepId\": \"saga_postman:complete\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
               },
               "response": []
             },
@@ -1584,19 +1769,15 @@
           "name": "Attempts",
           "item": [
             {
-              "name": "Start attempt (survivor)",
+              "name": "Start attempt is internal (404)",
               "event": [
                 {
                   "listen": "test",
                   "script": {
                     "type": "text/javascript",
                     "exec": [
-                      "pm.test('Status is one of [200, 201, 409]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 409]));",
-                      "if (pm.response.code < 300) {",
-                      "    const json = pm.response.json();",
-                      "    const attemptIdValue = json.attemptId;",
-                      "    if (attemptIdValue !== undefined && attemptIdValue !== null) pm.environment.set('attemptId', String(attemptIdValue));",
-                      "}"
+                      "pm.test('Status is 404 (the Gateway keeps this route for the services)', () => pm.expect(pm.response.code).to.eql(404));",
+                      "pm.test('Refused with route_not_found', () => pm.expect(pm.response.json().error).to.eql('route_not_found'));"
                     ]
                   }
                 }
@@ -1633,14 +1814,15 @@
               "response": []
             },
             {
-              "name": "Submit attempt",
+              "name": "Submit attempt is internal (404)",
               "event": [
                 {
                   "listen": "test",
                   "script": {
                     "type": "text/javascript",
                     "exec": [
-                      "pm.test('Status is one of [200, 409]', () => pm.expect(pm.response.code).to.be.oneOf([200, 409]));"
+                      "pm.test('Status is 404 (the Gateway keeps this route for the services)', () => pm.expect(pm.response.code).to.eql(404));",
+                      "pm.test('Refused with route_not_found', () => pm.expect(pm.response.json().error).to.eql('route_not_found'));"
                     ]
                   }
                 }
@@ -1677,14 +1859,15 @@
               "response": []
             },
             {
-              "name": "Abandon attempt",
+              "name": "Abandon attempt is internal (404)",
               "event": [
                 {
                   "listen": "test",
                   "script": {
                     "type": "text/javascript",
                     "exec": [
-                      "pm.test('Status is one of [200, 409]', () => pm.expect(pm.response.code).to.be.oneOf([200, 409]));"
+                      "pm.test('Status is 404 (the Gateway keeps this route for the services)', () => pm.expect(pm.response.code).to.eql(404));",
+                      "pm.test('Refused with route_not_found', () => pm.expect(pm.response.json().error).to.eql('route_not_found'));"
                     ]
                   }
                 }
@@ -1721,14 +1904,15 @@
               "response": []
             },
             {
-              "name": "Retry eligibility",
+              "name": "Retry eligibility is internal (404)",
               "event": [
                 {
                   "listen": "test",
                   "script": {
                     "type": "text/javascript",
                     "exec": [
-                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                      "pm.test('Status is 404 (the Gateway keeps this route for the services)', () => pm.expect(pm.response.code).to.eql(404));",
+                      "pm.test('Refused with route_not_found', () => pm.expect(pm.response.json().error).to.eql('route_not_found'));"
                     ]
                   }
                 }
@@ -2773,7 +2957,7 @@
               "response": []
             },
             {
-              "name": "Create inventory",
+              "name": "Create inventory is internal (404)",
               "event": [
                 {
                   "listen": "prerequest",
@@ -2789,7 +2973,8 @@
                   "script": {
                     "type": "text/javascript",
                     "exec": [
-                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                      "pm.test('Status is 404 (the Gateway keeps this route for the services)', () => pm.expect(pm.response.code).to.eql(404));",
+                      "pm.test('Refused with route_not_found', () => pm.expect(pm.response.json().error).to.eql('route_not_found'));"
                     ]
                   }
                 }
@@ -2892,14 +3077,15 @@
           "name": "Economy",
           "item": [
             {
-              "name": "Gather",
+              "name": "Gather is internal (404)",
               "event": [
                 {
                   "listen": "test",
                   "script": {
                     "type": "text/javascript",
                     "exec": [
-                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                      "pm.test('Status is 404 (the Gateway keeps this route for the services)', () => pm.expect(pm.response.code).to.eql(404));",
+                      "pm.test('Refused with route_not_found', () => pm.expect(pm.response.json().error).to.eql('route_not_found'));"
                     ]
                   }
                 }
@@ -2935,14 +3121,15 @@
               "response": []
             },
             {
-              "name": "Spend",
+              "name": "Spend is internal (404)",
               "event": [
                 {
                   "listen": "test",
                   "script": {
                     "type": "text/javascript",
                     "exec": [
-                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                      "pm.test('Status is 404 (the Gateway keeps this route for the services)', () => pm.expect(pm.response.code).to.eql(404));",
+                      "pm.test('Refused with route_not_found', () => pm.expect(pm.response.json().error).to.eql('route_not_found'));"
                     ]
                   }
                 }
@@ -2978,14 +3165,15 @@
               "response": []
             },
             {
-              "name": "Refund",
+              "name": "Refund is internal (404)",
               "event": [
                 {
                   "listen": "test",
                   "script": {
                     "type": "text/javascript",
                     "exec": [
-                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                      "pm.test('Status is 404 (the Gateway keeps this route for the services)', () => pm.expect(pm.response.code).to.eql(404));",
+                      "pm.test('Refused with route_not_found', () => pm.expect(pm.response.json().error).to.eql('route_not_found'));"
                     ]
                   }
                 }
@@ -3283,19 +3471,15 @@
           "name": "Zombie instances",
           "item": [
             {
-              "name": "Spawn zombies",
+              "name": "Spawn zombies is internal (404)",
               "event": [
                 {
                   "listen": "test",
                   "script": {
                     "type": "text/javascript",
                     "exec": [
-                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));",
-                      "if (pm.response.code < 300) {",
-                      "    const json = pm.response.json();",
-                      "    const zombieInstanceIdValue = json.zombies && json.zombies[0].instanceId;",
-                      "    if (zombieInstanceIdValue !== undefined && zombieInstanceIdValue !== null) pm.environment.set('zombieInstanceId', String(zombieInstanceIdValue));",
-                      "}"
+                      "pm.test('Status is 404 (the Gateway keeps this route for the services)', () => pm.expect(pm.response.code).to.eql(404));",
+                      "pm.test('Refused with route_not_found', () => pm.expect(pm.response.json().error).to.eql('route_not_found'));"
                     ]
                   }
                 }
@@ -3332,14 +3516,15 @@
               "response": []
             },
             {
-              "name": "Trigger special action",
+              "name": "Trigger special action is internal (404)",
               "event": [
                 {
                   "listen": "test",
                   "script": {
                     "type": "text/javascript",
                     "exec": [
-                      "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                      "pm.test('Status is 404 (the Gateway keeps this route for the services)', () => pm.expect(pm.response.code).to.eql(404));",
+                      "pm.test('Refused with route_not_found', () => pm.expect(pm.response.json().error).to.eql('route_not_found'));"
                     ]
                   }
                 }
@@ -3367,6 +3552,293 @@
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"targetPlayerId\": \"{{playerId}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Cure zombie (Two-Phase Commit)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 200 when both participants committed, 409 transaction_aborted with the reason (already_cured, not_curable, not_a_tourist,",
+                      "// insufficient_resources, ...). With COORDINATION_MODE=saga the Gateway answers 202 with the saga instead.",
+                      "pm.test('Status is one of [200, 202, 409]', () => pm.expect(pm.response.code).to.be.oneOf([200, 202, 409]));",
+                      "const json = pm.response.json();",
+                      "if (pm.response.code === 202) {",
+                      "    pm.test('A saga was started', () => pm.expect(json.sagaId).to.match(/^saga_/));",
+                      "    pm.environment.set('sagaId', json.sagaId);",
+                      "} else {",
+                      "    pm.test('The transaction is a cure', () => pm.expect(json.action).to.eql('cure'));",
+                      "    pm.test('It has a txId and a decision', () => { pm.expect(json.txId).to.match(/^tx_/); pm.expect(['commit', 'abort']).to.include(json.decision); });",
+                      "    if (pm.response.code === 409) pm.test('Aborted with a reason', () => pm.expect(json.reason).to.be.a('string'));",
+                      "    pm.environment.set('txId', json.txId);",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/zombies/{{zombieInstanceId}}/cure",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "zombies",
+                    "{{zombieInstanceId}}",
+                    "cure"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get the transaction",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is 200', () => pm.expect(pm.response.code).to.eql(200));",
+                      "pm.test('Same transaction', () => pm.expect(pm.response.json().txId).to.eql(pm.environment.get('txId')));",
+                      "pm.test('It has a state', () => pm.expect(['preparing', 'committing', 'aborting', 'committed', 'aborted']).to.include(pm.response.json().state));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/tx/{{txId}}",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "tx",
+                    "{{txId}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Tourist zombie steals (Two-Phase Commit)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 200 when both participants committed, 409 transaction_aborted with the reason (already_cured, not_curable, not_a_tourist,",
+                      "// insufficient_resources, ...). With COORDINATION_MODE=saga the Gateway answers 202 with the saga instead.",
+                      "pm.test('Status is one of [200, 202, 409]', () => pm.expect(pm.response.code).to.be.oneOf([200, 202, 409]));",
+                      "const json = pm.response.json();",
+                      "if (pm.response.code === 202) {",
+                      "    pm.test('A saga was started', () => pm.expect(json.sagaId).to.match(/^saga_/));",
+                      "    pm.environment.set('sagaId', json.sagaId);",
+                      "} else {",
+                      "    pm.test('The transaction is a steal', () => pm.expect(json.action).to.eql('steal'));",
+                      "    pm.test('It has a txId and a decision', () => { pm.expect(json.txId).to.match(/^tx_/); pm.expect(['commit', 'abort']).to.include(json.decision); });",
+                      "    if (pm.response.code === 409) pm.test('Aborted with a reason', () => pm.expect(json.reason).to.be.a('string'));",
+                      "    pm.environment.set('txId', json.txId);",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/zombies/{{zombieInstanceId}}/steal",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "zombies",
+                    "{{zombieInstanceId}}",
+                    "steal"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"loot\": [\n    {\n      \"resourceType\": \"food\",\n      \"amount\": 1\n    }\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Steal with invalid loot (400)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is 400', () => pm.expect(pm.response.code).to.eql(400));",
+                      "pm.test('Refused with invalid_body', () => pm.expect(pm.response.json().error).to.eql('invalid_body'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/zombies/{{zombieInstanceId}}/steal",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "zombies",
+                    "{{zombieInstanceId}}",
+                    "steal"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"loot\": [\n    {\n      \"resourceType\": \"food\",\n      \"amount\": 0\n    }\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Unknown transaction (404)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is 404', () => pm.expect(pm.response.code).to.eql(404));",
+                      "pm.test('Refused with tx_not_found', () => pm.expect(pm.response.json().error).to.eql('tx_not_found'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/tx/tx_doesnotexist",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "tx",
+                    "tx_doesnotexist"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Unknown saga (404)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is 404', () => pm.expect(pm.response.code).to.eql(404));",
+                      "pm.test('Refused with saga_not_found', () => pm.expect(pm.response.json().error).to.eql('saga_not_found'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/sagas/saga_doesnotexist",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "sagas",
+                    "saga_doesnotexist"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "cure-zombie saga step is internal (404)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is 404 (the Gateway keeps this route for the services)', () => pm.expect(pm.response.code).to.eql(404));",
+                      "pm.test('Refused with route_not_found', () => pm.expect(pm.response.json().error).to.eql('route_not_found'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/zombies/{{zombieInstanceId}}/saga/cure",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "zombies",
+                    "{{zombieInstanceId}}",
+                    "saga",
+                    "cure"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"stepId\": \"saga_postman:cure\",\n  \"playerId\": \"{{playerId}}\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -3575,14 +4047,15 @@
           "response": []
         },
         {
-          "name": "Barricade room",
+          "name": "Barricade room is internal (404)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                  "pm.test('Status is 404 (the Gateway keeps this route for the services)', () => pm.expect(pm.response.code).to.eql(404));",
+                  "pm.test('Refused with route_not_found', () => pm.expect(pm.response.json().error).to.eql('route_not_found'));"
                 ]
               }
             }
@@ -3620,14 +4093,15 @@
           "response": []
         },
         {
-          "name": "Upgrade facility",
+          "name": "Upgrade facility is internal (404)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status is one of [200, 201, 204]', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));"
+                  "pm.test('Status is 404 (the Gateway keeps this route for the services)', () => pm.expect(pm.response.code).to.eql(404));",
+                  "pm.test('Refused with route_not_found', () => pm.expect(pm.response.json().error).to.eql('route_not_found'));"
                 ]
               }
             }
@@ -3655,6 +4129,53 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"idempotencyKey\": \"facility_{{$timestamp}}\",\n  \"facilityType\": \"storage\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "base-upgrade saga step is internal (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404 (the Gateway keeps this route for the services)', () => pm.expect(pm.response.code).to.eql(404));",
+                  "pm.test('Refused with route_not_found', () => pm.expect(pm.response.json().error).to.eql('route_not_found'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayUrl}}/api/base/{{playerId}}/saga/apply",
+              "host": [
+                "{{gatewayUrl}}"
+              ],
+              "path": [
+                "api",
+                "base",
+                "{{playerId}}",
+                "saga",
+                "apply"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stepId\": \"saga_postman:apply\",\n  \"idempotencyKey\": \"postman\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4250,6 +4771,53 @@
                       "value": "{{playerId}}"
                     }
                   ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "craft-item saga step is internal (404)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is 404 (the Gateway keeps this route for the services)', () => pm.expect(pm.response.code).to.eql(404));",
+                      "pm.test('Refused with route_not_found', () => pm.expect(pm.response.json().error).to.eql('route_not_found'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{gatewayUrl}}/api/crafts/{{craftId}}/saga/complete",
+                  "host": [
+                    "{{gatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "crafts",
+                    "{{craftId}}",
+                    "saga",
+                    "complete"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"stepId\": \"saga_postman:complete\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
                 }
               },
               "response": []

@@ -65,6 +65,34 @@
       "key": "secondWorldReplica",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "deadLetterId",
+      "value": ""
+    },
+    {
+      "key": "sagaPlayer",
+      "value": ""
+    },
+    {
+      "key": "sagaZombieA",
+      "value": ""
+    },
+    {
+      "key": "sagaZombieB",
+      "value": ""
+    },
+    {
+      "key": "sagaCompleted",
+      "value": ""
+    },
+    {
+      "key": "sagaCompensated",
+      "value": ""
+    },
+    {
+      "key": "cureAmount",
+      "value": ""
     }
   ],
   "item": [
@@ -211,7 +239,22 @@
                   "pm.test(\"[SUCCESS] 200 OK - Service JWT authenticated by broker\", () => pm.response.to.have.status(200));",
                   "pm.test(\"[SUCCESS] Handled on dedicated worker thread (X-Broker-Thread: req-xxxx)\", () => {",
                   "    pm.expect(pm.response.headers.get('X-Broker-Thread')).to.match(/^req-/);",
-                  "});"
+                  "});",
+                  "const status = pm.response.json();",
+                  "pm.test(\"[SUCCESS] Version 5.0.0 or later\", () => pm.expect(Number(status.version.split('.')[0])).to.be.at.least(5));",
+                  "pm.test(\"[SUCCESS] database reports the message store and the saga store (postgresql or sqlite)\", () => {",
+                  "    pm.expect([\"postgresql\", \"sqlite\"]).to.include(status.database.queueStore);",
+                  "    pm.expect([\"postgresql\", \"sqlite\"]).to.include(status.database.sagaStore);",
+                  "});",
+                  "if (status.database.queueStore === \"postgresql\") {",
+                  "    pm.test(\"[SUCCESS] Replicated store: 3 nodes, exactly one primary, the others standby (or down while stopped)\", () => {",
+                  "        const roles = status.replication.nodes.map(n => n.role);",
+                  "        pm.expect(roles).to.have.lengthOf(3);",
+                  "        pm.expect(roles.filter(r => r === \"primary\")).to.have.lengthOf(1);",
+                  "        roles.filter(r => r !== \"primary\").forEach(r => pm.expect([\"standby\", \"down\"]).to.include(r));",
+                  "        pm.expect(status.replication.primary).to.eql(status.replication.nodes.find(n => n.role === \"primary\").host);",
+                  "    });",
+                  "}"
                 ]
               }
             }
@@ -1872,7 +1915,9 @@
                   "});",
                   "pm.test(\"[SUCCESS] Served on dedicated worker thread (X-Broker-Thread: req-xxxx)\", () => {",
                   "    pm.expect(pm.response.headers.get('X-Broker-Thread')).to.match(/^req-/);",
-                  "});"
+                  "});",
+                  "const ours = b.deadLetters.find(m => m.messageId === pm.collectionVariables.get('deadMessageId'));",
+                  "if (ours) pm.collectionVariables.set('deadLetterId', String(ours.id));"
                 ]
               }
             }
@@ -2011,6 +2056,86 @@
               ]
             }
           }
+        },
+        {
+          "name": "8.6 Redeliver the DeadLetterDemo Dead Letter (POST /dead-letters/{id}/redeliver)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 202 Accepted - Dead letter taken out of the channel and queued again\", () => pm.response.to.have.status(202));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"[SUCCESS] Same dead letter, same messageId (subscribers can still ignore a repeat)\", () => {",
+                  "    pm.expect(String(b.id)).to.eql(pm.collectionVariables.get('deadLetterId'));",
+                  "    pm.expect(b.messageId).to.eql(pm.collectionVariables.get('deadMessageId'));",
+                  "    pm.expect(b.topic).to.eql('DeadLetterDemo');",
+                  "});",
+                  "pm.test(\"[SUCCESS] queued says whether the subscriber's queue took it\", () => pm.expect(b.queued).to.be.a('boolean'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/dead-letters/{{deadLetterId}}/redeliver",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "dead-letters",
+                "{{deadLetterId}}",
+                "redeliver"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "8.7 Error: Redeliver an Unknown Dead Letter (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[EXPECTED REJECTION] 404 Not Found for an unknown dead letter\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"[EXPECTED REJECTION] Error code is 'dead_letter_not_found'\", () => pm.expect(pm.response.json().error).to.eql('dead_letter_not_found'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/dead-letters/99999999/redeliver",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "dead-letters",
+                "99999999",
+                "redeliver"
+              ]
+            }
+          },
+          "response": []
         }
       ]
     },
@@ -2240,6 +2365,816 @@
               ]
             }
           }
+        }
+      ]
+    },
+    {
+      "name": "10. Sagas (POST /sagas, GET /sagas, GET /sagas/{sagaId}, POST /sagas/{sagaId}/retry)",
+      "item": [
+        {
+          "name": "10.1 Setup: Create the Saga Player's Inventory (Resource Service queue)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('sagaPlayer', 'p_saga_' + Date.now().toString(36));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 201 Created - inventory for the saga player\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/inventory/{{sagaPlayer}}",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "inventory",
+                "{{sagaPlayer}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "10.2 Setup: Give the Saga Player 10 Chemicals",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 200 OK - 10 chemicals\", () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().resources.chemicals).to.eql(10);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/inventory/{{sagaPlayer}}",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "inventory",
+                "{{sagaPlayer}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resources\": {\n    \"chemicals\": 10\n  }\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "10.3 Setup: Spawn 2 Infected Zombies (Zombie Service queue)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 200/201 - 2 Infected Zombies spawned\", () => {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+                  "    const z = pm.response.json().zombies;",
+                  "    pm.expect(z).to.have.lengthOf(2);",
+                  "    z.forEach(x => pm.expect(x.category).to.eql('infected'));",
+                  "    pm.collectionVariables.set('sagaZombieA', z[0].instanceId);",
+                  "    pm.collectionVariables.set('sagaZombieB', z[1].instanceId);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/zombie-service/api/zombies/spawn",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "zombie-service",
+                "api",
+                "zombies",
+                "spawn"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cycleId\": \"cyc_postman_sagas\",\n  \"worldZoneId\": \"mainCorridorZone\",\n  \"spawnCount\": 2,\n  \"typeWeights\": {\n    \"infected\": 1\n  }\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "10.4 Start a cure-zombie Saga (202 Accepted)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 202 Accepted - the saga runs on a worker thread of its own\", () => pm.response.to.have.status(202));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"[SUCCESS] Location points at the saga, with its steps in order\", () => {",
+                  "    pm.expect(pm.response.headers.get('Location')).to.eql('/sagas/' + b.sagaId);",
+                  "    pm.expect(b.saga).to.eql('cure-zombie');",
+                  "    pm.expect(b.steps.map(s => s.step)).to.eql(['cure', 'pay']);",
+                  "});",
+                  "pm.collectionVariables.set('sagaCompleted', b.sagaId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/sagas",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "sagas"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"saga\": \"cure-zombie\",\n  \"input\": { \"playerId\": \"{{sagaPlayer}}\", \"instanceId\": \"{{sagaZombieA}}\" }\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "10.5 Follow the Saga: Completed (GET /sagas/{sagaId})",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The saga runs on the broker's worker thread after the 202, so give it a moment.",
+                  "setTimeout(() => {}, 1500);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 200 OK\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"[SUCCESS] completed: both steps succeeded, nothing failed\", () => {",
+                  "    pm.expect(b.state).to.eql('completed');",
+                  "    pm.expect(b.steps.map(s => s.state)).to.eql(['succeeded', 'succeeded']);",
+                  "    pm.expect(b.failure).to.be.null;",
+                  "});",
+                  "pm.test(\"[SUCCESS] The cure step's answer (the cure requirement) fed the pay step\", () => {",
+                  "    pm.expect(b.context.cureRequirement.resourceType).to.eql('chemicals');",
+                  "    pm.collectionVariables.set('cureAmount', String(b.context.cureRequirement.amount));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/sagas/{{sagaCompleted}}",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "sagas",
+                "{{sagaCompleted}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "10.6 The Cure Was Paid (inventory through the Resource Service queue)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 10 chemicals minus the cure requirement\", () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().resources.chemicals).to.eql(10 - Number(pm.collectionVariables.get('cureAmount')));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/inventory/{{sagaPlayer}}",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "inventory",
+                "{{sagaPlayer}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "10.7 Setup: Empty the Saga Player's Chemicals",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 200 OK - no chemicals left\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/inventory/{{sagaPlayer}}",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "inventory",
+                "{{sagaPlayer}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resources\": {\n    \"chemicals\": 0\n  }\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "10.8 Start a cure-zombie Saga the Player Can't Pay For",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 202 Accepted\", () => pm.response.to.have.status(202));",
+                  "pm.collectionVariables.set('sagaCompensated', pm.response.json().sagaId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/sagas",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "sagas"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"saga\": \"cure-zombie\",\n  \"input\": { \"playerId\": \"{{sagaPlayer}}\", \"instanceId\": \"{{sagaZombieB}}\" }\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "10.9 Follow the Saga: Compensated (the cure undone)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The saga runs on the broker's worker thread after the 202, so give it a moment.",
+                  "setTimeout(() => {}, 1500);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 200 OK\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"[SUCCESS] compensated: the pay step was refused (402 rejected_insufficient)\", () => {",
+                  "    pm.expect(b.state).to.eql('compensated');",
+                  "    pm.expect(b.failure.step).to.eql('pay');",
+                  "    pm.expect(b.failure.status).to.eql(402);",
+                  "    pm.expect(b.failure.error).to.eql('rejected_insufficient');",
+                  "});",
+                  "pm.test(\"[SUCCESS] The cure that succeeded was compensated, in reverse order\", () => {",
+                  "    pm.expect(b.steps.map(s => s.state)).to.eql(['compensated', 'failed']);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/sagas/{{sagaCompensated}}",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "sagas",
+                "{{sagaCompensated}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "10.10 List the Compensated cure-zombie Sagas (GET /sagas?state=&saga=&limit=)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 200 OK\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"[SUCCESS] Only compensated cure-zombie sagas, ours among them\", () => {",
+                  "    b.sagas.forEach(s => { pm.expect(s.state).to.eql('compensated'); pm.expect(s.saga).to.eql('cure-zombie'); });",
+                  "    pm.expect(b.sagas.map(s => s.sagaId)).to.include(pm.collectionVariables.get('sagaCompensated'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/sagas?state=compensated&saga=cure-zombie&limit=10",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "sagas"
+              ],
+              "query": [
+                {
+                  "key": "state",
+                  "value": "compensated"
+                },
+                {
+                  "key": "saga",
+                  "value": "cure-zombie"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "10.11 Error: Retry a Saga That Did Not Fail (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[EXPECTED REJECTION] 409 Conflict - only a failed saga can be retried\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"[EXPECTED REJECTION] Error code is 'saga_not_failed'\", () => pm.expect(pm.response.json().error).to.eql('saga_not_failed'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/sagas/{{sagaCompensated}}/retry",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "sagas",
+                "{{sagaCompensated}}",
+                "retry"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "10.12 Error: Unknown Saga (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[EXPECTED REJECTION] 400 Bad Request, nothing started\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"[EXPECTED REJECTION] Error code is 'invalid_saga'\", () => pm.expect(pm.response.json().error).to.eql('invalid_saga'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/sagas",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "sagas"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"saga\": \"teleport-zombie\",\n  \"input\": {}\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "10.13 Error: Invalid Saga Input (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[EXPECTED REJECTION] 400 Bad Request - a steal needs its loot\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"[EXPECTED REJECTION] Error code is 'invalid_saga'\", () => pm.expect(pm.response.json().error).to.eql('invalid_saga'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/sagas",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "sagas"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"saga\": \"steal-resources\",\n  \"input\": {\n    \"playerId\": \"p_postman\",\n    \"instanceId\": \"z_postman\"\n  }\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "10.14 Error: Unknown Saga Id (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[EXPECTED REJECTION] 404 Not Found\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"[EXPECTED REJECTION] Error code is 'saga_not_found'\", () => pm.expect(pm.response.json().error).to.eql('saga_not_found'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/sagas/saga_doesnotexist",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "sagas",
+                "saga_doesnotexist"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "10.15 Error: Invalid Limit (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[EXPECTED REJECTION] 400 Bad Request\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"[EXPECTED REJECTION] Error code is 'invalid_limit'\", () => pm.expect(pm.response.json().error).to.eql('invalid_limit'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/sagas?limit=0",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "sagas"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "10.16 Error: Sagas Without a Service Token (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[EXPECTED REJECTION] 401 Unauthorized\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"[EXPECTED REJECTION] Error code is 'missing_token'\", () => pm.expect(pm.response.json().error).to.eql('missing_token'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/sagas",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "sagas"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "10.17 Saga Metrics and Durability (GET /metrics, GET /health)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 200 OK\", () => pm.response.to.have.status(200));",
+                  "const text = pm.response.text();",
+                  "pm.test(\"[SUCCESS] broker_sagas_total counts the completed and the compensated cure-zombie sagas\", () => {",
+                  "    pm.expect(text).to.match(/broker_sagas_total\\{[^}]*outcome=\"completed\"[^}]*saga=\"cure-zombie\"[^}]*\\} [1-9]/);",
+                  "    pm.expect(text).to.match(/broker_sagas_total\\{[^}]*outcome=\"compensated\"[^}]*saga=\"cure-zombie\"[^}]*\\} [1-9]/);",
+                  "});",
+                  "pm.test(\"[SUCCESS] Step and compensation counters are exported\", () => {",
+                  "    pm.expect(text).to.include('broker_saga_steps_total');",
+                  "    pm.expect(text).to.include('broker_saga_compensations_total');",
+                  "});",
+                  "pm.sendRequest(pm.collectionVariables.get('brokerUrl') + '/health', (err, res) => {",
+                  "    pm.test(\"[SUCCESS] /health reports the saga store as durable\", () => pm.expect(res.json().sagas.durable).to.eql(true));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/metrics",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "metrics"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "10.18 Cleanup: Delete the Saga Player's Inventory",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"[SUCCESS] 204 No Content\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{serviceToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/resource-service/api/inventory/{{sagaPlayer}}",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "resource-service",
+                "api",
+                "inventory",
+                "{{sagaPlayer}}"
+              ]
+            }
+          },
+          "response": []
         }
       ]
     }
