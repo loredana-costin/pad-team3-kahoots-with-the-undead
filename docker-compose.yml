@@ -73,6 +73,26 @@ x-broker-db-env: &broker-db-env
   REPMGR_PARTNER_NODES: broker-db-1,broker-db-2,broker-db-3
   REPMGR_PORT_NUMBER: 5432
 
+x-base-db-env: &base-db-env
+  POSTGRESQL_USERNAME: ${BASE_DB_USER:-postgres}
+  POSTGRESQL_PASSWORD: ${BASE_DB_PASSWORD:-postgres}
+  POSTGRESQL_POSTGRES_PASSWORD: ${BASE_DB_PASSWORD:-postgres}
+  POSTGRESQL_DATABASE: base_db
+  REPMGR_PASSWORD: repmgr
+  REPMGR_PRIMARY_HOST: base-db-1
+  REPMGR_PARTNER_NODES: base-db-1,base-db-2,base-db-3
+  REPMGR_PORT_NUMBER: 5432
+
+x-crafting-db-env: &crafting-db-env
+  POSTGRESQL_USERNAME: ${CRAFTING_DB_USER:-postgres}
+  POSTGRESQL_PASSWORD: ${CRAFTING_DB_PASSWORD:-postgres}
+  POSTGRESQL_POSTGRES_PASSWORD: ${CRAFTING_DB_PASSWORD:-postgres}
+  POSTGRESQL_DATABASE: crafting_db
+  REPMGR_PASSWORD: repmgr
+  REPMGR_PRIMARY_HOST: crafting-db-1
+  REPMGR_PARTNER_NODES: crafting-db-1,crafting-db-2,crafting-db-3
+  REPMGR_PORT_NUMBER: 5432
+
 x-zombie-db-node: &zombie-db-node
   image: mongo:8
   restart: always
