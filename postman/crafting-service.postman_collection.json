@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "03aaf70c-e06f-5657-a736-0c3371a81724",
     "name": "Crafting Service",
-    "description": "Tests for Crafting Service (In Kahoots with the Undead, Team 3), run through the Gateway against the real Resource, Player, Exam and World Service of the team docker-compose.yml. Run the folders in order: Setup makes sure the five contract recipes exist, registers a fresh player and grants it resources through Resource Service's refund route. Rollback uses a player id Player Service does not know, so the delivery fails and the ingredients are refunded.",
+    "description": "Tests for Crafting Service (In Kahoots with the Undead, Team 3), run through the Gateway against the real Resource, Player, Exam and World Service of the team docker-compose.yml. Run the folders in order: Setup makes sure the five contract recipes exist, registers a fresh player and grants it resources through Resource Service's refund route. Rollback uses a player id Player Service does not know: with the Two-Phase Commit of 5.0.0 Player Service votes abort and nothing is spent, and with the local saga the delivery fails and the ingredients are refunded. Folders 6 to 9 cover Lab 5 and need the 5.0.0 image with the compose defaults (Coordination__Mode=2pc); start the compose with CACHE_DEBUG_HEADERS=true for the cache checks.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -38,6 +38,46 @@
     },
     {
       "key": "craftId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "brokerUrl",
+      "value": "http://localhost:8600",
+      "type": "string"
+    },
+    {
+      "key": "jwtSecret",
+      "value": "team-compose-development-secret-at-least-32-chars",
+      "type": "string"
+    },
+    {
+      "key": "serviceJwt",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "logsAdminKey",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "cacheNode",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "txId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "ghostCraftId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "poorCraftId",
       "value": "",
       "type": "string"
     }
@@ -385,6 +425,23 @@
           "name": "Grant test resources to the player",
           "event": [
             {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for crafting-service, which the message broker requires.",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'crafting-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+                ]
+              }
+            },
+            {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
@@ -397,6 +454,16 @@
             }
           ],
           "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
             "method": "POST",
             "header": [
               {
@@ -405,16 +472,18 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/refund",
+              "raw": "{{brokerUrl}}/queues/resource-service/api/refund",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "resource-service",
                 "api",
                 "refund"
               ]
             },
-            "description": "",
+            "description": "The Gateway refuses POST /api/refund, which only services may call, so the collection sends it to Resource Service through the message broker's queue with a service token, the way crafting-service does.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"idempotencyKey\": \"seed_{{runId}}_playerId\",\n  \"playerId\": \"{{playerId}}\",\n  \"reason\": \"postman_test_seed\",\n  \"costs\": [\n    {\n      \"resourceType\": \"wood\",\n      \"amount\": 10\n    },\n    {\n      \"resourceType\": \"metal\",\n      \"amount\": 5\n    }\n  ]\n}",
@@ -431,6 +500,23 @@
           "name": "Grant test resources to a player Player Service does not know",
           "event": [
             {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for crafting-service, which the message broker requires.",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'crafting-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+                ]
+              }
+            },
+            {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
@@ -443,6 +529,16 @@
             }
           ],
           "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
             "method": "POST",
             "header": [
               {
@@ -451,16 +547,18 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/refund",
+              "raw": "{{brokerUrl}}/queues/resource-service/api/refund",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "resource-service",
                 "api",
                 "refund"
               ]
             },
-            "description": "",
+            "description": "The Gateway refuses POST /api/refund, which only services may call, so the collection sends it to Resource Service through the message broker's queue with a service token, the way crafting-service does.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"idempotencyKey\": \"seed_{{runId}}_ghostPlayerId\",\n  \"playerId\": \"{{ghostPlayerId}}\",\n  \"reason\": \"postman_test_seed\",\n  \"costs\": [\n    {\n      \"resourceType\": \"wood\",\n      \"amount\": 10\n    },\n    {\n      \"resourceType\": \"metal\",\n      \"amount\": 5\n    }\n  ]\n}",
@@ -1340,26 +1438,39 @@
       ]
     },
     {
-      "name": "4. Saga rollback",
+      "name": "4. Rollback",
       "description": "",
       "item": [
         {
-          "name": "Craft for a player Player Service does not know (500, refunded)",
+          "name": "Craft for a player Player Service does not know (409 aborted, or 500 refunded)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"Status code is 500\", function () {",
-                  "    pm.response.to.have.status(500);",
-                  "});",
-                  "pm.test(\"Ingredients refunded\", function () {",
-                  "    const json = pm.response.json();",
-                  "    pm.expect(json.status).to.eql('rolled_back');",
-                  "    pm.expect(json.reason).to.eql('inventory_delivery_failed');",
-                  "    pm.expect(json.resourcesRefunded).to.be.true;",
-                  "});"
+                  "const json = pm.response.json();",
+                  "pm.collectionVariables.set('ghostCraftId', json.craftId || '');",
+                  "if (json.txId) {",
+                  "    // 5.0.0 with Coordination__Mode=2pc (the compose default): Player Service votes abort, nothing is spent.",
+                  "    pm.test(\"Status code is 409\", function () {",
+                  "        pm.response.to.have.status(409);",
+                  "    });",
+                  "    pm.test(\"The transaction aborted, the ingredients were never spent\", function () {",
+                  "        pm.expect(json.status).to.eql('aborted');",
+                  "        pm.expect(json.reason).to.eql('player_not_found');",
+                  "    });",
+                  "} else {",
+                  "    // The local saga (4.0.0, or Coordination__Mode=local): the delivery fails and the ingredients are refunded.",
+                  "    pm.test(\"Status code is 500\", function () {",
+                  "        pm.response.to.have.status(500);",
+                  "    });",
+                  "    pm.test(\"Ingredients refunded\", function () {",
+                  "        pm.expect(json.status).to.eql('rolled_back');",
+                  "        pm.expect(json.reason).to.eql('inventory_delivery_failed');",
+                  "        pm.expect(json.resourcesRefunded).to.be.true;",
+                  "    });",
+                  "}"
                 ]
               }
             }
@@ -1410,6 +1521,7 @@
                   "    const json = pm.response.json();",
                   "    pm.expect(json.status).to.eql('rejected_insufficient_materials');",
                   "    pm.expect(json.missing).to.have.property('wood');",
+                  "    pm.collectionVariables.set('poorCraftId', json.craftId || '');",
                   "});"
                 ]
               }
@@ -1449,7 +1561,1178 @@
       ]
     },
     {
-      "name": "6. Cleanup",
+      "name": "5. Message Broker",
+      "item": [
+        {
+          "name": "Publish ZoneUnlocked Through The Message Broker (202)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint the service token the message broker requires; its subject (world-service) is recorded as the publisher.",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'world-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 202 Accepted\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"The broker queued the event for crafting-service\", () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.topic).to.eql(\"ZoneUnlocked\");",
+                  "    pm.expect(body.publisher).to.eql(\"world-service\");",
+                  "    pm.expect(body.subscribers).to.include(\"crafting-service\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/topics/ZoneUnlocked/publish",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "topics",
+                "ZoneUnlocked",
+                "publish"
+              ]
+            },
+            "description": "Publishes the event World Service publishes when a zone opens. crafting-service registered the topic with Service Discovery, so the broker lists it among the subscribers and delivers the event to POST /events/ZoneUnlocked on one of its instances (retried on a 5xx, dead-lettered after the last attempt).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"zoneId\": \"mathematicsWing\",\n  \"roomsAdded\": [\n    \"mathematicsWingLibrary\"\n  ],\n  \"timestamp\": \"2026-11-09T10:00:00Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Download Crafting Service logs",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const key = pm.collectionVariables.get(\"logsAdminKey\");",
+                  "if (!key) {",
+                  "    // No key in the collection: the instance answers 503 while its own key is empty, 401 when it has one.",
+                  "    pm.test(\"Without logsAdminKey the download is refused\", () => pm.expect(pm.response.code).to.be.oneOf([401, 503]));",
+                  "} else {",
+                  "    pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));",
+                  "    pm.test(\"The logs come back as a file of JSON lines\", () => {",
+                  "        pm.expect(pm.response.headers.get(\"Content-Disposition\")).to.include(\"attachment\");",
+                  "        pm.expect(pm.response.headers.get(\"X-Log-Lines\")).to.exist;",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Admin-Key",
+                "value": "{{logsAdminKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/crafts/logs/download",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "crafts",
+                "logs",
+                "download"
+              ]
+            },
+            "description": "This instance's recent log lines (one JSON object per line), oldest first. Set logsAdminKey to the LOGS_ADMIN_KEY of the stack; without it the request checks that the download is refused. Add ?tail=100 or ?since=2026-11-09T10:00:00Z to narrow it."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "6. Cache (Redis, sharded with consistent hashing)",
+      "description": "Needs the 5.0.0 image. Recipe definitions are cached in the team's Redis nodes (keys start with crafting-service:), and creating, updating or deleting a recipe invalidates them all. The player lookups behind the unlock conditions (30 s) and World Service's zones (until a ZoneUnlocked) are cached too. Run the compose with CACHE_DEBUG_HEADERS=true to check X-Cache (MISS / HIT) and X-Cache-Node; without them, those checks are skipped.",
+      "item": [
+        {
+          "name": "Update the recipe (a write: invalidates the cached recipes)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Updated\", function () {",
+                  "    pm.expect(pm.response.json().updated).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/recipes/recipe_pm_{{runId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "recipes",
+                "recipe_pm_{{runId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Cached Duct Tape Armor\",\n  \"ingredients\": [\n    {\n      \"resourceType\": \"paper\",\n      \"amount\": 2\n    },\n    {\n      \"resourceType\": \"metal\",\n      \"amount\": 1\n    }\n  ],\n  \"output\": \"duct_tape_armor\",\n  \"unlockCondition\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get the recipe - first read (MISS)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The cache debug headers are on only with CACHE_DEBUG_HEADERS=true (and the 5.0.0 image); without them the",
+                  "// cache checks are skipped and only the answer is checked.",
+                  "const cacheCheck = (name, expected) => {",
+                  "  const outcome = pm.response.headers.get('X-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)(name, function () {",
+                  "    pm.expect(outcome).to.eql(expected);",
+                  "    const node = pm.response.headers.get('X-Cache-Node');",
+                  "    pm.expect(node).to.match(/^[\\w.-]+:\\d+$/);",
+                  "    if (expected === 'HIT') { pm.expect(node).to.eql(pm.collectionVariables.get('cacheNode')); }",
+                  "    pm.collectionVariables.set('cacheNode', node);",
+                  "  });",
+                  "};",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Current name\", function () {",
+                  "    pm.expect(pm.response.json().name).to.eql('Cached Duct Tape Armor');",
+                  "});",
+                  "cacheCheck('Read from PostgreSQL and stored (X-Cache: MISS)', 'MISS');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/recipes/recipe_pm_{{runId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "recipes",
+                "recipe_pm_{{runId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Get the recipe again (HIT)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The cache debug headers are on only with CACHE_DEBUG_HEADERS=true (and the 5.0.0 image); without them the",
+                  "// cache checks are skipped and only the answer is checked.",
+                  "const cacheCheck = (name, expected) => {",
+                  "  const outcome = pm.response.headers.get('X-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)(name, function () {",
+                  "    pm.expect(outcome).to.eql(expected);",
+                  "    const node = pm.response.headers.get('X-Cache-Node');",
+                  "    pm.expect(node).to.match(/^[\\w.-]+:\\d+$/);",
+                  "    if (expected === 'HIT') { pm.expect(node).to.eql(pm.collectionVariables.get('cacheNode')); }",
+                  "    pm.collectionVariables.set('cacheNode', node);",
+                  "  });",
+                  "};",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Current name\", function () {",
+                  "    pm.expect(pm.response.json().name).to.eql('Cached Duct Tape Armor');",
+                  "});",
+                  "cacheCheck('Served from the cache, by the same node (X-Cache: HIT)', 'HIT');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/recipes/recipe_pm_{{runId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "recipes",
+                "recipe_pm_{{runId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Update the recipe again (invalidates the cached recipes)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Updated\", function () {",
+                  "    pm.expect(pm.response.json().updated).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/recipes/recipe_pm_{{runId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "recipes",
+                "recipe_pm_{{runId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Cached Duct Tape Armor v2\",\n  \"ingredients\": [\n    {\n      \"resourceType\": \"paper\",\n      \"amount\": 2\n    },\n    {\n      \"resourceType\": \"metal\",\n      \"amount\": 1\n    }\n  ],\n  \"output\": \"duct_tape_armor\",\n  \"unlockCondition\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get the recipe after the change (MISS, never the old name)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The cache debug headers are on only with CACHE_DEBUG_HEADERS=true (and the 5.0.0 image); without them the",
+                  "// cache checks are skipped and only the answer is checked.",
+                  "const cacheCheck = (name, expected) => {",
+                  "  const outcome = pm.response.headers.get('X-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)(name, function () {",
+                  "    pm.expect(outcome).to.eql(expected);",
+                  "    const node = pm.response.headers.get('X-Cache-Node');",
+                  "    pm.expect(node).to.match(/^[\\w.-]+:\\d+$/);",
+                  "    if (expected === 'HIT') { pm.expect(node).to.eql(pm.collectionVariables.get('cacheNode')); }",
+                  "    pm.collectionVariables.set('cacheNode', node);",
+                  "  });",
+                  "};",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Current name\", function () {",
+                  "    pm.expect(pm.response.json().name).to.eql('Cached Duct Tape Armor v2');",
+                  "});",
+                  "cacheCheck('Read from PostgreSQL again (X-Cache: MISS)', 'MISS');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/recipes/recipe_pm_{{runId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "recipes",
+                "recipe_pm_{{runId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Get the recipe again (HIT with the new name)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The cache debug headers are on only with CACHE_DEBUG_HEADERS=true (and the 5.0.0 image); without them the",
+                  "// cache checks are skipped and only the answer is checked.",
+                  "const cacheCheck = (name, expected) => {",
+                  "  const outcome = pm.response.headers.get('X-Cache');",
+                  "  (outcome ? pm.test : pm.test.skip)(name, function () {",
+                  "    pm.expect(outcome).to.eql(expected);",
+                  "    const node = pm.response.headers.get('X-Cache-Node');",
+                  "    pm.expect(node).to.match(/^[\\w.-]+:\\d+$/);",
+                  "    if (expected === 'HIT') { pm.expect(node).to.eql(pm.collectionVariables.get('cacheNode')); }",
+                  "    pm.collectionVariables.set('cacheNode', node);",
+                  "  });",
+                  "};",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Current name\", function () {",
+                  "    pm.expect(pm.response.json().name).to.eql('Cached Duct Tape Armor v2');",
+                  "});",
+                  "cacheCheck('Served from the cache (X-Cache: HIT)', 'HIT');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/recipes/recipe_pm_{{runId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "recipes",
+                "recipe_pm_{{runId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "7. Replication and failover",
+      "description": "Needs the 5.0.0 image (with 4.0.0 the checks are skipped). Reads one replica's GET /status and GET /metrics through the broker's queue: the crafting-db-1..3 nodes, which one is the primary, and the failovers seen. Writes are synchronous: a commit returns only once a standby has it. To see a failover, run `docker stop crafting-db-1` and run the folder again about 30 s later: another node is the primary and primaryChanges went up (on the replicas that noticed it). Until the standby is promoted, the service answers 503 database_unavailable with Retry-After: 2.",
+      "item": [
+        {
+          "name": "Replication state (GET /status through the Message Broker)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for game-service, which the message broker requires (Game Service reaches this service through it in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'game-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "const replication = pm.response.json().replication;",
+                  "// The 4.0.0 image has no replication field; the checks need the 5.0.0 image.",
+                  "const check = replication ? pm.test : pm.test.skip;",
+                  "check('The database is replicated (primary + standbys)', function () { pm.expect(replication.mode).to.eql('primary + standbys (repmgr)'); });",
+                  "check('3 nodes, exactly one of them the primary', function () {",
+                  "  pm.expect(replication.nodes.map(n => n.host).sort()).to.eql([\"crafting-db-1\", \"crafting-db-2\", \"crafting-db-3\"]);",
+                  "  const primaries = replication.nodes.filter(n => n.role === 'primary');",
+                  "  pm.expect(primaries).to.have.lengthOf(1);",
+                  "  pm.expect(replication.primary).to.eql(primaries[0].host);",
+                  "});",
+                  "check('The other nodes are standbys, or down while stopped (at least one standby)', function () {",
+                  "  const others = replication.nodes.filter(n => n.host !== replication.primary);",
+                  "  others.forEach(n => pm.expect(n.role).to.be.oneOf(['standby', 'down']));",
+                  "  pm.expect(others.filter(n => n.role === 'standby')).to.not.be.empty;",
+                  "});",
+                  "check('primaryChanges counts the failovers', function () { pm.expect(replication.primaryChanges).to.be.a('number').and.at.least(0); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/crafting-service/status",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "crafting-service",
+                "status"
+              ]
+            },
+            "description": "The replication field of GET /status: the primary, each node's role, and the failovers this replica has seen.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Replication metrics (GET /metrics through the Message Broker)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for game-service, which the message broker requires (Game Service reaches this service through it in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'game-service', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "const text = pm.response.text();",
+                  "const check = text.includes('kahoots_database_has_primary') ? pm.test : pm.test.skip;",
+                  "check('There is a primary to write to', function () { pm.expect(text).to.include('kahoots_database_has_primary 1'); });",
+                  "check('The failovers are counted', function () { pm.expect(text).to.match(/kahoots_database_failovers_total \\d+/); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/crafting-service/metrics",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "crafting-service",
+                "metrics"
+              ]
+            },
+            "description": "kahoots_database_has_primary (1 while a node answers as the primary) and kahoots_database_failovers_total.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "8. Two-Phase Commit",
+      "description": "Needs the 5.0.0 image with Coordination__Mode=2pc (the team compose default). A craft is one transaction over crafting_db, Resource Service (the ingredients) and Player Service (the item): Resource Service holds the ingredients and votes, then Player Service checks the player and votes. The item and the spend land together, or the hold is released and nothing is delivered. Reads the crafts of folders 3 and 4.",
+      "item": [
+        {
+          "name": "The Barricade Kit craft ran as a Two-Phase Commit",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Completed, with its txId\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.status).to.eql('completed');",
+                  "    pm.expect(json.mode).to.eql('2pc');",
+                  "    pm.expect(json.txId).to.match(/^tx_/);",
+                  "    pm.collectionVariables.set('txId', json.txId);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/crafts/{{craftId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "crafts",
+                "{{craftId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Two-Phase Commit of the Barricade Kit (committed)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Both participants voted commit and acknowledged it\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.txId).to.eql(pm.collectionVariables.get('txId'));",
+                  "    pm.expect(json.craftId).to.eql(pm.collectionVariables.get('craftId'));",
+                  "    pm.expect(json.state).to.eql('committed');",
+                  "    pm.expect(json.decision).to.eql('commit');",
+                  "    pm.expect(json.participants['resource-service']).to.eql({ vote: 'commit', ack: 'committed' });",
+                  "    pm.expect(json.participants['player-service']).to.eql({ vote: 'commit', ack: 'committed' });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/crafts/{{craftId}}/transaction",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "crafts",
+                "{{craftId}}",
+                "transaction"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Two-Phase Commit of the unknown player's craft (aborted, ingredients released)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Player Service voted abort, so Resource Service released the hold\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.state).to.eql('aborted');",
+                  "    pm.expect(json.decision).to.eql('abort');",
+                  "    pm.expect(json.reason).to.eql('player_not_found');",
+                  "    pm.expect(json.participants['resource-service']).to.eql({ vote: 'commit', ack: 'aborted' });",
+                  "    pm.expect(json.participants['player-service'].vote).to.eql('abort');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/crafts/{{ghostCraftId}}/transaction",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "crafts",
+                "{{ghostCraftId}}",
+                "transaction"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Two-Phase Commit of the craft without enough materials (aborted at the first vote)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Resource Service voted abort; Player Service was never asked\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.state).to.eql('aborted');",
+                  "    pm.expect(json.reason).to.eql('insufficient_resources');",
+                  "    pm.expect(json.participants['resource-service'].vote).to.eql('abort');",
+                  "    pm.expect(json.participants['player-service'].vote).to.not.exist;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/crafts/{{poorCraftId}}/transaction",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "crafts",
+                "{{poorCraftId}}",
+                "transaction"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Unknown craft's Two-Phase Commit (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 404\", function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});",
+                  "pm.test(\"tx_not_found\", function () {",
+                  "    pm.expect(pm.response.json().error).to.eql('tx_not_found');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/crafts/craft_nope/transaction",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "crafts",
+                "craft_nope",
+                "transaction"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "9. Saga steps (through the Message Broker)",
+      "description": "Needs the 5.0.0 image. The complete step of the broker's craft-item saga and its compensation, cancel (the saga runs with CRAFTING_COORDINATION_MODE=saga: complete on Crafting Service, pay on Resource Service, then deliver on Player Service, and a craft answers 202 with the sagaId; GET /api/sagas/{sagaId} shows its progress). Only the broker calls the steps, so the Gateway refuses them (from loredana-costin/gateway-service#31) and the collection sends them through the broker's queue with a service token. A cancel always answers 200, also before its step.",
+      "item": [
+        {
+          "name": "Saga complete through the Gateway - Internal Route (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 404\", function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});",
+                  "pm.test(\"The Gateway does not route it\", function () {",
+                  "    pm.expect(pm.response.json().error).to.eql('route_not_found');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/crafts/{{craftId}}/saga/complete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "crafts",
+                "{{craftId}}",
+                "saga",
+                "complete"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stepId\": \"saga_pm_{{runId}}:complete\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saga complete without stepId (400)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for message-broker, which the message broker requires (only the broker's saga coordinator calls these steps in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'message-broker', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 400\", function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "pm.test(\"invalid_body\", function () {",
+                  "    pm.expect(pm.response.json().error).to.eql('invalid_body');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/crafting-service/api/crafts/{{craftId}}/saga/complete",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "crafting-service",
+                "api",
+                "crafts",
+                "{{craftId}}",
+                "saga",
+                "complete"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saga cancel before its step - nothing to cancel",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for message-broker, which the message broker requires (only the broker's saga coordinator calls these steps in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'message-broker', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"nothing_to_cancel\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.status).to.eql('nothing_to_cancel');",
+                  "    pm.expect(json.stepId).to.eql('saga_pm_' + pm.collectionVariables.get('runId') + ':complete');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/crafting-service/api/crafts/craft_saga_{{runId}}/saga/cancel",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "crafting-service",
+                "api",
+                "crafts",
+                "craft_saga_{{runId}}",
+                "saga",
+                "cancel"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stepId\": \"saga_pm_{{runId}}:complete\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saga complete of a craft that does not exist (404)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for message-broker, which the message broker requires (only the broker's saga coordinator calls these steps in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'message-broker', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 404\", function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});",
+                  "pm.test(\"craft_not_found\", function () {",
+                  "    pm.expect(pm.response.json().error).to.eql('craft_not_found');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/crafting-service/api/crafts/craft_saga_{{runId}}/saga/complete",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "crafting-service",
+                "api",
+                "crafts",
+                "craft_saga_{{runId}}",
+                "saga",
+                "complete"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stepId\": \"saga_pm_{{runId}}:complete\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saga complete of a craft the Two-Phase Commit aborted (409)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a service token for message-broker, which the message broker requires (only the broker's saga coordinator calls these steps in the system).",
+                  "// HS256, issuer player-service, audience kahoots-with-the-undead, kind service, signed with jwtSecret.",
+                  "const b64url = (wordArray) => CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "const encode = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const header = encode({ alg: 'HS256', typ: 'JWT' });",
+                  "const payload = encode({ sub: 'message-broker', kind: 'service', iss: 'player-service', aud: 'kahoots-with-the-undead', iat: now, exp: now + 3600 });",
+                  "const signature = b64url(CryptoJS.HmacSHA256(header + '.' + payload, pm.collectionVariables.get('jwtSecret')));",
+                  "pm.collectionVariables.set('serviceJwt', header + '.' + payload + '.' + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 409\", function () {",
+                  "    pm.response.to.have.status(409);",
+                  "});",
+                  "pm.test(\"craft_not_in_saga: a step never completes a craft outside its saga\", function () {",
+                  "    pm.expect(pm.response.json().error).to.eql('craft_not_in_saga');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{brokerUrl}}/queues/crafting-service/api/crafts/{{ghostCraftId}}/saga/complete",
+              "host": [
+                "{{brokerUrl}}"
+              ],
+              "path": [
+                "queues",
+                "crafting-service",
+                "api",
+                "crafts",
+                "{{ghostCraftId}}",
+                "saga",
+                "complete"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stepId\": \"saga_pm_{{runId}}:complete\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "10. Cleanup",
       "description": "",
       "item": [
         {

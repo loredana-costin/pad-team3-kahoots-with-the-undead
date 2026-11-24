@@ -29,3 +29,6 @@
 [submodule "discovery-service"]
 	path = discovery-service
 	url = https://github.com/loredana-costin/discovery-service.git
+[submodule "message-broker"]
+	path = message-broker
+	url = https://github.com/loredana-costin/message-broker.git

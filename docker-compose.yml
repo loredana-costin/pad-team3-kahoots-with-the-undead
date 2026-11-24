@@ -1,5 +1,131 @@
+x-redis-cache: &redis-cache-common
+  image: redis:7-alpine
+  command: redis-server --requirepass ${REDIS_PASSWORD} --maxmemory ${REDIS_MAXMEMORY} --maxmemory-policy volatile-lru --save "" --appendonly no
+  restart: unless-stopped
+  environment:
+    REDISCLI_AUTH: ${REDIS_PASSWORD}
+  healthcheck:
+    test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+    interval: 5s
+    timeout: 3s
+    retries: 5
+  networks:
+    - kahoots-network
+
+x-repmgr-node: &repmgr-node
+  image: bitnamilegacy/postgresql-repmgr:17.6.0
+  restart: always
+  healthcheck:
+    test: ["CMD-SHELL", "PGPASSWORD=postgres pg_isready -h 127.0.0.1 -U postgres"]
+    interval: 5s
+    timeout: 5s
+    retries: 20
+  networks:
+    - kahoots-network
+
+x-player-db-env: &player-db-env
+  POSTGRESQL_USERNAME: postgres
+  POSTGRESQL_PASSWORD: postgres
+  POSTGRESQL_POSTGRES_PASSWORD: postgres
+  POSTGRESQL_DATABASE: player_db
+  REPMGR_PASSWORD: repmgr
+  REPMGR_PRIMARY_HOST: player-db-1
+  REPMGR_PARTNER_NODES: player-db-1,player-db-2,player-db-3
+  REPMGR_PORT_NUMBER: 5432
+
+x-game-db-env: &game-db-env
+  POSTGRESQL_USERNAME: postgres
+  POSTGRESQL_PASSWORD: postgres
+  POSTGRESQL_POSTGRES_PASSWORD: postgres
+  POSTGRESQL_DATABASE: game_db
+  REPMGR_PASSWORD: repmgr
+  REPMGR_PRIMARY_HOST: game-db-1
+  REPMGR_PARTNER_NODES: game-db-1,game-db-2,game-db-3
+  REPMGR_PORT_NUMBER: 5432
+
+x-resource-db-env: &resource-db-env
+  POSTGRESQL_USERNAME: ${RESOURCE_DB_USER:-postgres}
+  POSTGRESQL_PASSWORD: ${RESOURCE_DB_PASSWORD:-postgres}
+  POSTGRESQL_POSTGRES_PASSWORD: ${RESOURCE_DB_PASSWORD:-postgres}
+  POSTGRESQL_DATABASE: resource_db
+  REPMGR_PASSWORD: repmgr
+  REPMGR_PRIMARY_HOST: resource-db-1
+  REPMGR_PARTNER_NODES: resource-db-1,resource-db-2,resource-db-3
+  REPMGR_PORT_NUMBER: 5432
+
+x-gateway-db-env: &gateway-db-env
+  POSTGRESQL_USERNAME: ${GATEWAY_DB_USER:-postgres}
+  POSTGRESQL_PASSWORD: ${GATEWAY_DB_PASSWORD:-postgres}
+  POSTGRESQL_POSTGRES_PASSWORD: ${GATEWAY_DB_PASSWORD:-postgres}
+  POSTGRESQL_DATABASE: gateway_db
+  REPMGR_PASSWORD: repmgr
+  REPMGR_PRIMARY_HOST: gateway-db-1
+  REPMGR_PARTNER_NODES: gateway-db-1,gateway-db-2,gateway-db-3
+  REPMGR_PORT_NUMBER: 5432
+
+x-broker-db-env: &broker-db-env
+  POSTGRESQL_USERNAME: ${BROKER_DB_USER:-postgres}
+  POSTGRESQL_PASSWORD: ${BROKER_DB_PASSWORD:-postgres}
+  POSTGRESQL_POSTGRES_PASSWORD: ${BROKER_DB_PASSWORD:-postgres}
+  POSTGRESQL_DATABASE: broker_db
+  REPMGR_PASSWORD: repmgr
+  REPMGR_PRIMARY_HOST: broker-db-1
+  REPMGR_PARTNER_NODES: broker-db-1,broker-db-2,broker-db-3
+  REPMGR_PORT_NUMBER: 5432
+
+x-base-db-env: &base-db-env
+  POSTGRESQL_USERNAME: ${BASE_DB_USER:-postgres}
+  POSTGRESQL_PASSWORD: ${BASE_DB_PASSWORD:-postgres}
+  POSTGRESQL_POSTGRES_PASSWORD: ${BASE_DB_PASSWORD:-postgres}
+  POSTGRESQL_DATABASE: base_db
+  REPMGR_PASSWORD: repmgr
+  REPMGR_PRIMARY_HOST: base-db-1
+  REPMGR_PARTNER_NODES: base-db-1,base-db-2,base-db-3
+  REPMGR_PORT_NUMBER: 5432
+
+x-crafting-db-env: &crafting-db-env
+  POSTGRESQL_USERNAME: ${CRAFTING_DB_USER:-postgres}
+  POSTGRESQL_PASSWORD: ${CRAFTING_DB_PASSWORD:-postgres}
+  POSTGRESQL_POSTGRES_PASSWORD: ${CRAFTING_DB_PASSWORD:-postgres}
+  POSTGRESQL_DATABASE: crafting_db
+  REPMGR_PASSWORD: repmgr
+  REPMGR_PRIMARY_HOST: crafting-db-1
+  REPMGR_PARTNER_NODES: crafting-db-1,crafting-db-2,crafting-db-3
+  REPMGR_PORT_NUMBER: 5432
+
+x-zombie-db-node: &zombie-db-node
+  image: mongo:8
+  restart: always
+  command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+  healthcheck:
+    test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+    interval: 5s
+    timeout: 5s
+    retries: 20
+  networks:
+    - kahoots-network
+
+# Runs once the cluster is up and makes the replication synchronous on every node: a commit returns only after
+# at least one standby has it. The image's env vars set this only on the first primary, and in a config file the
+# first primary hangs at startup waiting for standbys that aren't there yet. ALTER SYSTEM writes it into each
+# node's data directory, so it survives restarts and a promoted standby already has it.
+x-sync-replication: &sync-replication
+  image: postgres:17-alpine
+  restart: "no"
+  entrypoint: ["sh", "-c"]
+  command:
+    - |
+      set -e
+      for node in $$NODES; do
+        psql -h $$node -d postgres -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET synchronous_standby_names = 'ANY 1 (*)'" -c "SELECT pg_reload_conf()" > /dev/null
+        echo "$$node: synchronous_standby_names = $$(psql -h $$node -d postgres -Atc 'SHOW synchronous_standby_names')"
+      done
+  networks:
+    - kahoots-network
+
 services:
   # --- PostgreSQL Databases ---
+  # Exam Service and World Service databases: 1 Primary + 2 Hot-Standby Streaming Replicas each, with automatic failover.
   exam-db:
     image: postgres:16-alpine
     container_name: exam-db
@@ -8,10 +134,94 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: exam_db
+    command:
+      - sh
+      - -c
+      - |
+        docker-entrypoint.sh postgres -c wal_level=replica -c hot_standby=on -c max_wal_senders=10 -c max_replication_slots=10 -c hot_standby_feedback=on -c wal_keep_size=64MB &
+        PG_PID=$$!
+        until pg_isready -U postgres -d exam_db; do sleep 1; done
+        if ! grep -q "host replication all" /var/lib/postgresql/data/pg_hba.conf; then
+          echo "host replication all 0.0.0.0/0 trust" >> /var/lib/postgresql/data/pg_hba.conf
+          psql -U postgres -d exam_db -c "SELECT pg_reload_conf();"
+        fi
+        wait $$PG_PID
     ports:
       - "5433:5432"
     volumes:
       - exam_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d exam_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      kahoots-network:
+        aliases:
+          - exam-db-primary
+
+  exam-db-replica-1:
+    image: postgres:16-alpine
+    container_name: exam-db-replica-1
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: exam_db
+    command:
+      - sh
+      - -c
+      - |
+        export PGPASSWORD=postgres
+        if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then
+          until pg_isready -h exam-db -p 5432 -U postgres; do sleep 1; done
+          rm -rf /var/lib/postgresql/data/*
+          until pg_basebackup -h exam-db -p 5432 -U postgres -D /var/lib/postgresql/data -Fp -Xs -P -R; do
+            sleep 1
+          done
+          chmod 0700 /var/lib/postgresql/data
+        fi
+        exec docker-entrypoint.sh postgres -c wal_level=replica -c hot_standby=on -c max_wal_senders=10 -c max_replication_slots=10 -c hot_standby_feedback=on -c wal_keep_size=64MB
+    volumes:
+      - exam_postgres_replica_1_data:/var/lib/postgresql/data
+    depends_on:
+      exam-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d exam_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kahoots-network
+
+  exam-db-replica-2:
+    image: postgres:16-alpine
+    container_name: exam-db-replica-2
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: exam_db
+    command:
+      - sh
+      - -c
+      - |
+        export PGPASSWORD=postgres
+        if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then
+          until pg_isready -h exam-db -p 5432 -U postgres; do sleep 1; done
+          rm -rf /var/lib/postgresql/data/*
+          until pg_basebackup -h exam-db -p 5432 -U postgres -D /var/lib/postgresql/data -Fp -Xs -P -R; do
+            sleep 1
+          done
+          chmod 0700 /var/lib/postgresql/data
+        fi
+        exec docker-entrypoint.sh postgres -c wal_level=replica -c hot_standby=on -c max_wal_senders=10 -c max_replication_slots=10 -c hot_standby_feedback=on -c wal_keep_size=64MB
+    volumes:
+      - exam_postgres_replica_2_data:/var/lib/postgresql/data
+    depends_on:
+      exam-db:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d exam_db"]
       interval: 5s
@@ -28,6 +238,18 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: world_db
+    command:
+      - sh
+      - -c
+      - |
+        docker-entrypoint.sh postgres -c wal_level=replica -c hot_standby=on -c max_wal_senders=10 -c max_replication_slots=10 -c hot_standby_feedback=on -c wal_keep_size=64MB &
+        PG_PID=$$!
+        until pg_isready -U postgres -d world_db; do sleep 1; done
+        if ! grep -q "host replication all" /var/lib/postgresql/data/pg_hba.conf; then
+          echo "host replication all 0.0.0.0/0 trust" >> /var/lib/postgresql/data/pg_hba.conf
+          psql -U postgres -d world_db -c "SELECT pg_reload_conf();"
+        fi
+        wait $$PG_PID
     ports:
       - "5434:5432"
     volumes:
@@ -38,128 +260,605 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - kahoots-network
+      kahoots-network:
+        aliases:
+          - world-db-primary
 
-  player-db:
-    image: postgres:17-alpine
-    container_name: player-db
+  world-db-replica-1:
+    image: postgres:16-alpine
+    container_name: world-db-replica-1
     restart: always
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: player_db
+      POSTGRES_DB: world_db
+    command:
+      - sh
+      - -c
+      - |
+        export PGPASSWORD=postgres
+        if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then
+          until pg_isready -h world-db -p 5432 -U postgres; do sleep 1; done
+          rm -rf /var/lib/postgresql/data/*
+          until pg_basebackup -h world-db -p 5432 -U postgres -D /var/lib/postgresql/data -Fp -Xs -P -R; do
+            sleep 1
+          done
+          chmod 0700 /var/lib/postgresql/data
+        fi
+        exec docker-entrypoint.sh postgres -c wal_level=replica -c hot_standby=on -c max_wal_senders=10 -c max_replication_slots=10 -c hot_standby_feedback=on -c wal_keep_size=64MB
+    volumes:
+      - world_postgres_replica_1_data:/var/lib/postgresql/data
+    depends_on:
+      world-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d world_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kahoots-network
+
+  world-db-replica-2:
+    image: postgres:16-alpine
+    container_name: world-db-replica-2
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: world_db
+    command:
+      - sh
+      - -c
+      - |
+        export PGPASSWORD=postgres
+        if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then
+          until pg_isready -h world-db -p 5432 -U postgres; do sleep 1; done
+          rm -rf /var/lib/postgresql/data/*
+          until pg_basebackup -h world-db -p 5432 -U postgres -D /var/lib/postgresql/data -Fp -Xs -P -R; do
+            sleep 1
+          done
+          chmod 0700 /var/lib/postgresql/data
+        fi
+        exec docker-entrypoint.sh postgres -c wal_level=replica -c hot_standby=on -c max_wal_senders=10 -c max_replication_slots=10 -c hot_standby_feedback=on -c wal_keep_size=64MB
+    volumes:
+      - world_postgres_replica_2_data:/var/lib/postgresql/data
+    depends_on:
+      world-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d world_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kahoots-network
+
+  # --- Player Service and Game Service databases: one primary and 2 standbys each, with automatic failover ---
+  # repmgr streams the primary's WAL to the standbys. When the primary stops answering, repmgrd on the standbys
+  # elects one and promotes it; the old primary rejoins as a standby when it comes back. The services list all
+  # three nodes and Npgsql connects to whichever is the primary (Target Session Attributes=primary).
+  player-db-1:
+    <<: *repmgr-node
+    container_name: player-db-1
+    environment:
+      <<: *player-db-env
+      REPMGR_NODE_NAME: player-db-1
+      REPMGR_NODE_NETWORK_NAME: player-db-1
     ports:
       - "5435:5432"
     volumes:
-      - player_postgres_data:/var/lib/postgresql/data
+      - player_db_1_data:/bitnami/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d player_db"]
+      test: ["CMD-SHELL", "PGPASSWORD=postgres pg_isready -h 127.0.0.1 -U postgres -d player_db"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 20
+
+  player-db-2:
+    <<: *repmgr-node
+    container_name: player-db-2
+    environment:
+      <<: *player-db-env
+      REPMGR_NODE_NAME: player-db-2
+      REPMGR_NODE_NETWORK_NAME: player-db-2
+    volumes:
+      - player_db_2_data:/bitnami/postgresql
+
+  player-db-3:
+    <<: *repmgr-node
+    container_name: player-db-3
+    environment:
+      <<: *player-db-env
+      REPMGR_NODE_NAME: player-db-3
+      REPMGR_NODE_NETWORK_NAME: player-db-3
+    volumes:
+      - player_db_3_data:/bitnami/postgresql
+
+  game-db-1:
+    <<: *repmgr-node
+    container_name: game-db-1
+    environment:
+      <<: *game-db-env
+      REPMGR_NODE_NAME: game-db-1
+      REPMGR_NODE_NETWORK_NAME: game-db-1
+    ports:
+      - "5436:5432"
+    volumes:
+      - game_db_1_data:/bitnami/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=postgres pg_isready -h 127.0.0.1 -U postgres -d game_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  game-db-2:
+    <<: *repmgr-node
+    container_name: game-db-2
+    environment:
+      <<: *game-db-env
+      REPMGR_NODE_NAME: game-db-2
+      REPMGR_NODE_NETWORK_NAME: game-db-2
+    volumes:
+      - game_db_2_data:/bitnami/postgresql
+
+  game-db-3:
+    <<: *repmgr-node
+    container_name: game-db-3
+    environment:
+      <<: *game-db-env
+      REPMGR_NODE_NAME: game-db-3
+      REPMGR_NODE_NETWORK_NAME: game-db-3
+    volumes:
+      - game_db_3_data:/bitnami/postgresql
+
+  player-db-sync-replication:
+    <<: *sync-replication
+    container_name: player-db-sync-replication
+    environment:
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      NODES: player-db-1 player-db-2 player-db-3
+    depends_on:
+      player-db-1:
+        condition: service_healthy
+      player-db-2:
+        condition: service_healthy
+      player-db-3:
+        condition: service_healthy
+
+  game-db-sync-replication:
+    <<: *sync-replication
+    container_name: game-db-sync-replication
+    environment:
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      NODES: game-db-1 game-db-2 game-db-3
+    depends_on:
+      game-db-1:
+        condition: service_healthy
+      game-db-2:
+        condition: service_healthy
+      game-db-3:
+        condition: service_healthy
+
+  # --- Resource Service database: one primary and 2 standbys, with automatic failover (like player-db, game-db) ---
+  # Prisma connects to one host, so Resource Service asks every node in DATABASE_HOSTS which is the primary
+  # (pg_is_in_recovery() = false) and follows it after a promotion. Synchronous replication: see resource-db-sync-replication.
+  resource-db-1:
+    <<: *repmgr-node
+    container_name: resource-db-1
+    environment:
+      <<: *resource-db-env
+      REPMGR_NODE_NAME: resource-db-1
+      REPMGR_NODE_NETWORK_NAME: resource-db-1
+    ports:
+      - "5437:5432"
+    volumes:
+      - resource_db_1_data:/bitnami/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=$${POSTGRESQL_PASSWORD} pg_isready -h 127.0.0.1 -U $${POSTGRESQL_USERNAME} -d resource_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  resource-db-2:
+    <<: *repmgr-node
+    container_name: resource-db-2
+    environment:
+      <<: *resource-db-env
+      REPMGR_NODE_NAME: resource-db-2
+      REPMGR_NODE_NETWORK_NAME: resource-db-2
+    volumes:
+      - resource_db_2_data:/bitnami/postgresql
+
+  resource-db-3:
+    <<: *repmgr-node
+    container_name: resource-db-3
+    environment:
+      <<: *resource-db-env
+      REPMGR_NODE_NAME: resource-db-3
+      REPMGR_NODE_NETWORK_NAME: resource-db-3
+    volumes:
+      - resource_db_3_data:/bitnami/postgresql
+
+  resource-db-sync-replication:
+    <<: *sync-replication
+    container_name: resource-db-sync-replication
+    environment:
+      PGUSER: postgres
+      PGPASSWORD: ${RESOURCE_DB_PASSWORD:-postgres}
+      NODES: resource-db-1 resource-db-2 resource-db-3
+    depends_on:
+      resource-db-1:
+        condition: service_healthy
+      resource-db-2:
+        condition: service_healthy
+      resource-db-3:
+        condition: service_healthy
+
+  # --- Gateway database: one primary and 2 standbys, with automatic failover (like resource-db) ---
+  # The Two-Phase Commit coordinator's transaction log (TX_LOG_DSN), synchronously replicated: a logged decision survives the primary.
+  # The DSN lists the 3 nodes and asks for the one that accepts writes, so it follows the primary after a promotion.
+  gateway-db-1:
+    <<: *repmgr-node
+    container_name: gateway-db-1
+    environment:
+      <<: *gateway-db-env
+      REPMGR_NODE_NAME: gateway-db-1
+      REPMGR_NODE_NETWORK_NAME: gateway-db-1
+    volumes:
+      - gateway_db_1_data:/bitnami/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=$${POSTGRESQL_PASSWORD} pg_isready -h 127.0.0.1 -U $${POSTGRESQL_USERNAME} -d gateway_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  gateway-db-2:
+    <<: *repmgr-node
+    container_name: gateway-db-2
+    environment:
+      <<: *gateway-db-env
+      REPMGR_NODE_NAME: gateway-db-2
+      REPMGR_NODE_NETWORK_NAME: gateway-db-2
+    volumes:
+      - gateway_db_2_data:/bitnami/postgresql
+
+  gateway-db-3:
+    <<: *repmgr-node
+    container_name: gateway-db-3
+    environment:
+      <<: *gateway-db-env
+      REPMGR_NODE_NAME: gateway-db-3
+      REPMGR_NODE_NETWORK_NAME: gateway-db-3
+    volumes:
+      - gateway_db_3_data:/bitnami/postgresql
+
+  gateway-db-sync-replication:
+    <<: *sync-replication
+    container_name: gateway-db-sync-replication
+    environment:
+      PGUSER: postgres
+      PGPASSWORD: ${GATEWAY_DB_PASSWORD:-postgres}
+      NODES: gateway-db-1 gateway-db-2 gateway-db-3
+    depends_on:
+      gateway-db-1:
+        condition: service_healthy
+      gateway-db-2:
+        condition: service_healthy
+      gateway-db-3:
+        condition: service_healthy
+
+  # --- Message Broker database: one primary and 2 standbys, with automatic failover (like resource-db) ---
+  # The durable topic queues, the dead letter channel and the saga store (QUEUE_STORE_DSN), synchronously replicated.
+  # The DSN lists the 3 nodes and asks for the one that accepts writes, so it follows the primary after a promotion.
+  broker-db-1:
+    <<: *repmgr-node
+    container_name: broker-db-1
+    environment:
+      <<: *broker-db-env
+      REPMGR_NODE_NAME: broker-db-1
+      REPMGR_NODE_NETWORK_NAME: broker-db-1
+    volumes:
+      - broker_db_1_data:/bitnami/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=$${POSTGRESQL_PASSWORD} pg_isready -h 127.0.0.1 -U $${POSTGRESQL_USERNAME} -d broker_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  broker-db-2:
+    <<: *repmgr-node
+    container_name: broker-db-2
+    environment:
+      <<: *broker-db-env
+      REPMGR_NODE_NAME: broker-db-2
+      REPMGR_NODE_NETWORK_NAME: broker-db-2
+    volumes:
+      - broker_db_2_data:/bitnami/postgresql
+
+  broker-db-3:
+    <<: *repmgr-node
+    container_name: broker-db-3
+    environment:
+      <<: *broker-db-env
+      REPMGR_NODE_NAME: broker-db-3
+      REPMGR_NODE_NETWORK_NAME: broker-db-3
+    volumes:
+      - broker_db_3_data:/bitnami/postgresql
+
+  broker-db-sync-replication:
+    <<: *sync-replication
+    container_name: broker-db-sync-replication
+    environment:
+      PGUSER: postgres
+      PGPASSWORD: ${BROKER_DB_PASSWORD:-postgres}
+      NODES: broker-db-1 broker-db-2 broker-db-3
+    depends_on:
+      broker-db-1:
+        condition: service_healthy
+      broker-db-2:
+        condition: service_healthy
+      broker-db-3:
+        condition: service_healthy
+
+  # --- Zombie Service database: a MongoDB replica set (rs0) of 3 members, with automatic failover ---
+  # The members elect a primary among themselves and elect a new one when it stops (electionTimeoutMillis 5 s).
+  # Writes are acknowledged by a majority (w: majority), so an acknowledged write survives a failover.
+  zombie-db-1:
+    <<: *zombie-db-node
+    container_name: zombie-db-1
+    ports:
+      - "27017:27017"
+    volumes:
+      - zombie_db_1_data:/data/db
+
+  zombie-db-2:
+    <<: *zombie-db-node
+    container_name: zombie-db-2
+    volumes:
+      - zombie_db_2_data:/data/db
+
+  zombie-db-3:
+    <<: *zombie-db-node
+    container_name: zombie-db-3
+    volumes:
+      - zombie_db_3_data:/data/db
+
+  # Runs once: initiates the replica set on first start (a no-op afterwards), then waits until it has a primary.
+  zombie-db-init:
+    image: mongo:8
+    container_name: zombie-db-init
+    restart: "no"
+    entrypoint: ["mongosh", "--quiet", "--host", "zombie-db-1", "--eval"]
+    command:
+      - |
+        try {
+          rs.status();
+          print("rs0 already initiated");
+        } catch (e) {
+          if (e.codeName !== "NotYetInitialized") throw e;
+          rs.initiate({ _id: "rs0", settings: { electionTimeoutMillis: 5000 }, members: [
+            { _id: 0, host: "zombie-db-1:27017" },
+            { _id: 1, host: "zombie-db-2:27017" },
+            { _id: 2, host: "zombie-db-3:27017" },
+          ] });
+          print("rs0 initiated");
+        }
+        for (let i = 0; i < 60 && !rs.status().members.some((m) => m.stateStr === "PRIMARY"); i++) sleep(1000);
+        const primary = rs.status().members.find((m) => m.stateStr === "PRIMARY");
+        if (!primary) throw new Error("rs0 has no primary after 60 s");
+        print("rs0 primary: " + primary.name);
+    depends_on:
+      zombie-db-1:
+        condition: service_healthy
+      zombie-db-2:
+        condition: service_healthy
+      zombie-db-3:
+        condition: service_healthy
     networks:
       - kahoots-network
 
-  game-db:
+  # --- Base Service and Crafting Service databases: one primary and 2 standbys each, with automatic failover ---
+  # Both services list every node in POSTGRES_HOST: Npgsql connects to whichever node is the primary
+  # (Target Session Attributes=primary) and finds the new one after repmgr promotes a standby.
+  # Synchronous replication: see base-db-sync-replication and crafting-db-sync-replication.
+  base-db-1:
+    <<: *repmgr-node
+    container_name: base-db-1
+    environment:
+      <<: *base-db-env
+      REPMGR_NODE_NAME: base-db-1
+      REPMGR_NODE_NETWORK_NAME: base-db-1
+    ports:
+      - "5438:5432"
+    volumes:
+      - base_db_1_data:/bitnami/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=$${POSTGRESQL_PASSWORD} pg_isready -h 127.0.0.1 -U $${POSTGRESQL_USERNAME} -d base_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  base-db-2:
+    <<: *repmgr-node
+    container_name: base-db-2
+    environment:
+      <<: *base-db-env
+      REPMGR_NODE_NAME: base-db-2
+      REPMGR_NODE_NETWORK_NAME: base-db-2
+    volumes:
+      - base_db_2_data:/bitnami/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=$${POSTGRESQL_PASSWORD} pg_isready -h 127.0.0.1 -U $${POSTGRESQL_USERNAME} -d base_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  base-db-3:
+    <<: *repmgr-node
+    container_name: base-db-3
+    environment:
+      <<: *base-db-env
+      REPMGR_NODE_NAME: base-db-3
+      REPMGR_NODE_NETWORK_NAME: base-db-3
+    volumes:
+      - base_db_3_data:/bitnami/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=$${POSTGRESQL_PASSWORD} pg_isready -h 127.0.0.1 -U $${POSTGRESQL_USERNAME} -d base_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  base-db-sync-replication:
+    <<: *sync-replication
+    container_name: base-db-sync-replication
+    environment:
+      PGUSER: ${BASE_DB_USER:-postgres}
+      PGPASSWORD: ${BASE_DB_PASSWORD:-postgres}
+      NODES: base-db-1 base-db-2 base-db-3
+    depends_on:
+      base-db-1:
+        condition: service_healthy
+      base-db-2:
+        condition: service_healthy
+      base-db-3:
+        condition: service_healthy
+
+  crafting-db-1:
+    <<: *repmgr-node
+    container_name: crafting-db-1
+    environment:
+      <<: *crafting-db-env
+      REPMGR_NODE_NAME: crafting-db-1
+      REPMGR_NODE_NETWORK_NAME: crafting-db-1
+    ports:
+      - "5439:5432"
+    volumes:
+      - crafting_db_1_data:/bitnami/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=$${POSTGRESQL_PASSWORD} pg_isready -h 127.0.0.1 -U $${POSTGRESQL_USERNAME} -d crafting_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  crafting-db-2:
+    <<: *repmgr-node
+    container_name: crafting-db-2
+    environment:
+      <<: *crafting-db-env
+      REPMGR_NODE_NAME: crafting-db-2
+      REPMGR_NODE_NETWORK_NAME: crafting-db-2
+    volumes:
+      - crafting_db_2_data:/bitnami/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=$${POSTGRESQL_PASSWORD} pg_isready -h 127.0.0.1 -U $${POSTGRESQL_USERNAME} -d crafting_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  crafting-db-3:
+    <<: *repmgr-node
+    container_name: crafting-db-3
+    environment:
+      <<: *crafting-db-env
+      REPMGR_NODE_NAME: crafting-db-3
+      REPMGR_NODE_NETWORK_NAME: crafting-db-3
+    volumes:
+      - crafting_db_3_data:/bitnami/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=$${POSTGRESQL_PASSWORD} pg_isready -h 127.0.0.1 -U $${POSTGRESQL_USERNAME} -d crafting_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  crafting-db-sync-replication:
+    <<: *sync-replication
+    container_name: crafting-db-sync-replication
+    environment:
+      PGUSER: ${CRAFTING_DB_USER:-postgres}
+      PGPASSWORD: ${CRAFTING_DB_PASSWORD:-postgres}
+      NODES: crafting-db-1 crafting-db-2 crafting-db-3
+    depends_on:
+      crafting-db-1:
+        condition: service_healthy
+      crafting-db-2:
+        condition: service_healthy
+      crafting-db-3:
+        condition: service_healthy
+
+  # --- Data Warehouse: a star schema loaded by etl-service from every database above ---
+  # Published on 5440 so it can be queried in the demo; nothing in the system reads from it.
+  warehouse-db:
     image: postgres:17-alpine
-    container_name: game-db
+    container_name: warehouse-db
     restart: always
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: game_db
+      POSTGRES_DB: kahoots_dw
     ports:
-      - "5436:5432"
+      - "5440:5432"
     volumes:
-      - game_postgres_data:/var/lib/postgresql/data
+      - warehouse_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d game_db"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d kahoots_dw"]
       interval: 5s
       timeout: 5s
       retries: 5
     networks:
       - kahoots-network
 
-  resource-db:
-    image: postgres:17-alpine
-    container_name: resource-db
-    restart: always
+  # Extracts every service database (read-only sessions), transforms and upserts into warehouse-db, once at
+  # startup and then every ETL_INTERVAL_SECONDS. A source that is down is skipped and the run marked partial.
+  # The *_DSN values are libpq connection strings, so a cluster can be listed as host=a,b,c with target_session_attrs.
+  # One pass by hand: docker compose run --rm etl-service python etl.py --once
+  etl-service:
+    build: ./etl
+    image: andrei045/kahoots-etl:1.0.0
+    container_name: etl-service
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: ${RESOURCE_DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${RESOURCE_DB_PASSWORD:-postgres}
-      POSTGRES_DB: resource_db
-    ports:
-      - "5437:5432"
-    volumes:
-      - resource_postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d resource_db"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+      ETL_INTERVAL_SECONDS: ${ETL_INTERVAL_SECONDS:-300}
+      WAREHOUSE_DSN: "host=warehouse-db port=5432 dbname=kahoots_dw user=postgres password=postgres"
+      # Player, Game, Resource, Base and Crafting are read from a standby of their cluster when one is up, so the load never touches the primary.
+      PLAYER_DB_DSN: "host=player-db-1,player-db-2,player-db-3 port=5432 dbname=player_db user=postgres password=postgres target_session_attrs=standby"
+      GAME_DB_DSN: "host=game-db-1,game-db-2,game-db-3 port=5432 dbname=game_db user=postgres password=postgres target_session_attrs=standby"
+      EXAM_DB_DSN: "host=exam-db port=5432 dbname=exam_db user=postgres password=postgres"
+      WORLD_DB_DSN: "host=world-db port=5432 dbname=world_db user=postgres password=postgres"
+      RESOURCE_DB_DSN: "host=resource-db-1,resource-db-2,resource-db-3 port=5432 dbname=resource_db user=${RESOURCE_DB_USER:-postgres} password=${RESOURCE_DB_PASSWORD:-postgres} target_session_attrs=standby"
+      BASE_DB_DSN: "host=base-db-1,base-db-2,base-db-3 port=5432 dbname=base_db user=${BASE_DB_USER:-postgres} password=${BASE_DB_PASSWORD:-postgres} target_session_attrs=standby"
+      CRAFTING_DB_DSN: "host=crafting-db-1,crafting-db-2,crafting-db-3 port=5432 dbname=crafting_db user=${CRAFTING_DB_USER:-postgres} password=${CRAFTING_DB_PASSWORD:-postgres} target_session_attrs=standby"
+      # Zombie Service's replica set is read from a secondary when one is up.
+      ZOMBIE_DB_URI: "mongodb://zombie-db-1:27017,zombie-db-2:27017,zombie-db-3:27017/zombie_db?replicaSet=rs0&readPreference=secondaryPreferred"
+    depends_on:
+      warehouse-db:
+        condition: service_healthy
     networks:
       - kahoots-network
 
-  # --- MongoDB Database ---
-  zombie-db:
-    image: mongo:8
-    container_name: zombie-db
-    restart: always
-    ports:
-      - "27017:27017"
-    volumes:
-      - zombie_mongo_data:/data/db
-    healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - kahoots-network
+  # --- Shared Cache (3 standalone nodes, internal only, no persistence; sharded by the services) ---
+  redis-cache-1:
+    <<: *redis-cache-common
+    container_name: redis-cache-1
 
-  base-db:
-    image: postgres:16-alpine
-    container_name: base-db
-    restart: always
-    environment:
-      POSTGRES_USER: ${BASE_DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${BASE_DB_PASSWORD:-postgres}
-      POSTGRES_DB: base_db
-    ports:
-      - "5438:5432"
-    volumes:
-      - base_postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d base_db"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - kahoots-network
+  redis-cache-2:
+    <<: *redis-cache-common
+    container_name: redis-cache-2
 
-  crafting-db:
-    image: postgres:16-alpine
-    container_name: crafting-db
-    restart: always
-    environment:
-      POSTGRES_USER: ${CRAFTING_DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${CRAFTING_DB_PASSWORD:-postgres}
-      POSTGRES_DB: crafting_db
-    ports:
-      - "5439:5432"
-    volumes:
-      - crafting_postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d crafting_db"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - kahoots-network
+  redis-cache-3:
+    <<: *redis-cache-common
+    container_name: redis-cache-3
+
+  redis-cache-4:
+    <<: *redis-cache-common
+    container_name: redis-cache-4
+    profiles: ["cache-scale"]
 
   # --- Microservices (using uploaded DockerHub images) ---
   discovery-service:
-    image: mariaelenabotnari/service-discovery:3.0.0
+    image: mariaelenabotnari/service-discovery:4.0.0
     container_name: discovery-service
     restart: always
     environment:
@@ -168,8 +867,45 @@ services:
       ALERT_DISCORD_WEBHOOK_URL: ${ALERT_DISCORD_WEBHOOK_URL:-}
       ALERT_TELEGRAM_BOT_TOKEN: ${ALERT_TELEGRAM_BOT_TOKEN:-}
       ALERT_TELEGRAM_CHAT_ID: ${ALERT_TELEGRAM_CHAT_ID:-}
+    ports:
+      - "8500:8500"
     expose:
       - "8500"
+    networks:
+      - kahoots-network
+
+  # The Gateway sends every request to the broker's service queues over HTTP (8600) and the services call
+  # each other through it over gRPC (8601); it looks the instances up in Service Discovery. 8600 is published
+  # for the demo: the log download (X-Admin-Key) and the Postman event requests, which publish on a topic.
+  message-broker:
+    image: mariaelenabotnari/message-broker:5.0.0
+    container_name: message-broker
+    restart: always
+    environment:
+      PORT: 8600
+      GRPC_PORT: 8601
+      SERVICE_DISCOVERY_URL: http://discovery-service:8500
+      JWT_SECRET: team-compose-development-secret-at-least-32-chars
+      # Key for GET /logs/download; the download is off while it is empty (set it in .env, never commit it).
+      LOGS_ADMIN_KEY: ${LOGS_ADMIN_KEY:-}
+      # Durable queues: undelivered events, dead letters and sagas are kept in the broker-db cluster and follow
+      # its primary across failovers (from the 5.0.0 image; the 4.0.0 image ignores it and uses QUEUE_STORE_PATH).
+      QUEUE_STORE_DSN: "host=broker-db-1,broker-db-2,broker-db-3 port=5432 dbname=broker_db user=${BROKER_DB_USER:-postgres} password=${BROKER_DB_PASSWORD:-postgres}"
+      DB_FAILOVER_WAIT_SECONDS: 45
+      QUEUE_STORE_PATH: /app/data/messages.db
+    volumes:
+      - broker_data:/app/data
+    ports:
+      - "8600:8600"
+    expose:
+      - "8601"
+    depends_on:
+      discovery-service:
+        condition: service_healthy
+      broker-db-1:
+        condition: service_healthy
+      broker-db-sync-replication:
+        condition: service_completed_successfully
     networks:
       - kahoots-network
 
@@ -177,7 +913,7 @@ services:
   # serve any request. Each registers its own address with Service Discovery; the Gateway reads it
   # to spread requests over them, and each replica looks up World Service there for its ExamPassed events.
   exam-service:
-    image: mariaelenabotnari/exam-service:3.0.0
+    image: mariaelenabotnari/exam-service:5.0.0
     restart: always
     deploy:
       replicas: 3
@@ -190,7 +926,15 @@ services:
       DB_PASSWORD: postgres
       DB_NAME: exam_db
       DATABASE_URL: "postgresql://postgres:postgres@exam-db:5432/exam_db?schema=public"
+      DATABASE_REPLICA_URLS: "postgresql://postgres:postgres@exam-db-replica-1:5432/exam_db?schema=public,postgresql://postgres:postgres@exam-db-replica-2:5432/exam_db?schema=public"
       DISCOVERY_URL: http://discovery-service:8500
+      BROKER_URL: http://message-broker:8600
+      BROKER_GRPC_URL: message-broker:8601
+      JWT_SECRET: team-compose-development-secret-at-least-32-chars
+      REDIS_NODES: redis://:${REDIS_PASSWORD}@redis-cache-1:6379,redis://:${REDIS_PASSWORD}@redis-cache-2:6379,redis://:${REDIS_PASSWORD}@redis-cache-3:6379
+      REDIS_VNODES: ${REDIS_VNODES:-160}
+      CACHE_ENABLED: "true"
+      CACHE_DEBUG_HEADERS: ${CACHE_DEBUG_HEADERS:-false}
     expose:
       - "3000"
     depends_on:
@@ -204,7 +948,7 @@ services:
   # No container_name: 3 replicas share world-db, where zones and rooms live, so any replica can serve
   # any request. Each registers its own address with Service Discovery, which the Gateway and Exam Service read.
   world-service:
-    image: mariaelenabotnari/world-service:3.0.0
+    image: mariaelenabotnari/world-service:5.0.0
     restart: always
     deploy:
       replicas: 3
@@ -217,7 +961,14 @@ services:
       DB_PASSWORD: postgres
       DB_NAME: world_db
       DATABASE_URL: "postgresql://postgres:postgres@world-db:5432/world_db?schema=public"
+      DATABASE_REPLICA_URLS: "postgresql://postgres:postgres@world-db-replica-1:5432/world_db?schema=public,postgresql://postgres:postgres@world-db-replica-2:5432/world_db?schema=public"
       DISCOVERY_URL: http://discovery-service:8500
+      BROKER_URL: http://message-broker:8600
+      JWT_SECRET: team-compose-development-secret-at-least-32-chars
+      REDIS_NODES: redis://:${REDIS_PASSWORD}@redis-cache-1:6379,redis://:${REDIS_PASSWORD}@redis-cache-2:6379,redis://:${REDIS_PASSWORD}@redis-cache-3:6379
+      REDIS_VNODES: ${REDIS_VNODES:-160}
+      CACHE_ENABLED: "true"
+      CACHE_DEBUG_HEADERS: ${CACHE_DEBUG_HEADERS:-false}
     expose:
       - "3001"
     depends_on:
@@ -228,39 +979,45 @@ services:
     networks:
       - kahoots-network
 
-  # No container_name: 3 replicas share player-db, and each registers its own address with
+  # No container_name: 3 replicas share the player-db cluster, and each registers its own address with
   # Service Discovery, which the Gateway reads to spread requests over them (round robin).
   player-service:
-    image: andrei045/player-service:3.1.0
+    image: andrei045/player-service:5.0.0
     restart: always
     deploy:
       replicas: 3
     environment:
-      ConnectionStrings__Postgres: "Host=player-db;Port=5432;Database=player_db;Username=postgres;Password=postgres"
+      ConnectionStrings__Postgres: "Host=player-db-1,player-db-2,player-db-3;Port=5432;Database=player_db;Username=postgres;Password=postgres;Target Session Attributes=primary"
       Jwt__Secret: "team-compose-development-secret-at-least-32-chars"
       Jwt__Issuer: player-service
       Jwt__Audience: kahoots-with-the-undead
       ASPNETCORE_ENVIRONMENT: Development
       Discovery__Url: http://discovery-service:8500
+      REDIS_NODES: redis://:${REDIS_PASSWORD}@redis-cache-1:6379,redis://:${REDIS_PASSWORD}@redis-cache-2:6379,redis://:${REDIS_PASSWORD}@redis-cache-3:6379
+      REDIS_VNODES: ${REDIS_VNODES:-160}
+      CACHE_ENABLED: "true"
+      CACHE_DEBUG_HEADERS: ${CACHE_DEBUG_HEADERS:-false}
     expose:
       - "8080"
     depends_on:
-      player-db:
+      player-db-1:
         condition: service_healthy
+      player-db-sync-replication:
+        condition: service_completed_successfully
       discovery-service:
         condition: service_healthy
     networks:
       - kahoots-network
 
-  # No container_name: 3 replicas share game-db, where sessions, actions and socket tickets live,
+  # No container_name: 3 replicas share the game-db cluster, where sessions, actions and socket tickets live,
   # so any replica can serve any request. Each registers its own address with Service Discovery.
   game-service:
-    image: andrei045/game-service:3.1.0
+    image: andrei045/game-service:5.0.0
     restart: always
     deploy:
       replicas: 3
     environment:
-      ConnectionStrings__Postgres: "Host=game-db;Port=5432;Database=game_db;Username=postgres;Password=postgres"
+      ConnectionStrings__Postgres: "Host=game-db-1,game-db-2,game-db-3;Port=5432;Database=game_db;Username=postgres;Password=postgres;Target Session Attributes=primary"
       ASPNETCORE_ENVIRONMENT: Development
       Services__World: http://gateway-service:8000
       Services__Zombie: http://gateway-service:8000
@@ -268,85 +1025,111 @@ services:
       Services__Resource: http://gateway-service:8000
       Services__Base: http://gateway-service:8000
       Services__Exam: http://gateway-service:8000
-      # Signs Game Service's own calls through the Gateway; same secret as Player Service and the Gateway.
+      # Calls to the other services go to the message broker over gRPC (Broker.Relay); the Services__* URLs
+      # above are the fallback of an image without broker support.
+      Broker__Url: http://message-broker:8601
+      # The broker's HTTP API, where Game Service starts the clear-room saga.
+      Broker__HttpUrl: http://message-broker:8600
+      # How a cleared room completes: 2pc (a Two-Phase Commit Game Service coordinates) or saga (the broker's clear-room saga).
+      Coordination__Mode: ${GAME_COORDINATION_MODE:-2pc}
+      # Signs Game Service's own calls through the broker; same secret as Player Service, the Gateway and the broker.
       Jwt__Secret: "team-compose-development-secret-at-least-32-chars"
       Jwt__Issuer: player-service
       Jwt__Audience: kahoots-with-the-undead
       # The URL clients get from POST /api/sessions/{id}/websocket; the socket port is the
       # only one published, REST stays behind the Gateway. Each replica takes one host port of
-      # 3003-3005; tickets are shared in game-db, so the replica on 3003 accepts any of them.
+      # 3003-3005; tickets are shared in the game-db cluster, so the replica on 3003 accepts any of them.
       WebSocket__PublicBaseUrl: ws://localhost:3003
       Discovery__Url: http://discovery-service:8500
+      REDIS_NODES: redis://:${REDIS_PASSWORD}@redis-cache-1:6379,redis://:${REDIS_PASSWORD}@redis-cache-2:6379,redis://:${REDIS_PASSWORD}@redis-cache-3:6379
+      REDIS_VNODES: ${REDIS_VNODES:-160}
+      CACHE_ENABLED: "true"
+      CACHE_DEBUG_HEADERS: ${CACHE_DEBUG_HEADERS:-false}
     ports:
       - "3003-3005:8081"
     expose:
       - "8080"
     depends_on:
-      game-db:
+      game-db-1:
         condition: service_healthy
+      game-db-sync-replication:
+        condition: service_completed_successfully
       discovery-service:
+        condition: service_healthy
+      message-broker:
         condition: service_healthy
     networks:
       - kahoots-network
 
-  # No container_name: 3 replicas share resource-db, and each registers its own address with
+  # No container_name: 3 replicas share the resource-db cluster, and each registers its own address with
   # Service Discovery, which the Gateway reads to spread requests over them (round robin).
   # Idempotency keys and the table bootstrap are safe across replicas (resource-service #248, #249).
   resource-service:
-    image: costinloredana/resource-service:3.0.0
+    image: costinloredana/resource-service:5.0.0
     deploy:
       replicas: 3
     restart: always
     environment:
       PORT: 4002
-      POSTGRES_HOST: resource-db
-      POSTGRES_PORT: 5432
-      POSTGRES_USER: ${RESOURCE_DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${RESOURCE_DB_PASSWORD:-postgres}
-      POSTGRES_DB: resource_db
+      # The user, password and database; with DATABASE_HOSTS the service connects to whichever node is the primary
+      # and follows it across failovers.
+      DATABASE_URL: postgresql://${RESOURCE_DB_USER:-postgres}:${RESOURCE_DB_PASSWORD:-postgres}@resource-db-1:5432/resource_db
+      DATABASE_HOSTS: resource-db-1:5432,resource-db-2:5432,resource-db-3:5432
       DISCOVERY_URL: http://discovery-service:8500
+      REDIS_NODES: redis://:${REDIS_PASSWORD}@redis-cache-1:6379,redis://:${REDIS_PASSWORD}@redis-cache-2:6379,redis://:${REDIS_PASSWORD}@redis-cache-3:6379
+      REDIS_VNODES: ${REDIS_VNODES:-160}
+      CACHE_ENABLED: "true"
+      CACHE_DEBUG_HEADERS: ${CACHE_DEBUG_HEADERS:-false}
     # Internal only: reachable through the gateway on :8000
     expose:
       - "4002"
     depends_on:
-      resource-db:
+      resource-db-1:
         condition: service_healthy
+      resource-db-sync-replication:
+        condition: service_completed_successfully
       discovery-service:
         condition: service_healthy
     networks:
       - kahoots-network
 
-  # No container_name: 3 replicas share zombie-db, and each registers its own address with
+  # No container_name: 3 replicas share the zombie-db replica set, and each registers its own address with
   # Service Discovery, which the Gateway reads to spread requests over them (round robin).
   zombie-service:
-    image: costinloredana/zombie-service:3.0.0
+    image: costinloredana/zombie-service:5.0.0
     deploy:
       replicas: 3
     restart: always
     environment:
       PORT: 4001
-      MONGO_URI: "mongodb://zombie-db:27017/zombie_db"
+      # Every member and the set's name: the driver finds the primary and follows it across failovers.
+      MONGO_URI: "mongodb://zombie-db-1:27017,zombie-db-2:27017,zombie-db-3:27017/zombie_db?replicaSet=rs0"
       DISCOVERY_URL: http://discovery-service:8500
+      REDIS_NODES: redis://:${REDIS_PASSWORD}@redis-cache-1:6379,redis://:${REDIS_PASSWORD}@redis-cache-2:6379,redis://:${REDIS_PASSWORD}@redis-cache-3:6379
+      REDIS_VNODES: ${REDIS_VNODES:-160}
+      CACHE_ENABLED: "true"
+      CACHE_DEBUG_HEADERS: ${CACHE_DEBUG_HEADERS:-false}
     # Internal only: reachable through the gateway on :8000
     expose:
       - "4001"
     depends_on:
-      zombie-db:
-        condition: service_healthy
+      zombie-db-init:
+        condition: service_completed_successfully
       discovery-service:
         condition: service_healthy
     networks:
       - kahoots-network
 
   base-service:
-    image: cristi150404/base-service:3.0.0
-    # No container_name: 3 replicas share the base-db database, and each registers its own address
+    image: cristi150404/base-service:5.0.0
+    # No container_name: 3 replicas share the base-db-1..3 cluster, and each registers its own address
     # with Service Discovery, which the Gateway reads to spread requests over them (round robin).
     deploy:
       replicas: 3
     restart: always
     environment:
-      POSTGRES_HOST: base-db
+      # Every node of the cluster: the service connects to whichever one is the primary and follows it across failovers.
+      POSTGRES_HOST: base-db-1,base-db-2,base-db-3
       POSTGRES_PORT: 5432
       POSTGRES_USER: ${BASE_DB_USER:-postgres}
       POSTGRES_PASSWORD: ${BASE_DB_PASSWORD:-postgres}
@@ -355,29 +1138,47 @@ services:
       Services__Resource: http://gateway-service:8000
       Services__Player: http://gateway-service:8000
       Services__World: http://gateway-service:8000
-      # Signs the service token the Gateway accepts; same value as the Gateway's JWT_SECRET.
+      # Calls to the other services go to the message broker over gRPC (Broker.Relay), and events are
+      # published on its topics; the Services__* URLs above are the fallback when Broker__Url is empty.
+      Broker__Url: http://message-broker:8601
+      # Signs the service token the broker accepts; same value as the Gateway's and the broker's JWT_SECRET.
       Jwt__Secret: team-compose-development-secret-at-least-32-chars
       ASPNETCORE_ENVIRONMENT: Development
       Discovery__Url: http://discovery-service:8500
+      # Key for GET /logs/download; the download is off while it is empty (set it in .env, never commit it).
+      Logs__AdminKey: ${LOGS_ADMIN_KEY:-}
+      REDIS_NODES: redis://:${REDIS_PASSWORD}@redis-cache-1:6379,redis://:${REDIS_PASSWORD}@redis-cache-2:6379,redis://:${REDIS_PASSWORD}@redis-cache-3:6379
+      REDIS_VNODES: ${REDIS_VNODES:-160}
+      CACHE_ENABLED: "true"
+      CACHE_DEBUG_HEADERS: ${CACHE_DEBUG_HEADERS:-false}
+      # Lab 5: an action that spends resources runs as a Two-Phase Commit coordinated by this service
+      # (saga: the broker's saga instead, started on its HTTP API).
+      Coordination__Mode: ${BASE_COORDINATION_MODE:-2pc}
+      Broker__HttpUrl: http://message-broker:8600
     expose:
       - "5003"
     depends_on:
-      base-db:
+      base-db-1:
         condition: service_healthy
+      base-db-sync-replication:
+        condition: service_completed_successfully
       discovery-service:
+        condition: service_healthy
+      message-broker:
         condition: service_healthy
     networks:
       - kahoots-network
 
   crafting-service:
-    image: cristi150404/crafting-service:3.0.0
-    # No container_name: 3 replicas share the crafting-db database, and each registers its own address
+    image: cristi150404/crafting-service:5.0.0
+    # No container_name: 3 replicas share the crafting-db-1..3 cluster, and each registers its own address
     # with Service Discovery, which the Gateway reads to spread requests over them (round robin).
     deploy:
       replicas: 3
     restart: always
     environment:
-      POSTGRES_HOST: crafting-db
+      # Every node of the cluster: the service connects to whichever one is the primary and follows it across failovers.
+      POSTGRES_HOST: crafting-db-1,crafting-db-2,crafting-db-3
       POSTGRES_PORT: 5432
       POSTGRES_USER: ${CRAFTING_DB_USER:-postgres}
       POSTGRES_PASSWORD: ${CRAFTING_DB_PASSWORD:-postgres}
@@ -387,22 +1188,39 @@ services:
       Services__Player: http://gateway-service:8000
       Services__Exam: http://gateway-service:8000
       Services__World: http://gateway-service:8000
-      # Signs the service token the Gateway accepts; same value as the Gateway's JWT_SECRET.
+      # Calls to the other services go to the message broker over gRPC (Broker.Relay), and events are
+      # published on its topics; the Services__* URLs above are the fallback when Broker__Url is empty.
+      Broker__Url: http://message-broker:8601
+      # Signs the service token the broker accepts; same value as the Gateway's and the broker's JWT_SECRET.
       Jwt__Secret: team-compose-development-secret-at-least-32-chars
       ASPNETCORE_ENVIRONMENT: Development
       Discovery__Url: http://discovery-service:8500
+      # Key for GET /logs/download; the download is off while it is empty (set it in .env, never commit it).
+      Logs__AdminKey: ${LOGS_ADMIN_KEY:-}
+      REDIS_NODES: redis://:${REDIS_PASSWORD}@redis-cache-1:6379,redis://:${REDIS_PASSWORD}@redis-cache-2:6379,redis://:${REDIS_PASSWORD}@redis-cache-3:6379
+      REDIS_VNODES: ${REDIS_VNODES:-160}
+      CACHE_ENABLED: "true"
+      CACHE_DEBUG_HEADERS: ${CACHE_DEBUG_HEADERS:-false}
+      # Lab 5: an action that spends resources runs as a Two-Phase Commit coordinated by this service
+      # (saga: the broker's saga instead, started on its HTTP API).
+      Coordination__Mode: ${CRAFTING_COORDINATION_MODE:-2pc}
+      Broker__HttpUrl: http://message-broker:8600
     expose:
       - "5004"
     depends_on:
-      crafting-db:
+      crafting-db-1:
         condition: service_healthy
+      crafting-db-sync-replication:
+        condition: service_completed_successfully
       discovery-service:
+        condition: service_healthy
+      message-broker:
         condition: service_healthy
     networks:
       - kahoots-network
 
   gateway-service:
-    image: mariaelenabotnari/gateway-service:3.0.0
+    image: mariaelenabotnari/gateway-service:5.0.0
     container_name: gateway-service
     restart: always
     environment:
@@ -420,27 +1238,164 @@ services:
       # a service with no registered instance falls back to its *_SERVICE_URL above.
       DISCOVERY_URL: http://discovery-service:8500
       DISCOVERY_SERVICES: zombie-service,resource-service,base-service,crafting-service,player-service,game-service,exam-service,world-service
+      # Every request goes to the broker's queue of the target service; the broker balances and breaks circuits.
+      BROKER_URL: http://message-broker:8600
+      # The verified tokens (authentication data) are cached in the shared Redis nodes, sharded with consistent
+      # hashing like the services' keys (from the 5.0.0 image; the 4.0.0 image ignores these).
+      REDIS_NODES: redis://:${REDIS_PASSWORD}@redis-cache-1:6379,redis://:${REDIS_PASSWORD}@redis-cache-2:6379,redis://:${REDIS_PASSWORD}@redis-cache-3:6379
+      REDIS_VNODES: ${REDIS_VNODES:-160}
+      CACHE_ENABLED: "true"
+      CACHE_DEBUG_HEADERS: ${CACHE_DEBUG_HEADERS:-false}
+      # The Two-Phase Commit transaction log, in the gateway-db cluster; it follows the primary across failovers
+      # and answers 503 database_unavailable meanwhile (from the 5.0.0 image; the 4.0.0 image keeps it in SQLite).
+      TX_LOG_DSN: "host=gateway-db-1,gateway-db-2,gateway-db-3 port=5432 dbname=gateway_db user=${GATEWAY_DB_USER:-postgres} password=${GATEWAY_DB_PASSWORD:-postgres}"
     ports:
       - "8000:8000"
+    depends_on:
+      message-broker:
+        condition: service_healthy
+      gateway-db-1:
+        condition: service_healthy
+      gateway-db-sync-replication:
+        condition: service_completed_successfully
+    networks:
+      - kahoots-network
+
+  # --- Monitoring: Prometheus scrapes the metrics, Alloy ships the container logs to Loki, Grafana shows both ---
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    container_name: prometheus
+    restart: always
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=2d
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - kahoots-network
+
+  loki:
+    image: grafana/loki:3.4.2
+    container_name: loki
+    restart: always
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki_data:/loki
+    expose:
+      - "3100"
+    networks:
+      - kahoots-network
+
+  alloy:
+    image: grafana/alloy:v1.8.1
+    container_name: alloy
+    restart: always
+    command:
+      - run
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./monitoring/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      # Read-only access to the Docker socket, to find the containers and read their logs.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+    networks:
+      - kahoots-network
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    container_name: grafana
+    restart: always
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - loki
     networks:
       - kahoots-network
 
 volumes:
-  base_postgres_data:
+  broker_data:
     driver: local
-  crafting_postgres_data:
+  base_db_1_data:
     driver: local
-  player_postgres_data:
+  base_db_2_data:
     driver: local
-  game_postgres_data:
+  base_db_3_data:
+    driver: local
+  crafting_db_1_data:
+    driver: local
+  crafting_db_2_data:
+    driver: local
+  crafting_db_3_data:
+    driver: local
+  player_db_1_data:
+    driver: local
+  player_db_2_data:
+    driver: local
+  player_db_3_data:
+    driver: local
+  game_db_1_data:
+    driver: local
+  game_db_2_data:
+    driver: local
+  game_db_3_data:
     driver: local
   exam_postgres_data:
     driver: local
+  exam_postgres_replica_1_data:
+    driver: local
+  exam_postgres_replica_2_data:
+    driver: local
   world_postgres_data:
     driver: local
-  resource_postgres_data:
+  world_postgres_replica_1_data:
     driver: local
-  zombie_mongo_data:
+  world_postgres_replica_2_data:
+    driver: local
+  resource_db_1_data:
+    driver: local
+  resource_db_2_data:
+    driver: local
+  resource_db_3_data:
+    driver: local
+  gateway_db_1_data:
+    driver: local
+  gateway_db_2_data:
+    driver: local
+  gateway_db_3_data:
+    driver: local
+  broker_db_1_data:
+    driver: local
+  broker_db_2_data:
+    driver: local
+  broker_db_3_data:
+    driver: local
+  zombie_db_1_data:
+    driver: local
+  zombie_db_2_data:
+    driver: local
+  zombie_db_3_data:
+    driver: local
+  warehouse_postgres_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  loki_data:
+    driver: local
+  grafana_data:
     driver: local
 
 networks:
