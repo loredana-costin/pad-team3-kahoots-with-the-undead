@@ -2462,7 +2462,7 @@ Status, concurrency and thread counters, Service Discovery status, the pending m
 {
   "status": "ok",
   "service": "message-broker",
-  "version": "4.0.0",
+  "version": "5.0.0",
   "discovery": "up",
   "concurrency": { "current": 0, "max": 100 },
   "queues": {

@@ -3,8 +3,10 @@
 # the Postman environment that the "Kahoots Gateway" collection uses (postman/kahoots-local.postman_environment.json).
 # Run from anywhere after `docker compose up -d`. Safe to run again: existing data is left alone.
 #
-# Every API call goes through the Gateway with a Bearer token, like a real client. Reference data that has
-# no API (resource inventories, base rooms, crafting recipes, exam history) is written to the databases.
+# Every API call goes through the Gateway with a Bearer token, like a real client, except the routes the Gateway
+# keeps for the services (a player's XP, items and achievements), which go through the broker's relay with a
+# service token. Reference data that has no API (resource inventories, base rooms, crafting recipes, exam history)
+# is written to the databases.
 #
 #   Player Service   - registers the test users, gives new users XP, items, an achievement and a trade.
 #   Resource Service - the image's own seed (resource types, nodes) plus resources for each user.
@@ -18,6 +20,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 GATEWAY_URL=${GATEWAY_URL:-http://localhost:8000}
+BROKER_URL=${BROKER_URL:-http://localhost:8600}
+# The compose's JWT_SECRET, to mint the service token of the routes the Gateway keeps for the services.
+JWT_SECRET=${JWT_SECRET:-team-compose-development-secret-at-least-32-chars}
 ENV_FILE=postman/kahoots-local.postman_environment.json
 
 # username:password:email:role. The first user is the one the Postman environment logs in as.
@@ -34,6 +39,22 @@ api() {
     local args=(-s -X "$method" "$GATEWAY_URL$path" -H "Content-Type: application/json" -w '\n%{http_code}')
     [[ -n "$body" ]] && args+=(-d "$body")
     [[ -n "$jwt" ]] && args+=(-H "Authorization: Bearer $jwt")
+    curl "${args[@]}"
+}
+b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+# A Game Service token (HS256, kind service), as the services' own calls through the broker carry.
+service_jwt() {
+    local now header payload
+    now=$(date +%s)
+    header=$(printf '{"alg":"HS256","typ":"JWT"}' | b64url)
+    payload=$(printf '{"sub":"game-service","kind":"service","iss":"player-service","aud":"kahoots-with-the-undead","iat":%s,"exp":%s}' "$now" "$((now + 3600))" | b64url)
+    echo "$header.$payload.$(printf '%s' "$header.$payload" | openssl dgst -sha256 -hmac "$JWT_SECRET" -binary | b64url)"
+}
+# broker METHOD PATH [JSON] -> like api, through the broker's relay with a service token.
+broker() {
+    local method=$1 path=$2 body=${3:-}
+    local args=(-s -X "$method" "$BROKER_URL/relay$path" -H "Content-Type: application/json" -H "Authorization: Bearer $(service_jwt)" -w '\n%{http_code}')
+    [[ -n "$body" ]] && args+=(-d "$body")
     curl "${args[@]}"
 }
 status_of() { tail -n1 <<< "$1"; }
@@ -102,10 +123,11 @@ for path in /api/sessions /api/resource-types /api/zombie-types "/api/base?skip=
 done
 
 # XP and items stack on every call, so they are only given to users registered by this run.
+# Progression, items and achievements are service routes the Gateway refuses, so they go through the broker.
 player_call() {
     local username=$1 method=$2 path=$3 body=$4
     expect_ok "$method $path for $username" \
-        "$(api "$method" "/api/players/${PLAYER_ID[$username]}$path" "$body" "${JWT[$username]}")"
+        "$(broker "$method" "/player-service/api/players/${PLAYER_ID[$username]}$path" "$body")"
 }
 add_item() { player_call "$1" POST /inventory/items "{\"itemId\":\"$2\",\"quantity\":$3,\"source\":\"seed\"}"; }
 

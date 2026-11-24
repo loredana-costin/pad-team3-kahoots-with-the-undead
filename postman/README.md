@@ -13,6 +13,7 @@ Collections for testing each service. One file per service, Postman schema v2.1.
 | `base-service.postman_collection.json` | Base Service | `http://localhost:8000` |
 | `crafting-service.postman_collection.json` | Crafting Service | `http://localhost:8000` |
 | `message-broker.postman_collection.json` | Message Broker | `http://localhost:8600` |
+| `kahoots-gateway.postman_collection.json` | Every service, through the Gateway | `gatewayUrl` in `kahoots-local.postman_environment.json` |
 
 ## Running in Postman
 
@@ -44,9 +45,24 @@ the broker delivers the event to the subscribed service, and the next request re
 back through the Gateway. `brokerUrl` defaults to `http://localhost:8600`, which the team compose
 publishes.
 
-The Message Broker collection (`message-broker.postman_collection.json`) verifies all 7 Message Broker tasks
-running on port `8600` (with every assertion labeled `[SUCCESS] ...` or `[EXPECTED REJECTION] ...` in the Test Results tab):
-- **Folder 0 (Setup & Token Minting)**: Health check and dynamic HMAC-SHA256 JWT minting for both service tokens (`kind: "service"`) and player tokens (`kind: "player"`).
+The Kahoots Gateway collection (`kahoots-gateway.postman_collection.json`) calls every service through the Gateway
+with the seeded veteran's token, using the environment that `bash db-scripts/seed-all.sh` writes. For the routes only
+the services call (XP, items, achievements, event deliveries, exam encounters, spawning, gathering, spending, refunds,
+base actions, and every Two-Phase Commit and saga step), it checks that the Gateway refuses them with
+`404 route_not_found`; the per-service collections call them through the broker. It also:
+
+- cures and robs with the seeded zombie through the Gateway's Two-Phase Commit (`POST /api/zombies/{id}/cure` and
+  `/steal`): `200` committed, or `409 transaction_aborted` with the reason (the seeded zombie's type decides which),
+  or `202` with the saga under `COORDINATION_MODE=saga`;
+- reads the transaction back (`GET /api/tx/{txId}`), and checks `400 invalid_body`, `404 tx_not_found` and
+  `404 saga_not_found`;
+- reads the seeded action's room-clearing transaction (`GET /api/actions/{id}/transaction`, `404` until a room is
+  cleared).
+
+The Message Broker collection (`message-broker.postman_collection.json`) verifies the Message Broker tasks
+running on port `8600` (with every assertion labeled `[SUCCESS] ...` or `[EXPECTED REJECTION] ...` in the Test Results tab).
+The log downloads need `LOGS_ADMIN_KEY` in `.env` to equal the collection variable `logsAdminKey`.
+- **Folder 0 (Setup & Token Minting)**: Health check and dynamic HMAC-SHA256 JWT minting for both service tokens (`kind: "service"`) and player tokens (`kind: "player"`). `GET /status` also checks where the message and saga stores are kept (`database`) and, with the replicated store, that `broker-db-1..3` have exactly one primary and the others are `standby`.
 - **Folder 1 (Task 1 - Logs Download)**: Exercises `GET /logs/download` testing full download, `tail=50`, `since` timestamp filtering, and security gates (`401 missing_admin_key`, `403 invalid_admin_key`).
 - **Folder 2 (Task 2 - Service-to-Service Relay)**: Verifies `ANY /relay/{serviceName}/{path}`, testing service token authentication, anti-spoofing header stripping (`X-Service-Name`), `401` on missing token, `403` on player token, and `400` on path traversal and self-relay loops.
 - **Folder 3 (Task 2 & 7 - Load Balancing, Circuit Breakers & High Availability)**: Checks Service Discovery connectivity, verifies Load-Aware Round-Robin rotation, Circuit Breaker state transitions (`CLOSED` -> `OPEN` -> `HALF_OPEN` -> `CLOSED`), and High-Availability rerouting.
@@ -54,8 +70,9 @@ running on port `8600` (with every assertion labeled `[SUCCESS] ...` or `[EXPECT
 - **Folder 5 (Task 3 & 4 - Topic-Based Queues & GET /topics)**: Publishes events to `POST /topics/{topic}/publish` (`202 Accepted`), fetches the registered topics from `GET /topics`, and verifies `400`/`401` rejections.
 - **Folder 6 (Task 4 - Thread-per-Request Architecture)**: Proves consecutive requests execute on distinct OS worker threads (`X-Broker-Thread: req-xxxx`) and inspects thread pool statistics in `/health`.
 - **Folder 7 (Task 5 - gRPC Service-to-Service Communication)**: Verifies the gRPC server is active on port `8601` and `broker_grpc_calls_total` is exported.
-- **Folder 8 (Task 6 - Durable Queues & Dead Letter Channel)**: Publishes an unsendable event to trigger the SQLite-backed Dead Letter Channel, fetches dead letters via `GET /dead-letters` (and filtered via `?topic=DeadLetterDemo&limit=5`), and tests `401`/`400` error gates.
+- **Folder 8 (Task 6 - Durable Queues & Dead Letter Channel)**: Publishes an unsendable event to trigger the SQLite-backed Dead Letter Channel, fetches dead letters via `GET /dead-letters` (and filtered via `?topic=DeadLetterDemo&limit=5`), and tests `401`/`400` error gates. It then redelivers that dead letter (`POST /dead-letters/{id}/redeliver`: `202`, same `messageId`) and checks `404 dead_letter_not_found` for an unknown id.
 - **Folder 9 (Task 7 - Prometheus & Grafana/Loki Observability)**: Scrapes `GET /metrics` for HTTP, dispatch, circuit breaker, HA reroute, in-flight load, thread pool, and durable message store gauges, and verifies structured JSON logs with correlation `requestId`s.
+- **Folder 10 (Sagas)**: Creates an inventory with 10 chemicals and spawns 2 Infected Zombies through the services' queues. It runs a `cure-zombie` saga that completes (both steps `succeeded`, the cure requirement charged), and one the player can't pay for, which is compensated (`402 rejected_insufficient` on `pay`, the cure undone). It lists sagas by state and name, and checks `409 saga_not_failed` on retry, `400 invalid_saga` / `invalid_limit`, `404 saga_not_found`, `401` without a token, the `broker_sagas_total` metrics and the durable saga store in `/health`. Then it deletes its inventory. Needs the 5.0.0 broker, Zombie and Resource images.
 
 The Base and Crafting collections use the broker the same way. Their setup credits the test player
 through Resource Service's `POST /api/refund`, which the Gateway refuses, so it goes to the broker's
