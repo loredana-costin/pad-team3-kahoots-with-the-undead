@@ -175,6 +175,21 @@ The Game collection's last requests clear rooms in a fresh session, with the pla
   and the one for `p_ghost` is compensated (the action reopened);
 - that the Gateway refuses the saga step routes.
 
+The Base and Crafting collections cover lab 5 for Base and Crafting Service in four folders each (Base 8 to 11,
+Crafting 6 to 9), and need their **5.0.0** images with the compose defaults (`Coordination__Mode=2pc`):
+
+- **Cache:** reads the player's base (Base) or a recipe (Crafting) twice, `X-Cache: MISS` then `HIT` from the same
+  node, changes it (a room claimed and unclaimed, the recipe updated), and checks that the next read is a `MISS`
+  with the new value and the one after it a `HIT` (with `CACHE_DEBUG_HEADERS=true`);
+- **Replication and failover:** one replica's `GET /status` and `GET /metrics` through the broker's queue, with
+  `base-db-1..3` or `crafting-db-1..3` (exactly one primary, the others `standby`, or `down` while stopped);
+- **Two-Phase Commit:** a committed transaction (a barricade; the Barricade Kit craft) with each participant's vote
+  and acknowledgement, aborted ones (an infirmary without chemicals; the crafts for `pm_ghost_*`, which Player
+  Service doesn't know, and for `pm_poor_*`, who has no materials), and `404 tx_not_found`;
+- **Saga steps:** the Gateway refuses them (`404 route_not_found`); through the broker's queue, `400` without a
+  step id, a compensation before its step (`nothing_to_revert`, `nothing_to_cancel`), an unknown action or craft
+  (`404`), and a craft the Two-Phase Commit aborted (`409 craft_not_in_saga`).
+
 Requests are numbered and share state through collection variables, so run the whole
 collection rather than firing requests individually - later requests depend on ids captured
 by earlier ones.
