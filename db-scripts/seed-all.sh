@@ -49,7 +49,7 @@ expect_ok() {
 }
 
 psql_in() {
-    # The repmgr nodes (player-db-*, game-db-*, resource-db-*) name their variables POSTGRESQL_*; the other databases POSTGRES_*.
+    # The repmgr nodes (player-db-*, game-db-*, resource-db-*, base-db-*, crafting-db-*) name their variables POSTGRESQL_*; the other databases POSTGRES_*.
     docker compose exec -T "$1" sh -c 'PGPASSWORD="${POSTGRESQL_PASSWORD:-}" psql -v ON_ERROR_STOP=1 -q -At -U "${POSTGRES_USER:-$POSTGRESQL_USERNAME}" -d "${POSTGRES_DB:-$POSTGRESQL_DATABASE}"'
 }
 
@@ -207,7 +207,8 @@ unlocked_rooms=$(psql_in world-db <<< "SELECT string_agg(format('(%L,%L)', r.roo
 
 # ---------------------------------------------------------------- Base Service
 echo; echo "== Base Service"
-psql_in base-db <<SQL
+BASE_PRIMARY=$(primary_of base-db-1 base-db-2 base-db-3)
+psql_in "$BASE_PRIMARY" <<SQL
 INSERT INTO claimable_rooms (room_id, zone_id, unlocked_at)
 SELECT room_id, zone_id, now() FROM (VALUES ${unlocked_rooms:-('mainCorridor','mainCorridorZone')}) AS r(room_id, zone_id)
 ON CONFLICT (room_id) DO NOTHING;
@@ -241,7 +242,8 @@ echo "  bases ensured for every user except newbie; decoration $DECORATION_ID"
 
 # ---------------------------------------------------------------- Crafting Service
 echo; echo "== Crafting Service"
-psql_in crafting-db <<SQL
+CRAFTING_PRIMARY=$(primary_of crafting-db-1 crafting-db-2 crafting-db-3)
+psql_in "$CRAFTING_PRIMARY" <<SQL
 -- The five recipes of the communication contract, one per unlock condition type.
 WITH new_recipes AS (
     INSERT INTO recipes (recipe_id, name, output, unlock_type, unlock_min_level, unlock_exam_id, unlock_zone_id, unlock_resource_type, created_at) VALUES
