@@ -1669,10 +1669,11 @@ Responsible for the player's survival base, initially represented by the FAF Cab
 - Unlocked storage capacity and homeroom decorations.
 - Kiki's interaction state and reward outcomes.
 - The transaction ledger keyed on the caller's idempotency key.
+- The Two-Phase Commit log of the upgrades it coordinates (from 5.0.0).
 
 ### **DockerHub Image**
 - **Repository:** [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service)
-- **Image Tag:** `cristi150404/base-service:4.0.0`
+- **Image Tag:** `cristi150404/base-service:5.0.0`
 - **Default Port:** `Internal only (5003), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
@@ -1683,8 +1684,16 @@ Responsible for the player's survival base, initially represented by the FAF Cab
 - `POST /api/spend` *(Resource Service)* — deducts resources before applying a barricade, facility upgrade, decoration, or Kiki feeding.
 - `POST /api/refund` *(Resource Service)* — returns the resources if the effect cannot be applied.
 - `POST /api/players/{player_id}/inventory/items` *(Player Service)* — delivers a Kiki reward to the player's inventory.
+- `POST /api/tx/{txId}/prepare`, `/commit`, `/abort` *(Resource Service)* — from 5.0.0, the participant of an upgrade's Two-Phase Commit.
+- `POST /sagas` *(Message Broker, port 8600)* — from 5.0.0, starts the `base-upgrade` saga when `Coordination__Mode` is `saga`.
 
 Base Service calls them through the Message Broker over gRPC (`Broker.Relay` on `message-broker:8601`, set with `Broker__Url`), signed with a service token in the call metadata (`kind: service`; the broker forwards its subject as `X-Service-Name: base-service`), and the broker picks the instance (load balancing, circuit breakers, rerouting). Without `Broker__Url` it calls them through the Gateway as before. Each called service has a circuit breaker shared by all its endpoints: 3 failures (`5xx`, timeout, unreachable; a `4xx` is not a failure) within Task Timeout × 3.5 (28 s) trip it, the trip is logged, and calls to that service fail at once until a trial call after the window succeeds. Every state-changing endpoint spends first, then applies the effect in one database transaction. If that fails, Base Service refunds the resources rather than leaving the player having paid for nothing.
+
+From 5.0.0 (Lab 5):
+- **Replication:** `base-db-1..3` is a repmgr cluster (one primary, 2 standbys, synchronous replication). `POSTGRES_HOST` lists the three nodes and the service connects to whichever one is the primary, so it follows a failover. Until a standby is promoted, requests answer `503 database_unavailable` with `Retry-After: 2`. `GET /status` reports each node's role under `replication`.
+- **Cache:** `GET /api/base/{player_id}` is cached per player and invalidated after any write to that base. World Service's rooms and zones are cached too, and zones are invalidated on `ZoneUnlocked`. Keys start with `base-service:` and are sharded on `redis-cache-1..3` with the team's consistent-hashing ring.
+- **Two-Phase Commit** (`Coordination__Mode=2pc`, the team compose default): a barricade, facility upgrade or decoration is one transaction over base_db and Resource Service. Resource Service votes on the cost, and Base Service votes by applying the effect in the decision's transaction. An abort releases the held resources: `402 rejected_insufficient`, `409 aborted` or `503 resource_service_unavailable`. Kiki keeps the local saga.
+- **Saga** (`Coordination__Mode=saga`): the same actions start the broker's `base-upgrade` saga, `apply` (Base) ↔ `revert`, then `pay` (Resource) ↔ `refund`, and answer `202` with the `sagaId` (progress on `GET /api/sagas/{sagaId}`).
 
 ### **Exposed API Endpoints**
 
@@ -1823,6 +1832,14 @@ Success Response (200 OK)
 { "eventName": "ZoneUnlocked", "status": "applied", "roomsNowClaimable": 1 }
 ```
 
+**`GET /api/base/{player_id}/transactions/{idempotencyKey}/2pc`** *(Consumed by development team — from 5.0.0)*
+
+The Two-Phase Commit behind an action: its state (`preparing`, `committing`, `committed`, `aborting`, `aborted`), the decision and reason, and each participant's vote and acknowledgement. `404 tx_not_found` for an action that did not run as one.
+
+**`POST /api/base/{player_id}/saga/apply`**, **`POST /api/base/{player_id}/saga/revert`** *(Consumed by the Message Broker's saga coordinator — from 5.0.0, not available through the Gateway)*
+
+The `apply` step of the `base-upgrade` saga and its compensation. Body `{ "stepId": "<sagaId>:apply", "idempotencyKey": "b1" }`. `apply`: `200 applied` / `already_applied`, `409 step_cancelled` once reverted, `422` when the effect no longer fits. `revert` always answers `200` (`reverted`, `cancelled`, `already_reverted`, `nothing_to_revert`).
+
 **`GET /metrics`** *(Consumed by Prometheus)*
 
 Request counts and durations per route and status in the Prometheus text format (`http_requests_received_total`, `http_request_duration_seconds`), plus `kahoots_events_published_total` and `kahoots_events_received_total` by topic and outcome, `kahoots_saga_compensations_total` and `kahoots_circuit_breaker_open` per called service. Exempt from the task limits like `GET /health`. Not available through the Gateway.
@@ -1852,10 +1869,11 @@ Allows players to combine resources into useful survival equipment.
 - Recipe definitions and unlock conditions: Wood + Metal → Barricade Kit, Paper + Metal → Improvised Weapon, Food + Chemicals → Energy Booster, Metal + Electronics → Zombie Detector, Paper + Wood → Exam Cheat Sheet.
 - Which recipes each player has unlocked.
 - The craft transaction/saga state for each craft attempt.
+- The Two-Phase Commit log of the crafts it coordinates (from 5.0.0).
 
 ### **DockerHub Image**
 - **Repository:** [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service)
-- **Image Tag:** `cristi150404/crafting-service:4.0.0`
+- **Image Tag:** `cristi150404/crafting-service:5.0.0`
 - **Default Port:** `Internal only (5004), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
@@ -1867,8 +1885,16 @@ Allows players to combine resources into useful survival equipment.
 - `GET /api/players/{player_id}` *(Player Service)* — reads the player's level.
 - `GET /players/{playerId}/progress` *(Exam Service)* — reads passed exams.
 - `GET /world/zones` *(World Service)* — reads unlocked zones.
+- `POST /api/tx/{txId}/prepare`, `/commit`, `/abort` *(Resource Service)* and `POST /api/players/{player_id}/tx/{txId}/prepare`, `/commit`, `/abort` *(Player Service)* — from 5.0.0, the participants of a craft's Two-Phase Commit.
+- `POST /sagas` *(Message Broker, port 8600)* — from 5.0.0, starts the `craft-item` saga when `Coordination__Mode` is `saga`.
 
 Crafting Service calls them through the Message Broker over gRPC (`Broker.Relay` on `message-broker:8601`, set with `Broker__Url`), signed with a service token in the call metadata (`kind: service`; the broker forwards its subject as `X-Service-Name: crafting-service`), and the broker picks the instance (load balancing, circuit breakers, rerouting). Without `Broker__Url` it calls them through the Gateway as before. Each called service has a circuit breaker shared by all its endpoints: 3 failures (`5xx`, timeout, unreachable; a `4xx` is not a failure) within Task Timeout × 3.5 (28 s) trip it, the trip is logged, and calls to that service fail at once until a trial call after the window succeeds. A recipe can be gated on a player level, a passed exam, an unlocked zone, or a discovered resource, which is why this service reads from four others. If delivery fails after the ingredients were consumed, Crafting Service refunds them — this is the saga's rollback path.
+
+From 5.0.0 (Lab 5):
+- **Replication:** `crafting-db-1..3` is a repmgr cluster (one primary, 2 standbys, synchronous replication). `POSTGRES_HOST` lists the three nodes and the service connects to whichever one is the primary, so it follows a failover. Until a standby is promoted, requests answer `503 database_unavailable` with `Retry-After: 2`. `GET /status` reports each node's role under `replication`.
+- **Cache:** recipe definitions (invalidated when a recipe changes), the player lookups behind the unlock conditions (30 s) and World Service's zones (invalidated on `ZoneUnlocked`) are cached. Keys start with `crafting-service:` and are sharded on `redis-cache-1..3` with the team's consistent-hashing ring.
+- **Two-Phase Commit** (`Coordination__Mode=2pc`, the team compose default): a craft is one transaction over crafting_db, Resource Service (the ingredients) and Player Service (the item). Both participants vote. The item and the spend land together, or the held ingredients are released and nothing is delivered: `402 rejected_insufficient_materials`, `409 aborted`, or `503 resource_service_unavailable` / `player_service_unavailable`.
+- **Saga** (`Coordination__Mode=saga`): a craft starts the broker's `craft-item` saga, `complete` (Crafting) ↔ `cancel`, `pay` (Resource) ↔ `refund`, then `deliver` (Player) ↔ `revoke`, and answers `202` with the `sagaId` (progress on `GET /api/sagas/{sagaId}`).
 
 ### **Exposed API Endpoints**
 
@@ -1976,6 +2002,14 @@ Success Response (200 OK)
 ```json
 { "eventName": "AchievementUnlocked", "status": "applied", "recipesUnlocked": ["recipe_paper_metal"] }
 ```
+
+**`GET /api/crafts/{craftId}/transaction`** *(Consumed by development team — from 5.0.0)*
+
+The Two-Phase Commit behind a craft: its state, the decision and reason, and each participant's vote and acknowledgement. `404 tx_not_found` for a craft that did not run as one.
+
+**`POST /api/crafts/{craftId}/saga/complete`**, **`POST /api/crafts/{craftId}/saga/cancel`** *(Consumed by the Message Broker's saga coordinator — from 5.0.0, not available through the Gateway)*
+
+The `complete` step of the `craft-item` saga and its compensation. Body `{ "stepId": "<sagaId>:complete" }`. `complete`: `200 completed` / `already_completed`, `404 craft_not_found`, `409 step_cancelled` once cancelled. `cancel` always answers `200` (`cancelled`, `already_cancelled`, `nothing_to_cancel`).
 
 **`GET /metrics`** *(Consumed by Prometheus)*
 
