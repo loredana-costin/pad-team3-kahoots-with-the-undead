@@ -913,7 +913,7 @@ services:
   # serve any request. Each registers its own address with Service Discovery; the Gateway reads it
   # to spread requests over them, and each replica looks up World Service there for its ExamPassed events.
   exam-service:
-    image: mariaelenabotnari/exam-service:5.0.0
+    image: mariaelenabotnari/exam-service:5.0.2
     restart: always
     deploy:
       replicas: 3
@@ -948,7 +948,7 @@ services:
   # No container_name: 3 replicas share world-db, where zones and rooms live, so any replica can serve
   # any request. Each registers its own address with Service Discovery, which the Gateway and Exam Service read.
   world-service:
-    image: mariaelenabotnari/world-service:5.0.0
+    image: mariaelenabotnari/world-service:5.0.2
     restart: always
     deploy:
       replicas: 3
