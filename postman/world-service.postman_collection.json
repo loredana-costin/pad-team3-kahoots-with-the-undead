@@ -1079,11 +1079,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/zones/unlock",
+              "raw": "{{brokerUrl}}/queues/world-service/world/zones/unlock",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "world-service",
+                "world",
                 "zones",
                 "unlock"
               ]
@@ -1780,11 +1783,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/sagas/unlock-zone",
+              "raw": "{{brokerUrl}}/queues/world-service/world/sagas/unlock-zone",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "world-service",
+                "world",
                 "sagas",
                 "unlock-zone"
               ]
@@ -1848,11 +1854,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/sagas/unlock-zone",
+              "raw": "{{brokerUrl}}/queues/world-service/world/sagas/unlock-zone",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "world-service",
+                "world",
                 "sagas",
                 "unlock-zone"
               ]
@@ -1917,11 +1926,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/sagas/unlock-zone",
+              "raw": "{{brokerUrl}}/queues/world-service/world/sagas/unlock-zone",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "world-service",
+                "world",
                 "sagas",
                 "unlock-zone"
               ]
@@ -1984,11 +1996,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/sagas/unlock-zone",
+              "raw": "{{brokerUrl}}/queues/world-service/world/sagas/unlock-zone",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "world-service",
+                "world",
                 "sagas",
                 "unlock-zone"
               ]
@@ -2052,11 +2067,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/sagas/relock-zone",
+              "raw": "{{brokerUrl}}/queues/world-service/world/sagas/relock-zone",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "world-service",
+                "world",
                 "sagas",
                 "relock-zone"
               ]
@@ -2120,11 +2138,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/sagas/relock-zone",
+              "raw": "{{brokerUrl}}/queues/world-service/world/sagas/relock-zone",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "world-service",
+                "world",
                 "sagas",
                 "relock-zone"
               ]
@@ -2188,11 +2209,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/sagas/unlock-zone",
+              "raw": "{{brokerUrl}}/queues/world-service/world/sagas/unlock-zone",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "world-service",
+                "world",
                 "sagas",
                 "unlock-zone"
               ]
@@ -2242,11 +2266,14 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/sagas/{{worldSagaId}}",
+              "raw": "{{brokerUrl}}/queues/world-service/world/sagas/{{worldSagaId}}",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "world-service",
+                "world",
                 "sagas",
                 "{{worldSagaId}}"
               ]
@@ -2283,11 +2310,14 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/sagas/non-existent-saga-{{runId}}",
+              "raw": "{{brokerUrl}}/queues/world-service/world/sagas/non-existent-saga-{{runId}}",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "world-service",
+                "world",
                 "sagas",
                 "non-existent-saga-{{runId}}"
               ]
