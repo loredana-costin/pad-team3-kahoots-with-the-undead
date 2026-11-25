@@ -746,15 +746,15 @@
           "response": []
         },
         {
-          "name": "Start exam - player token, no service identity (403)",
+          "name": "Start exam through Gateway - refused as service-only (404)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status code is 403', () => pm.response.to.have.status(403));",
-                  "pm.test('Service identity is required', () => pm.expect(pm.response.json().message).to.eql('Missing X-Service-Name header'));"
+                  "pm.test('Status code is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Gateway refuses service-only route', () => pm.expect(pm.response.json().error).to.eql('route_not_found'));"
                 ]
               }
             }
@@ -777,7 +777,7 @@
                 "start"
               ]
             },
-            "description": "Starting an attempt is service-only (Game Service). A player token carries no X-Service-Name.",
+            "description": "Starting an attempt is service-only (Game Service). The Gateway refuses it with 404 route_not_found; services must call it through the Message Broker.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"playerId\": \"{{playerId}}\",\n  \"examId\": \"{{attemptExamId}}\",\n  \"zombieEncounterId\": \"enc_{{runId}}_pass\"\n}",
@@ -819,11 +819,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/exams/start",
+              "raw": "{{brokerUrl}}/queues/exam-service/exams/start",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "exam-service",
                 "exams",
                 "start"
               ]
@@ -874,11 +876,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/exams/start",
+              "raw": "{{brokerUrl}}/queues/exam-service/exams/start",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "exam-service",
                 "exams",
                 "start"
               ]
@@ -937,11 +941,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/exams/{{attemptId}}/submit",
+              "raw": "{{brokerUrl}}/queues/exam-service/exams/{{attemptId}}/submit",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "exam-service",
                 "exams",
                 "{{attemptId}}",
                 "submit"
@@ -993,11 +999,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/exams/{{attemptId}}/submit",
+              "raw": "{{brokerUrl}}/queues/exam-service/exams/{{attemptId}}/submit",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "exam-service",
                 "exams",
                 "{{attemptId}}",
                 "submit"
@@ -1044,11 +1052,13 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/exams/{{attemptExamId}}/retryEligibility?playerId={{playerId}}",
+              "raw": "{{brokerUrl}}/queues/exam-service/exams/{{attemptExamId}}/retryEligibility?playerId={{playerId}}",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "exam-service",
                 "exams",
                 "{{attemptExamId}}",
                 "retryEligibility"
@@ -1091,11 +1101,13 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/exams/{{attemptExamId}}/retryEligibility",
+              "raw": "{{brokerUrl}}/queues/exam-service/exams/{{attemptExamId}}/retryEligibility",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "exam-service",
                 "exams",
                 "{{attemptExamId}}",
                 "retryEligibility"
@@ -1138,11 +1150,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/exams/start",
+              "raw": "{{brokerUrl}}/queues/exam-service/exams/start",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "exam-service",
                 "exams",
                 "start"
               ]
@@ -1198,11 +1212,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/exams/{{failAttemptId}}/submit",
+              "raw": "{{brokerUrl}}/queues/exam-service/exams/{{failAttemptId}}/submit",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "exam-service",
                 "exams",
                 "{{failAttemptId}}",
                 "submit"
@@ -1253,11 +1269,13 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/exams/{{attemptExamId}}/retryEligibility?playerId={{ghostPlayerId}}",
+              "raw": "{{brokerUrl}}/queues/exam-service/exams/{{attemptExamId}}/retryEligibility?playerId={{ghostPlayerId}}",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "exam-service",
                 "exams",
                 "{{attemptExamId}}",
                 "retryEligibility"
@@ -1306,11 +1324,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/exams/start",
+              "raw": "{{brokerUrl}}/queues/exam-service/exams/start",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "exam-service",
                 "exams",
                 "start"
               ]
@@ -1361,11 +1381,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/exams/start",
+              "raw": "{{brokerUrl}}/queues/exam-service/exams/start",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "exam-service",
                 "exams",
                 "start"
               ]
@@ -1416,11 +1438,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/exams/{{abandonAttemptId}}/abandon",
+              "raw": "{{brokerUrl}}/queues/exam-service/exams/{{abandonAttemptId}}/abandon",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "exam-service",
                 "exams",
                 "{{abandonAttemptId}}",
                 "abandon"
@@ -2143,11 +2167,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/exams/sagas/reserve-achievement",
+              "raw": "{{brokerUrl}}/queues/exam-service/exams/sagas/reserve-achievement",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "exam-service",
                 "exams",
                 "sagas",
                 "reserve-achievement"
@@ -2212,11 +2238,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/exams/sagas/reserve-achievement",
+              "raw": "{{brokerUrl}}/queues/exam-service/exams/sagas/reserve-achievement",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "exam-service",
                 "exams",
                 "sagas",
                 "reserve-achievement"
@@ -2281,11 +2309,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/exams/sagas/reserve-achievement",
+              "raw": "{{brokerUrl}}/queues/exam-service/exams/sagas/reserve-achievement",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "exam-service",
                 "exams",
                 "sagas",
                 "reserve-achievement"
@@ -2349,11 +2379,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/exams/sagas/release-achievement",
+              "raw": "{{brokerUrl}}/queues/exam-service/exams/sagas/release-achievement",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "exam-service",
                 "exams",
                 "sagas",
                 "release-achievement"
@@ -2418,11 +2450,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/exams/sagas/reserve-achievement",
+              "raw": "{{brokerUrl}}/queues/exam-service/exams/sagas/reserve-achievement",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "exam-service",
                 "exams",
                 "sagas",
                 "reserve-achievement"
@@ -2487,11 +2521,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/exams/sagas/confirm-achievement",
+              "raw": "{{brokerUrl}}/queues/exam-service/exams/sagas/confirm-achievement",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "exam-service",
                 "exams",
                 "sagas",
                 "confirm-achievement"
@@ -2542,11 +2578,13 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/exams/sagas/{{sagaId}}-tomb",
+              "raw": "{{brokerUrl}}/queues/exam-service/exams/sagas/{{sagaId}}-tomb",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "exam-service",
                 "exams",
                 "sagas",
                 "{{sagaId}}-tomb"
@@ -2584,11 +2622,13 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/exams/sagas/non-existent-saga-{{runId}}",
+              "raw": "{{brokerUrl}}/queues/exam-service/exams/sagas/non-existent-saga-{{runId}}",
               "host": [
-                "{{baseUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "exam-service",
                 "exams",
                 "sagas",
                 "non-existent-saga-{{runId}}"
