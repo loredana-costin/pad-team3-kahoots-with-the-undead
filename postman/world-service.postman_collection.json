@@ -1012,15 +1012,21 @@
           "response": []
         },
         {
-          "name": "Unlock zone - player token, no service identity (403)",
+          "name": "Unlock zone - player token is refused (404 through the Gateway)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status code is 403', () => pm.response.to.have.status(403));",
-                  "pm.test('Service identity is required', () => pm.expect(pm.response.json().message).to.eql('Forbidden'));"
+                  "// POST /world/zones/unlock is World Service's internal handler: the Gateway keeps it internal (404 route_not_found).",
+                  "// A 403 from World Service itself is also a refusal. A 200 means a player just unlocked a wing for everyone.",
+                  "pm.test('A player cannot unlock a zone', () => pm.expect(pm.response.code).to.be.oneOf([403, 404]));",
+                  "pm.test('Refused by the Gateway or by World Service', () => {",
+                  "    const body = pm.response.json();",
+                  "    if (pm.response.code === 404) pm.expect(body.error).to.eql('route_not_found');",
+                  "    else pm.expect(body.message).to.eql('Forbidden');",
+                  "});"
                 ]
               }
             }

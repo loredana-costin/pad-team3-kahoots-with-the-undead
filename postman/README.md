@@ -29,7 +29,9 @@ The Exam and World collections also exercise endpoints that only a service may c
 `GET /exams/{examId}/retryEligibility`, `POST /world/zones/unlock`). They mint a service
 token in the "Service token (Game Service)" request, signed with the collection variable
 `jwtSecret`. It defaults to the team compose development secret and must equal the Gateway's
-`JWT_SECRET`; change it if your stack uses another one.
+`JWT_SECRET`; change it if your stack uses another one. The World request that tries
+`POST /world/zones/unlock` with a player token through the Gateway expects it refused: `404
+route_not_found` from the Gateway (which keeps the route internal), or `403` from World Service.
 
 Two World requests go straight to a World Service instance instead of the Gateway,
 `GET /health` and `POST /events/exam-passed`, using the variable `worldDirectUrl`
@@ -78,7 +80,12 @@ The Base and Crafting collections use the broker the same way. Their setup credi
 through Resource Service's `POST /api/refund`, which the Gateway refuses, so it goes to the broker's
 queue instead (`POST {{brokerUrl}}/queues/resource-service/api/refund`) with a service token minted
 from `jwtSecret`. Both publish `ZoneUnlocked` on the broker and check that their service is among the
-subscribers; the Base collection then claims the room the event opened. Their last request downloads
+subscribers; the Base collection then claims the room the event opened. Base's barricades and facility
+upgrades are service-only too (Game Service applies them): one request checks that the Gateway refuses
+them, and the rest go to `{{brokerUrl}}/queues/base-service/...` with a Game Service token. Zone locks are
+shared by every player, and the World collection or a passed exam may already have unlocked the Mathematics
+Wing, so Base's locked-wing claim picks a room of a zone World Service reports locked when it runs (it is
+skipped if every wing is unlocked). Their last request downloads
 the service's logs through the Gateway (`/api/base/logs/download`, `/api/crafts/logs/download`) with
 `X-Admin-Key: {{logsAdminKey}}`: set `logsAdminKey` to the stack's `LOGS_ADMIN_KEY` to get the file,
 or leave it empty to check that the download is refused.
