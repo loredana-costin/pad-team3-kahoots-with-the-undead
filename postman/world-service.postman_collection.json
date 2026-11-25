@@ -1115,7 +1115,7 @@
           "response": []
         },
         {
-          "name": "World Service health (direct, internal) (200)",
+          "name": "World Service health (via Broker queue) (200)",
           "event": [
             {
               "listen": "test",
@@ -1137,23 +1137,32 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{worldDirectUrl}}/health",
+              "raw": "{{brokerUrl}}/queues/world-service/health",
               "host": [
-                "{{worldDirectUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "world-service",
                 "health"
               ]
             },
-            "description": "Straight to an instance, not through the Gateway. Reports the Service Discovery registration and instance id.",
+            "description": "Checks World Service GET /health through the Message Broker queue (since port 3001 is internal to the Docker network).",
             "auth": {
-              "type": "noauth"
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
             }
           },
           "response": []
         },
         {
-          "name": "ExamPassed event (direct, from Exam Service) (2xx or 404 until implemented)",
+          "name": "ExamPassed event (via Broker queue, from Exam Service) (2xx or 404 until implemented)",
           "event": [
             {
               "listen": "prerequest",
@@ -1182,23 +1191,21 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
-              },
-              {
-                "key": "X-Service-Name",
-                "value": "exam-service"
               }
             ],
             "url": {
-              "raw": "{{worldDirectUrl}}/events/exam-passed",
+              "raw": "{{brokerUrl}}/queues/world-service/events/exam-passed",
               "host": [
-                "{{worldDirectUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "world-service",
                 "events",
                 "exam-passed"
               ]
             },
-            "description": "Contract entry used by Exam Service when a player passes an exam. Sent to an instance's own baseUrl, not through the Gateway. Known issue: 404 until the World team adds the endpoint.",
+            "description": "Contract entry used by Exam Service when a player passes an exam, routed through the Message Broker queue with a service JWT.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"eventId\": \"{{examPassedEventId}}\",\n  \"playerId\": \"{{playerId}}\",\n  \"examId\": \"1\",\n  \"course\": \"Discrete Mathematics\",\n  \"gradedAt\": \"2026-09-08T10:30:00.000Z\"\n}",
@@ -1209,7 +1216,14 @@
               }
             },
             "auth": {
-              "type": "noauth"
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
             }
           },
           "response": []
@@ -1234,18 +1248,16 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
-              },
-              {
-                "key": "X-Service-Name",
-                "value": "exam-service"
               }
             ],
             "url": {
-              "raw": "{{worldDirectUrl}}/events/exam-passed",
+              "raw": "{{brokerUrl}}/queues/world-service/events/exam-passed",
               "host": [
-                "{{worldDirectUrl}}"
+                "{{brokerUrl}}"
               ],
               "path": [
+                "queues",
+                "world-service",
                 "events",
                 "exam-passed"
               ]
@@ -1261,7 +1273,14 @@
               }
             },
             "auth": {
-              "type": "noauth"
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceJwt}}",
+                  "type": "string"
+                }
+              ]
             }
           },
           "response": []
