@@ -1065,7 +1065,7 @@ services:
   # Service Discovery, which the Gateway reads to spread requests over them (round robin).
   # Idempotency keys and the table bootstrap are safe across replicas (resource-service #248, #249).
   resource-service:
-    image: costinloredana/resource-service:5.0.0
+    image: costinloredana/resource-service:5.0.1
     deploy:
       replicas: 3
     restart: always
@@ -1096,7 +1096,7 @@ services:
   # No container_name: 3 replicas share the zombie-db replica set, and each registers its own address with
   # Service Discovery, which the Gateway reads to spread requests over them (round robin).
   zombie-service:
-    image: costinloredana/zombie-service:5.0.0
+    image: costinloredana/zombie-service:5.0.1
     deploy:
       replicas: 3
     restart: always
