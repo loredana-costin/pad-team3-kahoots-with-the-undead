@@ -2160,7 +2160,7 @@ Maintains the runtime service registry so microservices can register their reach
 
 ### **DockerHub Image**
 - **Repository:** [`mariaelenabotnari/service-discovery`](https://hub.docker.com/r/mariaelenabotnari/service-discovery)
-- **Image Tag:** `mariaelenabotnari/service-discovery:4.0.0` (also tagged `mariaelenabotnari/service-discovery:lab4` and `mariaelenabotnari/service-discovery:latest`)
+- **Image Tag:** `mariaelenabotnari/service-discovery:5.0.0` (also tagged `mariaelenabotnari/service-discovery:lab5` and `mariaelenabotnari/service-discovery:latest`)
 - **Default Port:** `Internal only (8500)`
 
 ### **Exposed API Endpoints**
@@ -2687,7 +2687,7 @@ The microservices are containerized and published on DockerHub:
 | **Gateway Service** | [`mariaelenabotnari/gateway-service`](https://hub.docker.com/r/mariaelenabotnari/gateway-service) | `mariaelenabotnari/gateway-service:5.0.0` | `8000` | System entry point, async request routing layer |
 | **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:5.0.0` | `Internal (3000)` | Academic progression, exams, and achievements |
 | **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:5.0.0` | `Internal (3001)` | Physical campus layout, rooms, zones, and spawn points |
-| **Service Discovery** | [`mariaelenabotnari/service-discovery`](https://hub.docker.com/r/mariaelenabotnari/service-discovery) | `mariaelenabotnari/service-discovery:4.0.0` | `Internal (8500)` | Service registry: instances register, deregister and are looked up by name |
+| **Service Discovery** | [`mariaelenabotnari/service-discovery`](https://hub.docker.com/r/mariaelenabotnari/service-discovery) | `mariaelenabotnari/service-discovery:5.0.0` | `Internal (8500)` | Service registry: instances register, deregister and are looked up by name |
 | **Message Broker** | [`mariaelenabotnari/message-broker`](https://hub.docker.com/r/mariaelenabotnari/message-broker) | `mariaelenabotnari/message-broker:5.0.0` | `8600` (HTTP), `Internal (8601)` (gRPC) | Service queues for the Gateway, gRPC relay between services, durable topic queues, load balancing and circuit breakers |
 | **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:5.0.1` | `Internal (8080)` | Player identity, progression, inventory, and trades |
 | **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:5.0.1` | `Internal (8080), WebSocket 3003-3005` | Game sessions, day/night cycle, and timed player actions |
