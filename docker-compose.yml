@@ -858,7 +858,7 @@ services:
 
   # --- Microservices (using uploaded DockerHub images) ---
   discovery-service:
-    image: mariaelenabotnari/service-discovery:4.0.0
+    image: mariaelenabotnari/service-discovery:5.0.0
     container_name: discovery-service
     restart: always
     environment:
