@@ -190,6 +190,7 @@ docker compose exec -T zombie-service node dist/scripts/seed.js
 
 # ---------------------------------------------------------------- Exam Service
 echo; echo "== Exam Service"
+docker compose exec -T exam-service node dist/scripts/seed.js
 psql_in exam-db <<SQL
 DO \$\$
 BEGIN
@@ -223,7 +224,8 @@ echo "  $(psql_in exam-db <<< 'SELECT count(*) FROM exams') exams; veteran attem
 
 # ---------------------------------------------------------------- World Service
 echo; echo "== World Service"
-echo "  $(psql_in world-db <<< "SELECT (SELECT count(*) FROM zones) || ' zones, ' || (SELECT count(*) FROM rooms) || ' rooms, ' || (SELECT count(*) FROM spawn_points) || ' spawn points'") (seeded by the service on startup)"
+docker compose exec -T world-service node dist/scripts/seed.js
+echo "  $(psql_in world-db <<< "SELECT (SELECT count(*) FROM zones) || ' zones, ' || (SELECT count(*) FROM rooms) || ' rooms, ' || (SELECT count(*) FROM spawn_points) || ' spawn points'")"
 SPAWN_POINT_ID=$(psql_in world-db <<< "SELECT min(id) FROM spawn_points")
 unlocked_rooms=$(psql_in world-db <<< "SELECT string_agg(format('(%L,%L)', r.room_name, z.zone_name), ',') FROM rooms r JOIN zones z ON z.id = r.zone_record_id WHERE z.unlocked")
 
