@@ -300,7 +300,7 @@ Handles global player identity, progression, and inventory.
 
 ### **DockerHub Image**
 - **Repository:** [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service)
-- **Image Tag:** `andrei045/player-service:5.0.0`
+- **Image Tag:** `andrei045/player-service:5.0.1`
 - **Default Port:** `Internal only (8080), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
@@ -318,7 +318,7 @@ Describes the running instance: version, when it started and how long it has bee
 
 Response
 ```json
-{ "status": "ok", "service": "player-service", "version": "5.0.0", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z" }
+{ "status": "ok", "service": "player-service", "version": "5.0.1", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z" }
 ```
 
 **`POST /api/auth/register`** *(Consumed by Gateway)*
@@ -513,7 +513,7 @@ The central real-time gameplay service. Manages sessions, the day/night cycle, t
 
 ### **DockerHub Image**
 - **Repository:** [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service)
-- **Image Tag:** `andrei045/game-service:5.0.0`
+- **Image Tag:** `andrei045/game-service:5.0.1`
 - **Default Port:** `Internal only (8080), accessible via Gateway (8000); WebSocket on 3003-3005`
 
 ### **Consumed API Endpoints**
@@ -538,7 +538,7 @@ Describes the running instance: version, when it started and how long it has bee
 
 Response
 ```json
-{ "status": "ok", "service": "game-service", "version": "5.0.0", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z" }
+{ "status": "ok", "service": "game-service", "version": "5.0.1", "startedAt": "2026-10-26T12:00:00Z", "uptimeSeconds": 42.317, "timestamp": "2026-10-26T12:00:42Z" }
 ```
 
 **`POST /api/sessions/{session_id}/actions`** *(Consumed by Gateway)*
@@ -1158,7 +1158,7 @@ Owns the persistent definitions and short-lived instance state of zombies.
 
 ### **DockerHub Image**
 - **Repository:** [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service)
-- **Image Tag:** `costinloredana/zombie-service:5.0.0`
+- **Image Tag:** `costinloredana/zombie-service:5.0.1`
 - **Default Port:** `Internal only (4001), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
@@ -1185,7 +1185,7 @@ Response — 200 OK
 {
   "status": "ok",
   "service": "zombie-service",
-  "version": "5.0.0",
+  "version": "5.0.1",
   "startedAt": "2026-11-23T09:12:03.418Z",
   "uptimeSeconds": 42.317,
   "timestamp": "2026-11-23T09:12:45.735Z",
@@ -1481,7 +1481,7 @@ Owns the university's resource economy independently from the physical map.
 
 ### **DockerHub Image**
 - **Repository:** [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service)
-- **Image Tag:** `costinloredana/resource-service:5.0.0`
+- **Image Tag:** `costinloredana/resource-service:5.0.1`
 - **Default Port:** `Internal only (4002), accessible via Gateway (8000)`
 
 ### **Consumed API Endpoints**
@@ -1508,7 +1508,7 @@ Response — 200 OK
 {
   "status": "ok",
   "service": "resource-service",
-  "version": "5.0.0",
+  "version": "5.0.1",
   "startedAt": "2026-11-23T09:12:03.418Z",
   "uptimeSeconds": 42.317,
   "timestamp": "2026-11-23T09:12:45.735Z",
@@ -2160,7 +2160,7 @@ Maintains the runtime service registry so microservices can register their reach
 
 ### **DockerHub Image**
 - **Repository:** [`mariaelenabotnari/service-discovery`](https://hub.docker.com/r/mariaelenabotnari/service-discovery)
-- **Image Tag:** `mariaelenabotnari/service-discovery:4.0.0` (also tagged `mariaelenabotnari/service-discovery:lab4` and `mariaelenabotnari/service-discovery:latest`)
+- **Image Tag:** `mariaelenabotnari/service-discovery:5.0.0` (also tagged `mariaelenabotnari/service-discovery:lab5` and `mariaelenabotnari/service-discovery:latest`)
 - **Default Port:** `Internal only (8500)`
 
 ### **Exposed API Endpoints**
@@ -2687,12 +2687,12 @@ The microservices are containerized and published on DockerHub:
 | **Gateway Service** | [`mariaelenabotnari/gateway-service`](https://hub.docker.com/r/mariaelenabotnari/gateway-service) | `mariaelenabotnari/gateway-service:5.0.0` | `8000` | System entry point, async request routing layer |
 | **Exam Service** | [`mariaelenabotnari/exam-service`](https://hub.docker.com/r/mariaelenabotnari/exam-service) | `mariaelenabotnari/exam-service:5.0.0` | `Internal (3000)` | Academic progression, exams, and achievements |
 | **World Service** | [`mariaelenabotnari/world-service`](https://hub.docker.com/r/mariaelenabotnari/world-service) | `mariaelenabotnari/world-service:5.0.0` | `Internal (3001)` | Physical campus layout, rooms, zones, and spawn points |
-| **Service Discovery** | [`mariaelenabotnari/service-discovery`](https://hub.docker.com/r/mariaelenabotnari/service-discovery) | `mariaelenabotnari/service-discovery:4.0.0` | `Internal (8500)` | Service registry: instances register, deregister and are looked up by name |
+| **Service Discovery** | [`mariaelenabotnari/service-discovery`](https://hub.docker.com/r/mariaelenabotnari/service-discovery) | `mariaelenabotnari/service-discovery:5.0.0` | `Internal (8500)` | Service registry: instances register, deregister and are looked up by name |
 | **Message Broker** | [`mariaelenabotnari/message-broker`](https://hub.docker.com/r/mariaelenabotnari/message-broker) | `mariaelenabotnari/message-broker:5.0.0` | `8600` (HTTP), `Internal (8601)` (gRPC) | Service queues for the Gateway, gRPC relay between services, durable topic queues, load balancing and circuit breakers |
-| **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:5.0.0` | `Internal (8080)` | Player identity, progression, inventory, and trades |
-| **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:5.0.0` | `Internal (8080), WebSocket 3003-3005` | Game sessions, day/night cycle, and timed player actions |
-| **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:5.0.0` | `Internal (4001)` | Zombie type definitions, spawned instances, and special actions |
-| **Resource Service** | [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service) | `costinloredana/resource-service:5.0.0` | `Internal (4002)` | Resource types, player balances, nodes, and idempotent transactions |
+| **Player Service** | [`andrei045/player-service`](https://hub.docker.com/r/andrei045/player-service) | `andrei045/player-service:5.0.1` | `Internal (8080)` | Player identity, progression, inventory, and trades |
+| **Game Service** | [`andrei045/game-service`](https://hub.docker.com/r/andrei045/game-service) | `andrei045/game-service:5.0.1` | `Internal (8080), WebSocket 3003-3005` | Game sessions, day/night cycle, and timed player actions |
+| **Zombie Service** | [`costinloredana/zombie-service`](https://hub.docker.com/r/costinloredana/zombie-service) | `costinloredana/zombie-service:5.0.1` | `Internal (4001)` | Zombie type definitions, spawned instances, and special actions |
+| **Resource Service** | [`costinloredana/resource-service`](https://hub.docker.com/r/costinloredana/resource-service) | `costinloredana/resource-service:5.0.1` | `Internal (4002)` | Resource types, player balances, nodes, and idempotent transactions |
 | **Base Service** | [`cristi150404/base-service`](https://hub.docker.com/r/cristi150404/base-service) | `cristi150404/base-service:4.0.0` | `Internal (5003)` | Player bases, barricades, facilities, and decorations |
 | **Crafting Service** | [`cristi150404/crafting-service`](https://hub.docker.com/r/cristi150404/crafting-service) | `cristi150404/crafting-service:4.0.0` | `Internal (5004)` | Recipes, unlock conditions, and crafting sagas |
 
@@ -2992,7 +2992,7 @@ Both images are multi-stage Node.js 20 builds that run as the non-root `node` us
 
 | | Zombie Service | Resource Service |
 |---|---|---|
-| **Image** | `costinloredana/zombie-service:5.0.0` (`node:20-alpine`) | `costinloredana/resource-service:5.0.0` (`node:20-slim` + OpenSSL for Prisma) |
+| **Image** | `costinloredana/zombie-service:5.0.1` (`node:20-alpine`) | `costinloredana/resource-service:5.0.1` (`node:20-slim` + OpenSSL for Prisma) |
 | **Database** | MongoDB 8 (`mongo:8`) | PostgreSQL 17 (`postgres:17-alpine`) |
 | **Required env** | `MONGO_URI`, e.g. `mongodb://zombie-db:27017/zombie_db` | `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, or a single `DATABASE_URL` that takes precedence over them |
 | **Optional env** | `PORT` (default `4001`) | `PORT` (default `4002`) |
@@ -3005,11 +3005,11 @@ The service exits on startup if its database is unreachable, so start it only af
 
 # Zombie Service
 docker run -d --name zombie-db --network kahoots-net mongo:8
-docker run -d --name zombie-service --network kahoots-net -p 4001:4001   -e MONGO_URI=mongodb://zombie-db:27017/zombie_db   costinloredana/zombie-service:5.0.0
+docker run -d --name zombie-service --network kahoots-net -p 4001:4001   -e MONGO_URI=mongodb://zombie-db:27017/zombie_db   costinloredana/zombie-service:5.0.1
 
 # Resource Service
 docker run -d --name resource-db --network kahoots-net   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=resource_db postgres:17-alpine
-docker run -d --name resource-service --network kahoots-net -p 4002:4002   -e POSTGRES_HOST=resource-db -e POSTGRES_PORT=5432 -e POSTGRES_USER=postgres   -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=resource_db   costinloredana/resource-service:5.0.0
+docker run -d --name resource-service --network kahoots-net -p 4002:4002   -e POSTGRES_HOST=resource-db -e POSTGRES_PORT=5432 -e POSTGRES_USER=postgres   -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=resource_db   costinloredana/resource-service:5.0.1
 ```
 
 If a container exits right away, the database probably wasn't ready yet. Wait a few seconds and run `docker start zombie-service` or `docker start resource-service`.

@@ -858,7 +858,7 @@ services:
 
   # --- Microservices (using uploaded DockerHub images) ---
   discovery-service:
-    image: mariaelenabotnari/service-discovery:4.0.0
+    image: mariaelenabotnari/service-discovery:5.0.0
     container_name: discovery-service
     restart: always
     environment:
@@ -913,7 +913,7 @@ services:
   # serve any request. Each registers its own address with Service Discovery; the Gateway reads it
   # to spread requests over them, and each replica looks up World Service there for its ExamPassed events.
   exam-service:
-    image: mariaelenabotnari/exam-service:5.0.0
+    image: mariaelenabotnari/exam-service:5.0.2
     restart: always
     deploy:
       replicas: 3
@@ -948,7 +948,7 @@ services:
   # No container_name: 3 replicas share world-db, where zones and rooms live, so any replica can serve
   # any request. Each registers its own address with Service Discovery, which the Gateway and Exam Service read.
   world-service:
-    image: mariaelenabotnari/world-service:5.0.0
+    image: mariaelenabotnari/world-service:5.0.2
     restart: always
     deploy:
       replicas: 3
@@ -982,7 +982,7 @@ services:
   # No container_name: 3 replicas share the player-db cluster, and each registers its own address with
   # Service Discovery, which the Gateway reads to spread requests over them (round robin).
   player-service:
-    image: andrei045/player-service:5.0.0
+    image: andrei045/player-service:5.0.1
     restart: always
     deploy:
       replicas: 3
@@ -1012,7 +1012,7 @@ services:
   # No container_name: 3 replicas share the game-db cluster, where sessions, actions and socket tickets live,
   # so any replica can serve any request. Each registers its own address with Service Discovery.
   game-service:
-    image: andrei045/game-service:5.0.0
+    image: andrei045/game-service:5.0.1
     restart: always
     deploy:
       replicas: 3
@@ -1065,7 +1065,7 @@ services:
   # Service Discovery, which the Gateway reads to spread requests over them (round robin).
   # Idempotency keys and the table bootstrap are safe across replicas (resource-service #248, #249).
   resource-service:
-    image: costinloredana/resource-service:5.0.0
+    image: costinloredana/resource-service:5.0.1
     deploy:
       replicas: 3
     restart: always
@@ -1096,7 +1096,7 @@ services:
   # No container_name: 3 replicas share the zombie-db replica set, and each registers its own address with
   # Service Discovery, which the Gateway reads to spread requests over them (round robin).
   zombie-service:
-    image: costinloredana/zombie-service:5.0.0
+    image: costinloredana/zombie-service:5.0.1
     deploy:
       replicas: 3
     restart: always
